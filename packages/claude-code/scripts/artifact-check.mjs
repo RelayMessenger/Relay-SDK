@@ -47,8 +47,8 @@ assert.ok(
   "generated runtime does not embed the package version",
 );
 assert.ok(
-  !runtime.includes(Buffer.from("@a2a-js/sdk/dist/")),
-  "generated runtime bundles the A2A client; keep @a2a-js/sdk external (scripts/build.mjs)",
+  !runtime.includes(Buffer.from("@a2a-js/sdk")),
+  "generated runtime names the removed A2A client",
 );
 assert.doesNotMatch(
   runtime.toString("utf8"),

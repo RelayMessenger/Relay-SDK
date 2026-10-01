@@ -23,7 +23,8 @@ New human reply text is literal `• ` + each selected source label joined with
 `\n`, followed by `selection_response` metadata in source-option order. Dispatch
 with `selected_values` and the explicit source target, never label parsing.
 Exact legacy comma-joined text remains a server compatibility input. The person
-checks any number of options and submits them once; checking sends nothing, and
+checks any number of options (exactly one when `multiple` is false) and submits
+them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
@@ -197,8 +198,8 @@ and `send_id`; changed content is refused. A deliberate second Message uses a
 new `send_id`. The tool refuses a Chat other than the authenticated origin of
 the active turn, and any `reply_to_message_id` must be that turn's Message.
 When that Message came from another agent, the reply names it even if the
-model passes nothing, so a caller waiting on Relay's A2A door gets the answer
-to its own message; a Message that opens with buttons or a selection is not
+model passes nothing, so an agent that sent several knows which one it
+answers; a Message that opens with buttons or a selection is not
 named, since an agent may not reply to those parts. A person's Message is named
 only when the model passes it. A
 confirmed send completes and clears the turn automatically. A byte-identical

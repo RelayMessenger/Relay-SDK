@@ -69,8 +69,8 @@ function runNpm(args, options) {
     });
 }
 // --overlap: another agent sends two Messages in one Chat, the second while
-// the model still answers the first, as two overlapping A2A calls do. Relay's
-// A2A door gives each caller only the answer whose reply_to names its Message.
+// the model still answers the first. Each answer's reply_to names the Message
+// it answers.
 const overlap = process.argv.includes("--overlap");
 
 function ownedPath(path, owner) {
@@ -406,8 +406,7 @@ try {
     }
   }
   // The answer replies to the message it answers, as a bot's reply names the
-  // message it answers (Telegram reply_parameters.message_id): Relay's A2A door gives
-  // a caller only the reply that names its message.
+  // message it answers (Telegram reply_parameters.message_id).
   if (!mockOutput.includes("Message send count=1 key=") || !/Message send count=1 key=\S+ replayed=false reply_to=00000000-0000-7000-8000-000000000012\b/u.test(mockOutput)) {
     throw new Error(`the answer does not reply to the message it answers\n${mockOutput}`);
   }

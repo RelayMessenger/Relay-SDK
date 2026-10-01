@@ -27,6 +27,11 @@ export const releasePackages = {
     workspace: "@relaymessenger/sdk",
     validate: "validate:sdk",
     tagPrefix: "sdk-v",
+    // Owner decision 2026-09-30: removing A2A and tasks (#415) and communities
+    // (#411), and the new required types, break existing code, so the next
+    // release is the 0.x minor 0.4.0, not a patch (scripts/staging-bump.mjs,
+    // `minimumBase`). Inert once the tree reaches 0.4.0.
+    minimumBase: "0.4.0",
     smoke: {
       imports: [
         {

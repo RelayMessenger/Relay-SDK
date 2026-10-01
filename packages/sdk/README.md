@@ -29,8 +29,9 @@ card, and `partsWithSelection(undefined, selection)` sends the selection alone.
 
 `selectionPart` validates a complete part (`type` may be left out), returning a
 normalized part or an error string. The title is limited to 60 characters,
-options to 25, trimmed labels to 80 characters, and explicit case-sensitive
-ASCII token values to 100. Unknown fields, duplicate values, a missing or blank
+options to 25 total. Legacy value-only rows allow trimmed labels up to 80
+characters and case-sensitive ASCII tokens up to 100. ID rows and grouped
+inputs are described below. Unknown fields, duplicate values, a missing or blank
 title, and blank labels are rejected.
 
 Selection inherits existing Chat membership rules: at most one human user,
@@ -43,8 +44,8 @@ idempotency keys, without expanding group membership.
 text above the card. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
-The person opens the prompt, checks any number of options and submits them
-once; checking sends nothing and only the submit does. A person answers a given
+By default, the person opens the prompt, checks any number of options (exactly one
+when `multiple` is false) and submits them once; checking sends nothing and only the submit does. A person answers a given
 selection once, and reopening it afterwards shows what they chose without
 letting them change it.
 
@@ -63,7 +64,38 @@ metadata after narrowing to `message.received`.
 
 The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
 include selection guidance and structured inbound discovery.
-`selectionReply(parts, replyTo)` discovers values and the explicit source target.
+`selectionReply(parts, replyTo)` discovers values, IDs, source-owned reply text,
+and the explicit source target.
+
+### List picker sections
+
+```ts
+import { selectionPart, partsWithSelection } from "@relaymessenger/sdk";
+
+const picker = selectionPart({
+  title: "Shipping",
+  subtitle: "Choose a service",
+  multiple: false, // omitted means true
+  sections: [{
+    title: "Fast",
+    options: [{ id: "priority", label: "Priority", subtitle: "Tomorrow", image_url: "https://example.com/priority.png" }],
+  }],
+  reply_message: { title: "Shipping saved", subtitle: "Thank you" },
+});
+if (typeof picker === "string") throw new Error(picker);
+await relay.chats.messages.send(chatId, { message: { parts: partsWithSelection(undefined, picker) } });
+```
+
+Send exactly one of `options` or `sections` (1–10 sections, 1–25 rows total).
+ID rows accept 1–200 characters and labels up to 24 characters. Legacy value-only
+rows keep 100-character ASCII tokens and 80-character labels. If both aliases
+are supplied they must match. Row subtitles allow 72 characters; card subtitles
+and reply titles/subtitles allow 512. Images must be HTTPS URIs, up to 2048 characters; encode spaces and Unicode in URLs.
+Responses include flat options, normalized `id`/`value` aliases, and viewer-scoped
+`selected_ids`. `selectionReply` preserves IDs and server-owned `reply_message`;
+legacy replies still work. Do not send `reply_message` in response metadata.
+
+Optional subtitles may be empty.
 
 ## Payment
 
@@ -206,8 +238,9 @@ not define is refused. The messages it could not apply come back in the
 response's `a2ui_errors`: each gives `part_index` and `data_index` in your
 request and `a2ui_message`, A2UI's own `error` message, whose `path` points
 inside the failing message's body. A send that applies nothing throws a
-`RelayAPIError` (404 unknown or deleted surface, 409 a `surfaceId` already live
-in the chat, 422 anything else) whose `body.a2ui_errors` lists each.
+`RelayAPIError` (403 a surface another agent created, 404 unknown or deleted
+surface, 409 a `surfaceId` already live in the chat, 422 anything else) whose
+`body.a2ui_errors` lists each.
 
 Every `message.received` carries `metadata.a2uiClientCapabilities`: the
 catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
@@ -216,8 +249,8 @@ catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
 also carries that surface's data model; `readA2uiAction` returns it as
 `dataModel`. A tap reaches only the person who tapped and the agent that
 created the surface. Only an agent sends `createSurface`, `updateComponents`,
-`updateDataModel` and `deleteSurface`; any agent in the chat may update any
-surface in it.
+`updateDataModel` and `deleteSurface`; only the agent that created a surface
+may update or delete it, and another agent gets 403 (error code `2003`).
 
 A `Browser` card shows your agent's live browser: `a2uiBrowserCardMessages`
 builds the card from a status line, a `state` and an https live view address,
@@ -766,7 +799,12 @@ last subscription makes the WebSocket path available again. Relay retains
 undelivered events across either change.
 
 The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
-Agent Token in the WebSocket upgrade `Authorization` header.
+Agent Token in the WebSocket upgrade `Authorization` header. It names every
+event type in `RELAY_WEBHOOK_EVENT_TYPES` with `subscribed_events`: Relay sends
+a connection only the types it names, and every type, including types added
+later, when it names none. An event type this release does not know is skipped
+and acknowledged, and `onError` receives one `RelayUnknownEventTypeError` for
+it.
 
 The SDK validates the ready checkpoint, rejects sequence gaps, and routes
 replayed sequences through your durable deduplication handler. It sends a

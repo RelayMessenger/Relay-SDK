@@ -10,6 +10,7 @@ import {
   WERIFT_SAMPLE_RATE,
   createWeriftWebRTCFactory,
 } from "../../src/calls/engine-werift.js";
+import { waitForConnected } from "./wait-for-connected.js";
 
 /**
  * Real loopback: two werift peer connections on this machine, offer/answer
@@ -31,20 +32,6 @@ const waitForIce = (peer: RelayPeerConnectionLike): Promise<void> =>
       resolve();
     };
     peer.addEventListener("icegatheringstatechange", changed);
-  });
-
-const waitForConnected = (peer: RelayPeerConnectionLike): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`peer stuck in ${peer.connectionState}`)), 10_000);
-    peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "connected") {
-        clearTimeout(timer);
-        resolve();
-      } else if (peer.connectionState === "failed") {
-        clearTimeout(timer);
-        reject(new Error("peer connection failed"));
-      }
-    };
   });
 
 /** The person's roomState lists `audio` in `receiving`: the transport stops holding application audio (PROTOCOL.md 6b). */
@@ -130,7 +117,7 @@ it("carries a 1 kHz sine from A to B over werift + Opus on loopback", async () =
   await b.setLocalDescription(answer);
   await waitForIce(b);
   await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
-  await Promise.all([aConnected, bConnected]);
+  await Promise.all([aConnected.within(), bConnected.within()]);
 
   const sink = factory.createAudioSink(await remoteTrack, {
     sampleRate: WERIFT_SAMPLE_RATE,
@@ -194,7 +181,7 @@ const connectPair = async (factory: ReturnType<typeof createWeriftWebRTCFactory>
   await b.setLocalDescription(answer);
   await waitForIce(b);
   await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
-  await Promise.all([aConnected, bConnected]);
+  await Promise.all([aConnected.within(), bConnected.within()]);
   return { a, b, source, localTrack, remoteTrack: await remoteTrack };
 };
 

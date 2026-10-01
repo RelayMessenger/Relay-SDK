@@ -276,7 +276,7 @@ function messageIsMe(
 }
 
 /**
- * Relay adapter for `chat@4.39.0`, limited to the locked public v1 contract.
+ * Relay adapter for `chat@4.41.0`, limited to the locked public v1 contract.
  */
 export class RelayAdapter
   implements Adapter<RelayThreadId, RelayRawMessage>
@@ -1376,13 +1376,6 @@ export class RelayAdapter
       // GET /v1/chats/{chatId}/location through the SDK client.
       case "location.sharing.started":
       case "location.sharing.stopped":
-        return;
-      // Tasks between agents are A2A Tasks, not chat messages; the Chat SDK
-      // has no primitive for them.
-      case "task.created":
-      case "task.message":
-      case "task.canceled":
-      case "task.updated":
         return;
       default:
         return assertExhaustiveEvent(envelope.event_type);

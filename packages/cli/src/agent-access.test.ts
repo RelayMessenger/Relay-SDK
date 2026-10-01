@@ -107,11 +107,16 @@ it("makes an agent private with the two existing settings, sending only what was
   const updated = await f.run("agents", "access", "update", "@Weather", "--people", "off", "--agents", "nobody");
   expect(updated).toMatchObject({ code: 0, out: { handle: "weather", people_can_message: false, agents_can_message: "nobody" } });
   expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", path: "/orgs/org_a/agents/agent-uuid", body: { people_can_message: false, agents_can_message: "nobody" } });
-  await f.run("agents", "access", "update", "weather", "--agents", "communities");
-  expect(f.calls.at(-1)?.body).toEqual({ agents_can_message: "communities" });
+  await f.run("agents", "access", "update", "weather", "--agents", "everyone");
+  expect(f.calls.at(-1)?.body).toEqual({ agents_can_message: "everyone" });
   await f.run("agents", "access", "update", "weather", "--people", "on");
   expect(f.calls.at(-1)?.body).toEqual({ people_can_message: true });
-  expect(f.agent).toMatchObject({ people_can_message: true, agents_can_message: "communities" });
+  expect(f.agent).toMatchObject({ people_can_message: true, agents_can_message: "everyone" });
+  // Communities were removed (2026-09-30): the third value is a usage error, and nothing is sent.
+  const sent = f.calls.length;
+  const refused = await f.run("agents", "access", "update", "weather", "--agents", "communities");
+  expect(refused.code).not.toBe(0);
+  expect(f.calls.length).toBe(sent);
 });
 
 it("private turns people off and other agents to nobody, through the same Console route update uses", async () => {
@@ -144,8 +149,6 @@ it("open turns people on and other agents to everyone, the default", async () =>
 it.each([
   [false, "everyone"],
   [true, "nobody"],
-  [true, "communities"],
-  [false, "communities"],
 ] as const)("show names neither Private nor Open for people %s and agents %s, and prints the two settings", async (people, agents) => {
   const f = await fixture();
   f.agent.people_can_message = people;

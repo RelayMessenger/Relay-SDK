@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "61bd07d26328a493fa3aca1ceef9bf1c43321d31fb3ba3c6e10f7d353b48218b";
+  "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -104,8 +104,17 @@ describe("locked Relay Server contract", () => {
     const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.SelectionPart).toHaveProperty("additionalProperties", false);
-    expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title", "options"]);
+    expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title"]);
     expect(schemas.SelectionPart).toHaveProperty("properties.title.maxLength", 60);
+    expect(schemas.SelectionPart).toHaveProperty("oneOf", [
+      { required: ["options"], not: { required: ["sections"] } },
+      { required: ["sections"], not: { required: ["options"] } },
+    ]);
+    expect(schemas.SelectionPart).toHaveProperty("properties.multiple.default", true);
+    expect(schemas.SelectionPart).toHaveProperty("properties.sections.maxItems", 10);
+    expect(schemas.SelectionPartResponse).toHaveProperty("properties.selected_ids.readOnly", true);
+    expect(schemas.SelectionOptionResponse).toHaveProperty("required", ["id", "value", "label"]);
+    expect(schemas.SelectionResponsePartResponse).toHaveProperty("properties.reply_message.readOnly", true);
     expect(schemas.SelectionPartResponse).toHaveProperty("required", expect.arrayContaining(["title"]));
     expect(schemas.SelectionPart).toHaveProperty("properties.options.minItems", 1);
     expect(schemas.SelectionPart).toHaveProperty("properties.options.maxItems", 25);
@@ -148,7 +157,7 @@ describe("locked Relay Server contract", () => {
     }
     expect(schemas.CreatePaymentRequestRequest).toHaveProperty("required", ["description", "category"]);
     expect(schemas.PaymentRequest).toHaveProperty("required", [
-      "id", "object", "status", "mode", "amount", "currency", "description", "category", "checkout_url",
+      "id", "object", "status", "mode", "amount", "application_fee_amount", "currency", "description", "category", "checkout_url",
       "expires_at", "metadata", "stripe", "created_at", "updated_at",
     ]);
     expect(document.paths["/v1/payment_requests"]).toHaveProperty("post.operationId", "createPaymentRequest");

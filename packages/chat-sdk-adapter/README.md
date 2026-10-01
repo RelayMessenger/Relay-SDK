@@ -1,7 +1,7 @@
 # @relaymessenger/chat-sdk-adapter
 
 Vendor-official Relay adapter for
-[Vercel Chat SDK](https://chat-sdk.dev), targeting `chat@4.39.0`.
+[Vercel Chat SDK](https://chat-sdk.dev), targeting `chat@4.41.0`.
 
 Source is maintained in
 [`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/9180450baf5691f8172514b7117cd92ba5879674/packages/chat-sdk-adapter)
@@ -30,7 +30,8 @@ New human reply text is literal `• ` + each selected source label joined with
 `\n`, followed by `selection_response` metadata in source-option order. Dispatch
 with `selected_values` and the explicit source target, never label parsing.
 Exact legacy comma-joined text remains a server compatibility input. The person
-checks any number of options and submits them once; checking sends nothing, and
+checks any number of options (exactly one when `multiple` is false) and submits
+them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
@@ -54,7 +55,7 @@ or `Payment request: $24.00 for House blend, 250 g (requested)`.
 ## Install
 
 ```sh
-npm install chat@4.39.0 @chat-adapter/state-memory@4.39.0 \
+npm install chat@4.41.0 @chat-adapter/state-memory@4.41.0 \
   @relaymessenger/chat-sdk-adapter
 ```
 
@@ -202,7 +203,7 @@ This package was rewritten against:
   aliases
 - Relay API `v1`
 - Relay webhook payload version `2026-08-30`
-- `chat@4.39.0`
+- `chat@4.41.0`
 
 The byte-identical Server OpenAPI copy is retained under `contracts/` for
 reproducible contract tests and is excluded from the npm package.
@@ -373,7 +374,7 @@ npm run test:workerd
 npm run test:installed
 ```
 
-`@chat-adapter/shared@4.39.0` provides shared adapter utilities and errors. That
+`@chat-adapter/shared@4.41.0` provides shared adapter utilities and errors. That
 published package has no `/tests` export; Vercel's published contract runner is
-`@chat-adapter/tests@4.39.0`, which this package uses alongside
+`@chat-adapter/tests@4.41.0`, which this package uses alongside
 `@chat-adapter/shared`.

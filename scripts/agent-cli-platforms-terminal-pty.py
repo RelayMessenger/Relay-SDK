@@ -18,7 +18,7 @@ The last line printed is the receipt; `"passed": true` is the verdict. On Linux 
 on an owned Daytona sandbox (RELAY_DAYTONA_SANDBOX_ID), because a PTY proof there is a
 sandbox's business, never a shared machine's.
 """
-import json, os, pathlib, pty, re, select, shutil, struct, subprocess, sys, tempfile, termios, fcntl, time
+import json, os, pathlib, pty, re, select, shutil, struct, subprocess, sys, tempfile, termios, fcntl, time, urllib.parse
 if os.uname().sysname == 'Linux' and not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'):
     raise SystemExit('Linux PTY proof requires owned Daytona')
 here = pathlib.Path(__file__).resolve().parent
@@ -30,6 +30,13 @@ shim = os.environ.get('RELAY_TERMINAL_SHIM') or str(repo / 'packages' / 'cli' / 
 source = os.environ.get('RELAY_TERMINAL_SOURCE') or str(repo)
 if not node or not pathlib.Path(shim).exists():
     raise SystemExit(f'node ({node}) or the built CLI ({shim}) is missing; run npm run build first')
+# Since #397 the SDK names every event type it knows with subscribed_events after
+# observe=true, so the watch upgrade must carry exactly that query, taken from the
+# RELAY_WEBHOOK_EVENT_TYPES of the SDK this installed CLI actually loads.
+known = json.loads(subprocess.run([node, '--input-type=module', '-e', "import { createRequire } from 'node:module'; import { realpathSync } from 'node:fs'; import { pathToFileURL } from 'node:url'; const sdk = await import(pathToFileURL(createRequire(realpathSync(process.argv[1])).resolve('@relaymessenger/sdk')).href); console.log(JSON.stringify(sdk.RELAY_WEBHOOK_EVENT_TYPES));", shim], capture_output=True, text=True, check=True, timeout=30).stdout)
+assert isinstance(known, list) and known and all(isinstance(item, str) for item in known), known
+expectedUpgrade = ('/v1/websocket', [('observe', 'true')] + [('subscribed_events', item) for item in known])
+upgrade = lambda raw: (urllib.parse.urlsplit(raw).path, urllib.parse.parse_qsl(urllib.parse.urlsplit(raw).query, keep_blank_values=True))
 token = b'rel_token_' + b'P' * 43
 handle = 'my_agent.terminal'
 # A fake Claude Code lets runtime detection find it; --no-start never launches it.
@@ -120,7 +127,7 @@ for mode, columns, rows in modes:
         # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
         if rows >= 60 and (fullCells or halfBlocks): assert fullCells and not halfBlocks, output
         state = json.loads(report.read_text())
-        assert state['consoleCreates'] == 1 and state['authSessionRead'] and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
+        assert state['consoleCreates'] == 1 and state['authSessionRead'] and state['observers'] == 1 and state['authConfirmed'] and [upgrade(query) for query in state['queries']] == [expectedUpgrade] and state['frames'] == [], state
         # What was written: the folder link (a pointer, no token) and owner-only CLI config.
         link = json.loads((home / '.relay' / 'agent.json').read_bytes()); assert link == {'handle': handle, 'apiUrl': env['RELAY_API_URL']}, link
         config = pathlib.Path(env['RELAY_CONFIG_PATH'])

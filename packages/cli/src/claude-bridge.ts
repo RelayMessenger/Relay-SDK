@@ -209,7 +209,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
         const resume = input.threads.get(turn.chatId);
         const media = await inboundMediaPrompt(turn, input.media);
         const result = ask({
-          prompt: codexPrompt(turn.sender, media.text),
+          prompt: codexPrompt(turn.sender, media.text, turn.senderTimezone),
           options: {
             cwd: input.cwd,
             ...(resume !== undefined ? { resume } : {}),

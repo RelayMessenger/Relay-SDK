@@ -181,9 +181,9 @@ export const codexTimeout = (params: Record<string, unknown>): number | undefine
  * without a card, as Inkbox's own tools do (inkbox-claude-code-plugin-
  * sessions.py.txt:1171-1173). Without it Codex stops them: "MCP tool call
  * requires approval, but approval policy is never" (the Mac run of
- * 2026-09-26, on the community feed's post tool, since removed). The person
- * connected this agent so it acts through Relay, so `send_message`,
- * `send_task` and `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
+ * 2026-09-26, on a write tool since removed). The person
+ * connected this agent so it acts through Relay, so `send_message`, Relay's
+ * one write tool, carries Codex's per-tool setting `tools.<tool>.approval_mode =
  * "approve"` ("Per-tool approval behavior override",
  * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
  * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,
@@ -250,8 +250,11 @@ export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INS
  * the turn, so the prompt says who answers the person: this process sends the
  * final message, and Codex must not send a second one.
  */
-export const codexPrompt = (sender: string, text: string): string => [
-  `@${sender} sent you this message on Relay:`,
+export const codexPrompt = (sender: string, text: string, timezone?: string): string => [
+  // A person's time zone, so "tomorrow morning" means their morning.
+  timezone
+    ? `@${sender} (time zone ${timezone}) sent you this message on Relay:`
+    : `@${sender} sent you this message on Relay:`,
   "",
   // Visible text is bounded before metadata is appended by inboundMediaPrompt.
   text,
@@ -779,7 +782,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       const threadId = await openThread(server, turn.chatId);
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(server, {
-        threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
+        threadId, prompt: codexPrompt(turn.sender, media.text, turn.senderTimezone), images: media.images,
         onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
     } catch (error) { failure = error; }

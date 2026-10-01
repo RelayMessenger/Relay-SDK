@@ -20,7 +20,8 @@ New human reply text is literal `• ` + each selected source label joined with
 `\n`, followed by `selection_response` metadata in source-option order. Dispatch
 with `selected_values` and the explicit source target, never label parsing.
 Exact legacy comma-joined text remains a server compatibility input. The person
-checks any number of options and submits them once; checking sends nothing, and
+checks any number of options (exactly one when `multiple` is false) and submits
+them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
@@ -201,6 +202,8 @@ relay chats read "$CHAT_ID"
 relay contact-card get
 relay contact-card setup --handle weather --name Weather
 relay contact-card share "$CHAT_ID"
+relay contact-card share "$CHAT_ID" --handle atlas
+relay directory search --q "book recommendations"
 
 relay attachments upload ./report.pdf --content-type application/pdf
 relay blocked-handles list
@@ -232,7 +235,10 @@ relay chats participants add "$CHAT_ID" research
 relay chats participants remove "$CHAT_ID" research
 ```
 
-`contact-card share` shares the authenticated agent's own card. Agent-initiated
+`contact-card share` shares the authenticated agent's own card; with
+`--handle` it recommends another agent that is Public or Unlisted and that
+people can message. The shared card is a snapshot: it keeps the agent's name,
+picture and subtitle as they were when you shared it. Agent-initiated
 Messages to users remain supported subject to Contacts eligibility and blocking.
 There are no add-request, phone address-book, mutual-contact, human discovery, or
 human invite-link commands.
@@ -289,7 +295,7 @@ relay agents access deny weather spam_bot
 relay agents access remove weather alice
 ```
 
-`--people on|off` is "People in the Relay app". `--agents everyone|communities|nobody`
+`--people on|off` is "People in the Relay app". `--agents everyone|nobody`
 is "Other agents". A handle on Always Allow can start a chat whatever these
 say; a handle on Never Allow cannot. People in your organization, and its
 other agents, always get through. `private` turns people off and sets other

@@ -126,7 +126,7 @@ export const formatRelayHelp = (cmd: Command, helper: Help, heading?: string): s
   const description = helper.commandDescription(cmd);
   if (!root && description) lines.push(helper.styleCommandDescription(description), "");
   if (root) {
-    const topicNames = ["chats", "messages", "attachments", "blocked-handles", "webhooks", "contact-card", "profiles"];
+    const topicNames = ["directory", "chats", "messages", "attachments", "blocked-handles", "webhooks", "contact-card", "profiles"];
     const topics = topicNames
       .map((name) => cmd.commands.find((candidate) => candidate.name() === name))
       .filter((candidate): candidate is Command => candidate !== undefined);

@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
+import { SELECTION_TOOL_SCHEMA } from "../src/selection-schema.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const USER_ID = "00000000-0000-7000-8000-000000000001";
@@ -208,7 +209,7 @@ async function startRelayMock(params: {
   });
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
-    if (req.url !== "/v1/websocket" || req.headers.authorization !== `Bearer ${TOKEN}`) {
+    if (new URL(req.url ?? "", "http://relay.test").pathname !== "/v1/websocket" || req.headers.authorization !== `Bearer ${TOKEN}`) {
       socket.destroy();
       return;
     }
@@ -251,6 +252,11 @@ function startMCP(channelDir: string, baseURL: string, entry = "server.ts"): MCP
     cwd: ROOT,
     env: {
       ...process.env,
+      // The channel resolves a folder link (.relay/agent.json) from PWD
+      // upward, and a link wins over RELAY_AGENT_TOKEN and RELAY_BASE_URL.
+      // Pin PWD to the temporary channel directory so a developer's own link
+      // never points this process at a real Relay with a real token.
+      PWD: channelDir,
       RELAY_CHANNEL_DIR: channelDir,
       RELAY_AGENT_TOKEN: TOKEN,
       RELAY_ALLOWED_SENDERS: USER_ID,
@@ -382,17 +388,10 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
     const listed = await mcp.take(message => message.id === 101, "selection reply schema");
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
-    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toMatchObject({
-      type: "object", additionalProperties: false, required: ["title", "options"], properties: {
-        title: { type: "string", minLength: 1, maxLength: 60 },
-        options: {
-          type: "array", minItems: 1, maxItems: 25,
-          items: { additionalProperties: false, required: ["value", "label"], properties: {
-            value: { maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }, label: { maxLength: 80 },
-          } },
-        },
-      },
-    });
+    // The list the model sees is the schema the channel ships, list picker fields included.
+    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
+      JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),
+    );
     await acked;
     const notification = await mcp.take(
       (message) => message.method === "notifications/claude/channel",
@@ -457,8 +456,8 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     ["server.ts", "buttons", undefined],
     ["server.ts", "selection", undefined],
   ] as const)("%s: a reply to another agent's %s Message names it only when an agent may reply to it", async (entry, opening, replyTo) => {
-    // Relay's A2A door gives a calling agent only the reply that names its
-    // message; an agent may not reply to buttons or a selection.
+    // A reply names the other agent's message so it knows which one is
+    // answered; an agent may not reply to buttons or a selection.
     const channelDir = mkdtempSync(join(tmpdir(), "relay-agent-reply-"));
     cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
     const parts = opening === "text"

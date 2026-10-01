@@ -26,7 +26,7 @@ describe("Pi channel", () => {
     await new PiChannel({ agentToken: "secret", relay, spawnPi: (_command, _args, chat) => { spawned.push(chat); return fakePi(records(chat, true)); } }).run();
     expect(spawned).toEqual(["one", "two"]); expect(send).toHaveBeenCalledTimes(2);
     // Each answer to an agent replies to the message it answers, so two
-    // callers waiting at once on Relay's A2A door each get their own.
+    // agents writing at once each get their own.
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.reply_to])).toEqual(expect.arrayContaining([
       ["one", { message_id: "message-a" }], ["two", { message_id: "message-b" }],
     ]));
@@ -104,7 +104,7 @@ it("teaches selection authoring and passes structured inbound values to Pi", asy
   expect(piPrompt("send selections")).toContain("literal '• '");
   const event = makeEvent("selection", "chat");
   if (event.event_type !== "message.received") throw new Error("fixture");
-  event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+  event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"], selected_ids: ["research"] }];
   event.data.reply_to = { message_id: "source", part_index: 1 };
   const process = fakePi(records('Topics?\n```selection\n{"title":"Topics","options":[{"value":"design","label":"Design"}]}\n```'));
   const { relay, send } = relayFor([event]);

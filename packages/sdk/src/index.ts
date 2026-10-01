@@ -5,15 +5,13 @@ export {
   BlockedHandles,
   Chats,
   Calls,
-  Communities,
-  CommunityMembers,
   ContactCard,
   Contacts,
+  Directory,
   Me,
   Messages,
   PaymentRequests,
   Relay,
-  Tasks,
   WebSocket,
   WebhookEvents,
   WebhookSubscriptions,
@@ -102,6 +100,12 @@ export {
 
 export { Relay as default } from "./client.js";
 export {
+  RELAY_ISSUER,
+  verifyRelayIdToken,
+  type RelayIdTokenClaims,
+  type VerifyRelayIdTokenOptions,
+} from "./login.js";
+export {
   SELECTION_BLOCK_INSTRUCTION,
   SELECTION_FENCE,
   SELECTION_GUIDANCE,
@@ -120,6 +124,17 @@ export {
   type SelectionReply,
   type SplitSelection,
 } from "./selection.js";
+export {
+  CAROUSEL_MAX_CARDS,
+  CAROUSEL_MIN_CARDS,
+  RICH_CARD_DESCRIPTION_MAX_LENGTH,
+  RICH_CARD_MAX_SUGGESTIONS,
+  RICH_CARD_TITLE_MAX_LENGTH,
+  SUGGESTION_ID_MAX_LENGTH,
+  SUGGESTION_LABEL_MAX_LENGTH,
+  suggestionReply,
+  type SuggestionReply,
+} from "./rich-cards.js";
 export {
   REPLY_TARGET_TEXT_MAX_LENGTH,
   replyTargetContext,

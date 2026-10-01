@@ -1,0 +1,1766 @@
+{
+  "valid": [
+    {
+      "name": "legacy omission keeps wire default true",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "sections and all display fields",
+      "input": {
+        "title": " Topics ",
+        "subtitle": " Card subtitle ",
+        "multiple": false,
+        "sections": [
+          {
+            "title": " Group ",
+            "options": [
+              {
+                "id": "a / 1",
+                "label": " A ",
+                "subtitle": " Row subtitle ",
+                "image_url": "https://example.test/a.png"
+              }
+            ]
+          }
+        ],
+        "reply_message": {
+          "title": " Answered ",
+          "subtitle": " Thank you "
+        }
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "subtitle": "Card subtitle",
+        "multiple": false,
+        "sections": [
+          {
+            "title": "Group",
+            "options": [
+              {
+                "id": "a / 1",
+                "label": "A",
+                "subtitle": "Row subtitle",
+                "image_url": "https://example.test/a.png"
+              }
+            ]
+          }
+        ],
+        "reply_message": {
+          "title": "Answered",
+          "subtitle": "Thank you"
+        }
+      }
+    },
+    {
+      "name": "multiple boundary True",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": true
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "multiple": true
+      }
+    },
+    {
+      "name": "multiple boundary False",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": false
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "multiple": false
+      }
+    },
+    {
+      "name": "subtitle boundary sssss",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+      }
+    },
+    {
+      "name": "reply_message boundary {'tit",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {
+          "title": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+          "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+        }
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "reply_message": {
+          "title": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+          "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+        }
+      }
+    },
+    {
+      "name": "id200",
+      "input": {
+        "title": "Topics",
+        "options": [
+          {
+            "id": " /xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLL"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "id": " /xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLL"
+          }
+        ]
+      }
+    },
+    {
+      "name": "both aliases",
+      "input": {
+        "title": "Topics",
+        "options": [
+          {
+            "id": "same / id",
+            "value": "same / id",
+            "label": "A"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "id": "same / id",
+            "value": "same / id",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unicode codepoints",
+      "input": {
+        "title": "Topics",
+        "options": [
+          {
+            "id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "id": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "label": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option subtitle72",
+      "input": {
+        "title": "Topics",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "subtitle": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          }
+        ]
+      }
+    },
+    {
+      "name": "image2048",
+      "input": {
+        "title": "Topics",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://e.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://e.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy80 and 25 options",
+      "input": {
+        "title": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "options": [
+          {
+            "value": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "11aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "12aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "13aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "15aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "16aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "17aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "18aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "19aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "21aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "22aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "23aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "24aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+        "options": [
+          {
+            "value": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "6aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "11aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "12aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "13aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "14aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "15aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "16aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "17aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "18aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "19aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "20aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "21aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "22aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "23aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          },
+          {
+            "value": "24aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+          }
+        ]
+      }
+    },
+    {
+      "name": "10 sections",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "0",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "1",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "2",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "3",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "4",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "5",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "6",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "7",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "8",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "9",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "T",
+        "sections": [
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "0",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "1",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "2",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "3",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "4",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "5",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "6",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "7",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "8",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "9",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty subtitle option subtitle 24",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "subtitle": ""
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "subtitle": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty subtitle prompt subtitle 32",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "subtitle": ""
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "subtitle": ""
+      }
+    },
+    {
+      "name": "empty subtitle prompt reply_message 37",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "reply_message": {
+          "title": "A",
+          "subtitle": ""
+        }
+      },
+      "expected": {
+        "type": "selection",
+        "title": "Topics",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          }
+        ],
+        "reply_message": {
+          "title": "A",
+          "subtitle": ""
+        }
+      }
+    },
+    {
+      "name": "percent encoded URI preserved",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a%20b.png"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a%20b.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI component preserved 0",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://[2001:db8::1]/a.png"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://[2001:db8::1]/a.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI component preserved 1",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a%5Bb%5D.png?x=%5B1%5D#one%23two"
+          }
+        ]
+      },
+      "expected": {
+        "type": "selection",
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a%5Bb%5D.png?x=%5B1%5D#one%23two"
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "null sections",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "sections": null
+      }
+    },
+    {
+      "name": "null subtitle",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "subtitle": null
+      }
+    },
+    {
+      "name": "null multiple",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": null
+      }
+    },
+    {
+      "name": "null reply_message",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": null
+      }
+    },
+    {
+      "name": "multiple type 0",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": 0
+      }
+    },
+    {
+      "name": "multiple type 1",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": 1
+      }
+    },
+    {
+      "name": "multiple type false",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": "false"
+      }
+    },
+    {
+      "name": "multiple type []",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": []
+      }
+    },
+    {
+      "name": "multiple type {}",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "multiple": {}
+      }
+    },
+    {
+      "name": "both forms",
+      "input": {
+        "title": " Topics ",
+        "subtitle": " Card subtitle ",
+        "multiple": false,
+        "sections": [
+          {
+            "title": " Group ",
+            "options": [
+              {
+                "id": "a / 1",
+                "label": " A ",
+                "subtitle": " Row subtitle ",
+                "image_url": "https://example.test/a.png"
+              }
+            ]
+          }
+        ],
+        "reply_message": {
+          "title": " Answered ",
+          "subtitle": " Thank you "
+        },
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ]
+      }
+    },
+    {
+      "name": "neither form",
+      "input": {
+        "title": "T"
+      }
+    },
+    {
+      "name": "invalid sections 11",
+      "input": {
+        "title": "T",
+        "sections": []
+      }
+    },
+    {
+      "name": "invalid sections 12",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "0",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "1",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "2",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "3",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "4",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "5",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "6",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "7",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "8",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "9",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "10",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid sections 13",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "",
+            "options": [
+              {
+                "id": "a",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid sections 14",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "GGGGGGGGGGGGGGGGGGGGGGGGG",
+            "options": [
+              {
+                "id": "a",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid sections 15",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "G",
+            "options": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid sections 16",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "a",
+                "label": "A"
+              }
+            ],
+            "extra": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "global duplicate",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "A",
+            "options": [
+              {
+                "id": "a",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "B",
+            "options": [
+              {
+                "value": "a",
+                "label": "B"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "global 26 options",
+      "input": {
+        "title": "T",
+        "sections": [
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "0",
+                "label": "A"
+              },
+              {
+                "id": "1",
+                "label": "A"
+              },
+              {
+                "id": "2",
+                "label": "A"
+              },
+              {
+                "id": "3",
+                "label": "A"
+              },
+              {
+                "id": "4",
+                "label": "A"
+              },
+              {
+                "id": "5",
+                "label": "A"
+              },
+              {
+                "id": "6",
+                "label": "A"
+              },
+              {
+                "id": "7",
+                "label": "A"
+              },
+              {
+                "id": "8",
+                "label": "A"
+              },
+              {
+                "id": "9",
+                "label": "A"
+              },
+              {
+                "id": "10",
+                "label": "A"
+              },
+              {
+                "id": "11",
+                "label": "A"
+              },
+              {
+                "id": "12",
+                "label": "A"
+              }
+            ]
+          },
+          {
+            "title": "G",
+            "options": [
+              {
+                "id": "13",
+                "label": "A"
+              },
+              {
+                "id": "14",
+                "label": "A"
+              },
+              {
+                "id": "15",
+                "label": "A"
+              },
+              {
+                "id": "16",
+                "label": "A"
+              },
+              {
+                "id": "17",
+                "label": "A"
+              },
+              {
+                "id": "18",
+                "label": "A"
+              },
+              {
+                "id": "19",
+                "label": "A"
+              },
+              {
+                "id": "20",
+                "label": "A"
+              },
+              {
+                "id": "21",
+                "label": "A"
+              },
+              {
+                "id": "22",
+                "label": "A"
+              },
+              {
+                "id": "23",
+                "label": "A"
+              },
+              {
+                "id": "24",
+                "label": "A"
+              },
+              {
+                "id": "25",
+                "label": "A"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "option id 19",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option id 20",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option id 21",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": null,
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option id 22",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": 3,
+            "label": "A"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option label 23",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "xxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option subtitle 25",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "subtitle": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option image_url 26",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "http://example.test"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option image_url 27",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option image_url 28",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://e.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option image_url 29",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "option value 30",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "value": "different"
+          }
+        ]
+      }
+    },
+    {
+      "name": "option extra 31",
+      "input": {
+        "title": "T",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "extra": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "prompt subtitle 33",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "subtitle": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+      }
+    },
+    {
+      "name": "prompt reply_message 34",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {}
+      }
+    },
+    {
+      "name": "prompt reply_message 35",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {
+          "title": ""
+        }
+      }
+    },
+    {
+      "name": "prompt reply_message 36",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "prompt reply_message 38",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {
+          "title": "A",
+          "subtitle": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
+        }
+      }
+    },
+    {
+      "name": "prompt reply_message 39",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "reply_message": {
+          "title": "A",
+          "style": "icon"
+        }
+      }
+    },
+    {
+      "name": "prompt selected_ids 40",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "selected_ids": []
+      }
+    },
+    {
+      "name": "prompt has_responded 41",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "has_responded": false
+      }
+    },
+    {
+      "name": "prompt expiry 42",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "expiry": "tomorrow"
+      }
+    },
+    {
+      "name": "prompt task 43",
+      "input": {
+        "title": " Topics ",
+        "options": [
+          {
+            "value": "a",
+            "label": " A "
+          }
+        ],
+        "task": {}
+      }
+    },
+    {
+      "name": "URI lexical format 0",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a b.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI lexical format 1",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a\nb.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI lexical format 2",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/😀.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI lexical format 3",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a\\b.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI lexical format 4",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/%zz"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI lexical format 5",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://bad host.test/a"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI component format 0",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.com/a[b].png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI component format 1",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.com/a.png#one#two"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI component format 2",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.com/a?x=[1]"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI trailing newline",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://example.test/a.png\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "URI IPv6 zone outside RFC3986",
+      "input": {
+        "title": "URI",
+        "options": [
+          {
+            "id": "a",
+            "label": "A",
+            "image_url": "https://[fe80::1%25eth0]/a.png"
+          }
+        ]
+      }
+    }
+  ]
+}

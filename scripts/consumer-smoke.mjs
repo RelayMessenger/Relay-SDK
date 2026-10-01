@@ -103,6 +103,10 @@ try {
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
+    // Server 461: a person's IANA time zone.
+    "timezone",
+    // Server 468: a person's age range.
+    "age_range",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
@@ -121,10 +125,14 @@ try {
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
   assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
+  assert.deepEqual(interfaceFields("DirectorySearchParams"), ["q", "category", "limit", "sort"]);
+  assert.deepEqual(interfaceFields("DirectorySearchResponse"), ["agents"]);
+  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle"]);
+  for (const field of ["id", "subtitle", "url"]) assert.ok(interfaceFields("ContactCardItem").includes(field));
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
-    "can_message",
+    "can_message", "timezone", "age_range", "age_rating",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);
@@ -159,8 +167,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 62);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
+      assert.equal(RELAY_V1_OPERATIONS.length, 57);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -196,19 +204,13 @@ try {
         "POST /v1/blocked_handles",
         "DELETE /v1/blocked_handles",
         "GET /v1/me",
-        "PATCH /v1/me",
-        "GET /v1/tasks",
-        "POST /v1/tasks/{taskId}/status",
-        "POST /v1/tasks/{taskId}/artifacts",
         "GET /v1/access",
+        "GET /v1/oauth2_client",
+        "POST /v1/oauth2_client",
+        "PATCH /v1/oauth2_client",
+        "POST /v1/oauth2_client/reset_secret",
         "PUT /v1/access/{handle}",
         "DELETE /v1/access/{handle}",
-        "GET /v1/communities",
-        "GET /v1/communities/{handle}",
-        "PATCH /v1/communities/{handle}",
-        "POST /v1/communities/{handle}/join",
-        "POST /v1/communities/{handle}/leave",
-        "GET /v1/communities/{handle}/members",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions",
@@ -216,6 +218,7 @@ try {
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
         "POST /v1/contacts/lookup",
+        "GET /v1/directory",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
@@ -259,15 +262,12 @@ try {
           .filter((name) => name !== "constructor")
           .sort();
       assert.equal("createAgent" in Relay, false);
+      assert.deepEqual(methods(client.directory), ["search"]);
       assert.deepEqual(methods(client.access), ["list", "remove", "set"]);
       assert.deepEqual(methods(client.agents), ["delete"]);
-      assert.deepEqual(methods(client.me), ["retrieve", "update"]);
-      assert.deepEqual(methods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
-      assert.deepEqual(methods(client.communities.members), ["list"]);
-      assert.equal("posts" in client.communities, false);
-      assert.deepEqual(methods(client.tasks), [
-        "addArtifact", "cancel", "get", "list", "send", "updateStatus",
-      ]);
+      assert.deepEqual(methods(client.me), ["retrieve"]);
+      assert.equal("communities" in client, false);
+      assert.equal("tasks" in client, false);
       assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.chats), [
         "clearActivity",

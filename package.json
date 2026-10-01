@@ -64,5 +64,8 @@
     "protobufjs@7.6.6": true,
     "tree-sitter-bash@0.25.1": true,
     "workerd@1.20260918.1": true
+  },
+  "overrides": {
+    "undici@7.29.0": "7.29.1"
   }
 }

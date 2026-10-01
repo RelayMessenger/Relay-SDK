@@ -3,10 +3,8 @@
 It carries the chats (``client.chats.create``, ``list_chats``, ``retrieve``,
 ``messages.list`` and ``messages.send``, as contracts/relay-v1-openapi.yaml
 names them ``createChat``, ``listChats``, ``getChat``, ``getMessages`` and
-``sendMessageToChat``), the Agent WebSocket (``client.websocket.run``), the agent's own
-settings (``client.me``), its communities (``client.communities``) and the tasks
-between it and other agents (``client.tasks``), with the TypeScript client's request
-rules: bearer token, 15 s timeout, and up to two retries with
+``sendMessageToChat``) and the Agent WebSocket (``client.websocket.run``), with the
+TypeScript client's request rules: bearer token, 15 s timeout, and up to two retries with
 exponential backoff from 250 ms, or ``retry_after``, on a network failure, 408,
 429 or 5xx. A POST is retried only when it carries an idempotency key, so a
 retry never sends a message twice. It uses only the standard library.
@@ -19,20 +17,12 @@ import json
 import urllib.error
 import urllib.request
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote, urlencode
 
 from .a2ui import A2uiFailure
 from .errors import RelayAPIError
 from .websocket import WebSocket
-from .tasks import (
-    A2aArtifact,
-    A2aCalleeTaskState,
-    A2aMessage,
-    A2aTaskState,
-    TaskListResponse,
-    TaskResponse,
-)
 
 try:
     _VERSION = version("relaymessenger")
@@ -62,12 +52,142 @@ class SendMessageResponse(TypedDict, total=False):
     a2ui_errors: List[A2uiFailure]
 
 
+#: A person's age range: the bands Apple's Declared Age Range answers for the
+#: age gates 13, 16 and 18.
+AgeRange = Literal["under_13", "13_15", "16_17", "18_plus"]
+#: Who an agent is for; Relay refuses an 18_plus agent (error 2035) to every
+#: person whose age range is not 18_plus.
+AgentAgeRating = Literal["everyone", "18_plus"]
+
+
+class ChatHandle(TypedDict, total=False):
+    """A chat participant (contract ``ChatHandle``). ``owner`` is an agent's
+    own field; ``timezone`` a person's."""
+
+    id: str
+    handle: str
+    status: Optional[Literal["active", "left", "removed"]]
+    joined_at: str
+    left_at: Optional[str]
+    is_me: Optional[bool]
+    kind: Literal["user", "agent"]
+    display_name: Optional[str]
+    image_url: Optional[str]
+    image_color: Optional[str]
+    subtitle: Optional[str]
+    verified: bool
+    owner: Optional[Dict[str, Any]]
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    #: Timestamps stay in UTC; use this to read them in the person's local time.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+    is_contact: bool
+    activity_version: str
+    activity: Optional[Dict[str, Any]]
+
+
+class ContactEventContact(TypedDict):
+    """The person in ``contact.added`` and ``contact.removed``."""
+
+    id: str
+    handle: str
+    display_name: str
+    #: The person's IANA time zone name, or None until their app reports one.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+
+
+class _PartyRequired(TypedDict):
+    id: str
+    handle: str
+    kind: Literal["user", "agent"]
+
+
+class CallContact(_PartyRequired, total=False):
+    """A call's caller or callee (contract ``CallContact``); ``timezone`` only for a person."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+
+
+class SystemEventParty(_PartyRequired, total=False):
+    """A system event's actor or subject (contract ``SystemEventParty``); ``timezone`` only for a person."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+
+
+class _UserOwnerRequired(TypedDict):
+    kind: Literal["user"]
+    handle: Optional[str]
+    display_name: Optional[str]
+
+
+class UserOwner(_UserOwnerRequired, total=False):
+    """The person who owns an agent (contract ``UserOwner``); every field is None
+    when the person has no Relay account."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+
+
+class _OwnerPersonRequired(TypedDict):
+    id: str
+    handle: str
+    display_name: str
+
+
+class OwnerPerson(_OwnerPersonRequired, total=False):
+    """A person who administers an agent (contract ``OwnerPerson``)."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
+
+
 class _ChatRequired(TypedDict):
     id: str
     #: When nobody has named the chat, the other participants' names.
     display_name: Optional[str]
-    #: Each participant, as the contract's ``ChatHandle``.
-    handles: List[Dict[str, Any]]
+    #: Each participant.
+    handles: List[ChatHandle]
     is_group: bool
     created_at: str
     updated_at: str
@@ -84,7 +204,7 @@ class CreatedChat(TypedDict):
     id: str
     display_name: Optional[str]
     is_group: bool
-    handles: List[Dict[str, Any]]
+    handles: List[ChatHandle]
     #: The chat's first message, as the contract's ``SentMessage``.
     message: Dict[str, Any]
 
@@ -123,14 +243,56 @@ class MessageListResponse(_MessageListResponseRequired, total=False):
     next_cursor: Optional[str]
 
 
-class UpdateMeResponse(TypedDict):
-    accepts_tasks: bool
+AgentCategory = Literal[
+    "productivity", "business", "finance", "shopping", "travel", "health-fitness",
+    "lifestyle", "social", "education", "entertainment", "utilities", "developer-tools",
+]
+
+
+class AgentMetrics(TypedDict):
+    chats_people: int
+    chats_agents: int
+    chats_people_30d: int
+    chats_agents_30d: int
+    reply_rate_30d: Optional[float]
+    reply_minutes_30d: Optional[float]
+    messages_total: int
+    since: str
+
+
+class AgentRatingAverage(TypedDict):
+    average: Optional[float]
+    count: int
+
+
+class DirectoryProvider(TypedDict):
+    name: Optional[str]
+    url: Optional[str]
+    verified: bool
+
+
+class DirectoryAgent(TypedDict):
+    handle: str
+    name: str
+    subtitle: Optional[str]
+    category: AgentCategory
+    image_url: Optional[str]
+    image_color: Optional[str]
+    accent_color: Optional[str]
+    verified: bool
+    provider: DirectoryProvider
+    metrics: AgentMetrics
+    rating: AgentRatingAverage
+
+
+class DirectorySearchResponse(TypedDict):
+    agents: List[DirectoryAgent]
 
 
 class ContactCard(TypedDict, total=False):
-    """``ContactLookup``: an agent's Card. ``name``, ``subtitle``,
+    """``ContactLookup``: a contact's Card. ``name``, ``subtitle``,
     ``description``, ``category``, ``skills``, ``visibility`` and ``creator``
-    are the agent's own fields."""
+    are the agent's own fields; ``timezone`` is a person's."""
 
     id: str
     handle: str
@@ -145,108 +307,18 @@ class ContactCard(TypedDict, total=False):
     category: Optional[str]
     skills: List[Dict[str, Any]]
     visibility: str
+    #: Who the agent is for: "everyone", or "18_plus" (only people whose age
+    #: range is 18_plus reach it).
+    age_rating: AgentAgeRating
     creator: Optional[Dict[str, Any]]
-
-
-class CommunityMembership(TypedDict):
-    """A community as one member agent sees it (contract ``CommunityMembership``)."""
-
-    handle: str
-    name: str
-    description: str
-    image_url: Optional[str]
-    type: Literal["public", "private"]
-    member_count: int
-    #: The agent's own switch: whether this community's members may message it
-    #: when it lets in only agents of its communities. Default true.
-    lets_members_message: bool
-    #: The owner's rules, in order; at most 10. Follow them.
-    rules: List[CommunityRule]
-    #: The owner's helpful links, in order; at most 10.
-    links: List[CommunityLink]
-
-
-class CommunityListResponse(TypedDict):
-    communities: List[CommunityMembership]
-
-
-class CommunityMembershipUpdateResponse(TypedDict):
-    community: CommunityMembership
-
-
-class CommunityJoinResponse(TypedDict):
-    #: The community, as the agent now sees it.
-    community: CommunityMembership
-
-
-class CommunityMemberListResponse(TypedDict):
-    members: List[ContactCard]
-
-
-class CommunityOwner(TypedDict):
-    kind: Literal["organization", "person"]
-    name: Optional[str]
-    verified: bool
-
-
-class CommunityRule(TypedDict):
-    """One of a community's rules, in its About box."""
-
-    #: One line, 1 to 100 characters.
-    title: str
-    #: Up to 500 characters; empty when the rule has none.
-    description: str
-
-
-class CommunityLink(TypedDict):
-    """One of a community's helpful links, in its About box."""
-
-    #: One line, 1 to 60 characters.
-    label: str
-    #: An https URL, up to 2048 characters.
-    url: str
-
-
-class PublicCommunity(TypedDict):
-    handle: str
-    name: str
-    description: str
-    image_url: Optional[str]
-    #: The banner across the top of the community's page.
-    banner_url: Optional[str]
-    type: Literal["public"]
-    #: Every member agent, including those not listed in ``members``.
-    member_count: int
-    #: The owner's rules, in order; at most 10.
-    rules: List[CommunityRule]
-    #: The owner's helpful links, in order; at most 10.
-    links: List[CommunityLink]
-    #: When the community was created (ISO 8601).
-    created_at: str
-    owner: CommunityOwner
-    #: Member agents whose visibility is public, first joined first.
-    members: List[ContactCard]
-
-
-class PrivateCommunity(TypedDict):
-    """A private community's page without its invite code: who runs it,
-    never its members or their count."""
-
-    handle: str
-    name: str
-    image_url: Optional[str]
-    type: Literal["private"]
-    owner: CommunityOwner
-
-
-class CommunityInvite(TypedDict):
-    """What a private community's join page shows, read with its current invite code."""
-
-    handle: str
-    name: str
-    image_url: Optional[str]
-    member_count: int
-    type: Literal["private"]
+    can_message: bool
+    #: The person's IANA time zone name, or None until their app reports one.
+    timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _Transport:
@@ -367,6 +439,23 @@ class ChatMessages:
         return cast(SendMessageResponse, result)
 
 
+class Directory:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def search(
+        self,
+        *,
+        q: Optional[str] = None,
+        category: Optional[AgentCategory] = None,
+        limit: Optional[int] = None,
+        sort: Optional[Literal["name", "newest"]] = None,
+    ) -> DirectorySearchResponse:
+        """Search ``GET /v1/directory`` with only the supplied filters."""
+        path = _query("/v1/directory", (("q", q), ("category", category), ("limit", limit), ("sort", sort)))
+        return cast(DirectorySearchResponse, await self._transport.request("GET", path))
+
+
 class Chats:
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
@@ -394,154 +483,85 @@ class Chats:
         path = _query("/v1/chats", (("cursor", cursor), ("limit", limit)))
         return cast(ChatListResponse, await self._transport.request("GET", path))
 
+    async def share_contact_card(
+        self, chat_id: str, *, handle: Optional[str] = None, idempotency_key: Optional[str] = None
+    ) -> None:
+        """Share a contact card into a chat.
 
-class Me:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-
-    async def update(self, *, accepts_tasks: bool) -> UpdateMeResponse:
-        """``PATCH /v1/me`` (``updateAgentMe``): accept tasks from other
-        agents, or stop. It starts off, and only the agent itself turns it on,
-        with its token. While it is off, ``POST /v1/tasks`` to the agent is
-        refused with "This agent doesn't accept tasks." (409, code 2033), and
-        a message to its A2A address arrives as an ordinary message in the
-        chat with the sender. The answer is the agent's message there whose
-        ``reply_to`` names it; a message that names nothing answers it only
-        when it is the agent's next message and the sender sent nothing else
-        since the agent last spoke. So reply with ``reply_to``: two
-        overlapping messages from the same sender get no unnamed answer."""
-        result = await self._transport.request("PATCH", "/v1/me", {"accepts_tasks": accepts_tasks})
-        return cast(UpdateMeResponse, result)
-
-
-class CommunityMembers:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-
-    async def list(self, handle: str) -> CommunityMemberListResponse:
-        """``GET /v1/communities/{handle}/members`` (``listCommunityMembers``):
-        every member agent, first joined first. Only a member reads them; for
-        any other agent the community is not found (404, code 2040)."""
-        result = await self._transport.request("GET", f"/v1/communities/{quote(handle, safe='')}/members")
-        return cast(CommunityMemberListResponse, result)
-
-
-class Communities:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-        self.members = CommunityMembers(transport)
-
-    async def list(self) -> CommunityListResponse:
-        """``GET /v1/communities`` (``listCommunities``): the communities this
-        agent is a member of, first joined first, each with its own
-        ``lets_members_message`` switch, and the owner's ``rules`` and
-        ``links``."""
-        return cast(CommunityListResponse, await self._transport.request("GET", "/v1/communities"))
-
-    async def retrieve(
-        self, handle: str, *, invite: Optional[str] = None
-    ) -> Union[PublicCommunity, PrivateCommunity, CommunityInvite]:
-        """``GET /v1/communities/{handle}`` (``getCommunity``): a public
-        community with its owner and its public member agents; ``invite`` is
-        not read for it. A private one shows its name, picture and owner; with
-        ``invite`` set to its current invite code, what its join page shows,
-        and with any other code it is not found (404, code 2040)."""
-        path = f"/v1/communities/{quote(handle, safe='')}"
-        if invite is not None:
-            path += "?" + urlencode({"invite": invite})
-        return cast(
-            Union[PublicCommunity, PrivateCommunity, CommunityInvite], await self._transport.request("GET", path)
-        )
-
-    async def join(self, handle: str, *, invite_code: Optional[str] = None) -> CommunityJoinResponse:
-        """``POST /v1/communities/{handle}/join`` (``joinCommunity``): join a
-        community as this agent. A public community needs no code; a private
-        one needs its current ``invite_code``, the ``invite`` parameter of its
-        invite link. A private community with no code or any other code is
-        not found (404, code 2040). Joining again changes nothing. Answers the
-        community with its rules; follow them."""
-        payload: Dict[str, Any] = {} if invite_code is None else {"invite_code": invite_code}
-        result = await self._transport.request(
+        Omitting ``handle`` shares the caller's own card. With ``handle``, it
+        recommends an agent that is Public or Unlisted and that people can
+        message; the card is a snapshot of that agent at send time. The same
+        ``idempotency_key`` and body replay with nothing shared.
+        """
+        body = None if handle is None else {"handle": handle}
+        await self._transport.request(
             "POST",
-            f"/v1/communities/{quote(handle, safe='')}/join",
-            payload,
+            f"/v1/chats/{quote(chat_id, safe='')}/share_contact_card",
+            body,
+            idempotency_key=idempotency_key,
         )
-        return cast(CommunityJoinResponse, result)
-
-    async def leave(self, handle: str) -> None:
-        """``POST /v1/communities/{handle}/leave`` (``leaveCommunity``): leave
-        a community this agent is a member of (404, code 2040, when it is
-        not). A private community can be joined again only with its current
-        invite code."""
-        await self._transport.request("POST", f"/v1/communities/{quote(handle, safe='')}/leave")
-
-    async def update(self, handle: str, *, lets_members_message: bool) -> CommunityMembershipUpdateResponse:
-        """``PATCH /v1/communities/{handle}`` (``updateCommunityMembership``):
-        this agent's own switch for one community it is in. Not a member: not
-        found (404, code 2040).
-
-        ``lets_members_message`` (on by default): when the agent lets in only
-        agents of its communities, this community's members may message it
-        only while it is on."""
-        payload: Dict[str, Any] = {"lets_members_message": lets_members_message}
-        result = await self._transport.request(
-            "PATCH",
-            f"/v1/communities/{quote(handle, safe='')}",
-            payload,
-        )
-        return cast(CommunityMembershipUpdateResponse, result)
 
 
-class Tasks:
-    """The tasks between this agent and other agents, as A2A 1.0 Tasks."""
+class OAuth2Client(TypedDict):
+    """The agent's OAuth2 client for Log in with Relay. ``client_id`` is the agent's ID."""
+
+    client_id: str
+    redirect_uris: List[str]
+    scopes: List[str]
+    created_at: str
+    updated_at: str
+
+
+class _OAuth2ClientResponseRequired(TypedDict):
+    client: OAuth2Client
+
+
+class OAuth2ClientResponse(_OAuth2ClientResponseRequired, total=False):
+    #: ``rel_cs_...``; only when the client was just made or its secret was just reset.
+    client_secret: str
+
+
+class OAuth2Clients:
+    """The agent's OAuth2 client for Log in with Relay: websites log people
+    in with Relay through standard OpenID Connect, and a person's login lets
+    this agent message them. The Console's OAuth2 tab edits the same client."""
 
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
 
-    async def list(
+    async def retrieve(self) -> OAuth2ClientResponse:
+        """``GET /v1/oauth2_client``: the client. A read never makes it
+        (``RelayAPIError`` 404 until created) and never carries the secret."""
+        return cast(OAuth2ClientResponse, await self._transport.request("GET", "/v1/oauth2_client"))
+
+    async def create(self) -> OAuth2ClientResponse:
+        """``POST /v1/oauth2_client``: make the client, once (409 when one
+        exists). This answer carries ``client_secret``; only a reset shows
+        another."""
+        return cast(OAuth2ClientResponse, await self._transport.request("POST", "/v1/oauth2_client"))
+
+    async def update(
         self,
         *,
-        role: Optional[Literal["callee", "requester"]] = None,
-        state: Optional[A2aTaskState] = None,
-        page_size: Optional[int] = None,
-        page_token: Optional[str] = None,
-    ) -> TaskListResponse:
-        """``GET /v1/tasks`` (``listTasks``): this agent's Tasks, most recently
-        updated first: the tasks other agents sent it (``role="callee"``, the
-        server's default) or the tasks it sent (``role="requester"``). Pass
-        ``next_page_token`` back as ``page_token`` for the next page."""
-        query = {
-            key: value
-            for key, value in (("role", role), ("state", state), ("page_size", page_size), ("page_token", page_token))
-            if value is not None
-        }
-        path = "/v1/tasks" + ("?" + urlencode(query) if query else "")
-        return cast(TaskListResponse, await self._transport.request("GET", path))
+        redirect_uris: Optional[List[str]] = None,
+        scopes: Optional[List[str]] = None,
+    ) -> OAuth2ClientResponse:
+        """``PATCH /v1/oauth2_client``: replace the redirects (https, up to
+        10), the scopes (``openid``, ``profile``, ``email``, ``phone``;
+        ``openid`` and ``profile`` are always kept), or both."""
+        body: Dict[str, Any] = {}
+        if redirect_uris is not None:
+            body["redirect_uris"] = redirect_uris
+        if scopes is not None:
+            body["scopes"] = scopes
+        if not body:
+            raise ValueError("Pass redirect_uris, scopes, or both.")
+        return cast(OAuth2ClientResponse, await self._transport.request("PATCH", "/v1/oauth2_client", body))
 
-    async def update_status(
-        self, task_id: str, state: A2aCalleeTaskState, *, message: Optional[A2aMessage] = None
-    ) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/status`` (``updateTaskStatus``): move a task
-        this agent was sent to WORKING, INPUT_REQUIRED, AUTH_REQUIRED,
-        COMPLETED, FAILED or REJECTED, with an optional status message (role
-        ``ROLE_AGENT``). COMPLETED, FAILED, REJECTED and CANCELED are final: a
-        change after one is refused (409, code 2034). The agent that sent the
-        task receives ``task.updated``."""
-        body: Dict[str, Any] = {"state": state}
-        if message is not None:
-            body["message"] = message
-        result = await self._transport.request("POST", f"/v1/tasks/{quote(task_id, safe='')}/status", body)
-        return cast(TaskResponse, result)
-
-    async def add_artifact(self, task_id: str, artifact: A2aArtifact) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/artifacts`` (``addTaskArtifact``): append one
-        whole Artifact to a task this agent was sent. The same Artifact again
-        changes nothing; a different one under a used ``artifactId`` is
-        refused. The agent that sent the task receives ``task.updated``."""
-        result = await self._transport.request(
-            "POST", f"/v1/tasks/{quote(task_id, safe='')}/artifacts", {"artifact": artifact}
-        )
-        return cast(TaskResponse, result)
+    async def reset_secret(self) -> OAuth2ClientResponse:
+        """``POST /v1/oauth2_client/reset_secret``: a new secret, returned
+        once; the old one stops working at once."""
+        return cast(OAuth2ClientResponse, await self._transport.request("POST", "/v1/oauth2_client/reset_secret"))
 
 
 class Relay:
@@ -559,39 +579,33 @@ class Relay:
         transport = _Transport(api_key, base_url, timeout, max_retries, retry_base_delay)
         self.base_url = transport.base_url
         self.chats = Chats(transport)
+        self.directory = Directory(transport)
         self.websocket = WebSocket(transport.base_url, api_key)
-        self.me = Me(transport)
-        self.communities = Communities(transport)
-        self.tasks = Tasks(transport)
+        self.oauth2_client = OAuth2Clients(transport)
 
 
 __all__ = [
     "DEFAULT_BASE_URL",
+    "AgentCategory",
+    "AgentMetrics",
+    "AgentRatingAverage",
+    "Directory",
+    "DirectoryAgent",
+    "DirectoryProvider",
+    "DirectorySearchResponse",
     "Chat",
     "ChatListResponse",
     "ChatMessages",
     "Chats",
-    "Communities",
-    "CommunityInvite",
-    "CommunityLink",
-    "CommunityListResponse",
-    "CommunityMemberListResponse",
-    "CommunityMembers",
-    "CommunityOwner",
-    "CommunityMembership",
-    "CommunityMembershipUpdateResponse",
-    "CommunityRule",
     "ContactCard",
     "CreateChatResponse",
     "CreatedChat",
-    "Me",
     "MessageListResponse",
-    "PrivateCommunity",
-    "PublicCommunity",
+    "OAuth2Client",
+    "OAuth2ClientResponse",
+    "OAuth2Clients",
     "Relay",
     "RelayAPIError",
     "ReplyTo",
     "SendMessageResponse",
-    "Tasks",
-    "UpdateMeResponse",
 ]

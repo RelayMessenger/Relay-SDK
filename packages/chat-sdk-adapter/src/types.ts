@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 9448e92fb7465bdf30bad37475e5f3017460799b
- * OpenAPI 61bd07d26328a493fa3aca1ceef9bf1c43321d31fb3ba3c6e10f7d353b48218b
+ * Relay Server 349431592ca866731a95407ab8836611989371d2
+ * OpenAPI 1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -34,10 +34,6 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated",
 ] as const;
 
 export type RelayWebhookEventType =
@@ -243,6 +239,8 @@ export interface RelayPaymentRequest {
   status: RelayPaymentStatus;
   mode: RelayPaymentMode;
   amount: number;
+  /** Relay's 5% fee on `amount`, in minor units, taken from the payment by Stripe; in subscription mode, the first period's fee. 0 when 5% rounds to nothing. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: RelayPaymentCategory;

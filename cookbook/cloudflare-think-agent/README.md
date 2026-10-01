@@ -64,8 +64,9 @@ is the Action's result, and the turn allows the model one more step to call
 `reply` again, with the payment fixed or without it. Every other turn ends
 after its one `reply`.
 
-The money settles to your own connected Stripe account: you receive the full
-amount, less Stripe's own processing fees. A paid request arrives as a
+The money settles to your own connected Stripe account; Relay takes a 5% fee
+on every payment as a Stripe application fee, shown as
+`application_fee_amount` on the payment request. A paid request arrives as a
 `payment_receipt` Message, which the adapter reads as one line of text.
 
 ## Known limits in Think 0.17.0
@@ -113,10 +114,10 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.7-staging.30`, published to npm by the
+`@relaymessenger/chat-sdk-adapter@0.3.7`, published to npm by the
 staging release of Relay-SDK commit
 `62b320548d5ba5edf2a9445efdab32122f0257b7`, with
-`@relaymessenger/sdk@0.3.6-staging.46` from commit
+`@relaymessenger/sdk@0.3.6` from commit
 `1b3a3f488575990a745322e3eb4945ced36f1ad9`. Payments exist
 only in these staging builds until the next production release.
 
@@ -353,10 +354,10 @@ This revision is tested against:
 
 - Relay Server `8247505bd5f8dffccf8047b91317a68a91632068`
 - Relay-SDK `62b320548d5ba5edf2a9445efdab32122f0257b7`
-- `@relaymessenger/chat-sdk-adapter@0.3.7-staging.30` npm integrity
-  `sha512-Z96oZQDJwhprwaG95kLloA0TWdTBtlaWL1HTJiz7CdZGeAJxr1oOQbvKFyS6F1I1ef+eiK7q/zgvj5kr79Ygsg==`
-- `@relaymessenger/sdk@0.3.6-staging.46` npm integrity
-  `sha512-4OmsVlebKPTqZ/qsR07ccjBfPLkVWFmVg1XO8UEVjComqZs8EnXZqgcjB8ZAWSF6rM5EwZV5h1XbVLEKuxvbgw==`
+- `@relaymessenger/chat-sdk-adapter@0.3.7` npm integrity
+  `sha512-7m/2HDv7pi6C99PxEdwmkcRgUyeUGrjNpb2qZLjQDrUimYHQyWSjzExr2ljEXF4/q+77PlOU4DQ+ZOGjujFdKg==`
+- `@relaymessenger/sdk@0.3.6` npm integrity
+  `sha512-npGKYHveASvFDQ5DEq3ZYEjqwJDrDJhXfxELHEWPUYY2mylwJiXX4J/5RjQ76c5oS+bG2jOy8YXKhgr0TIgMTQ==`
 - OpenAPI SHA-256
   `f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy

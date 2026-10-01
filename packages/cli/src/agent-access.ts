@@ -18,7 +18,7 @@ import { CliError } from "./error-codes.js";
  */
 
 /** Relay Server's values for "Other agents" (migration 0090, AGENTS_CAN_MESSAGE). */
-export const AGENTS_CAN_MESSAGE = ["everyone", "communities", "nobody"] as const;
+export const AGENTS_CAN_MESSAGE = ["everyone", "nobody"] as const;
 export type AgentsCanMessage = (typeof AGENTS_CAN_MESSAGE)[number];
 /** `allow` is Always Allow; `deny` is Never Allow (Relay Server's AccessRule). */
 export type AccessRule = "allow" | "deny";
@@ -61,7 +61,7 @@ export const peopleSwitch = (value: string): boolean => {
 };
 
 /** The organization and the agent's Console id for a handle the organization owns. */
-const findAgent = async (request: ConsoleRequest, handle: string): Promise<{ path: string }> => {
+export const findAgent = async (request: ConsoleRequest, handle: string): Promise<{ path: string }> => {
   const wanted = accessHandle(handle);
   const me = await request<{ org: { id: string } }>("/me");
   const agents = await request<ConsoleAgentRow[]>(`/orgs/${encodeURIComponent(me.org.id)}/agents`);
@@ -118,7 +118,7 @@ export async function updateReach(
     throw new CliError("Choose --people or --agents.", "usage");
   }
   if (change.agents !== undefined && !AGENTS_CAN_MESSAGE.includes(change.agents)) {
-    throw new CliError("--agents takes everyone, communities or nobody.", "usage");
+    throw new CliError("--agents takes everyone or nobody.", "usage");
   }
   const { path } = await findAgent(request, handle);
   const saved = await request<ConsoleAgentDetail>(path, {

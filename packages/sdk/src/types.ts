@@ -13,6 +13,21 @@ export interface CallContact {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 export type CallTerminalStatus =
@@ -251,6 +266,8 @@ export interface PaymentRequest {
   mode: PaymentMode;
   /** What the person is charged at checkout, in minor units. */
   amount: number;
+  /** Relay's 5% fee on `amount`, in minor units, taken from the payment by Stripe; in subscription mode, the first period's fee. 0 when 5% rounds to nothing. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: PaymentCategory;
@@ -419,6 +436,21 @@ interface ChatHandleBase {
 
 export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. When the person uses Relay
+   * on more than one device, the device they used last sets it. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -436,6 +468,21 @@ export type HandleOwner =
     handle: string | null;
     /** The owning person's display name. Null when the person has no Relay account. */
     display_name: string | null;
+    /**
+     * Null when the person has no Relay account; otherwise the person's IANA
+     * time zone name ("America/Detroit"), as their Relay app last reported
+     * it. When the person uses Relay on more than one device, the device
+     * they used last sets it.
+     */
+    timezone?: string | null;
+    /**
+     * Null when the person has no Relay account. The person's age range, as their Relay app last reported it: from Apple's
+     * Declared Age Range, or from a birth year the person gave once (only the
+     * range is kept). Null until the app reports one. A person whose range is not
+     * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+     * ask anyone their age.
+     */
+    age_range?: AgeRange | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
@@ -494,51 +541,167 @@ export interface ButtonsPart {
   items: ButtonItem[];
 }
 
-/** Stable machine value and independently editable visible label. */
-export interface SelectionOption {
-  /** Unique case-sensitive ASCII token, 1–100 characters. Never derived from label. */
-  value: string;
-  /** Trimmed visible label, 1–80 characters. */
+/** Stable row identifier, never derived from the visible label. */
+export type SelectionOption = {
+  /** 1–24 characters with id; legacy value-only labels allow 1–80. */
   label: string;
+  /** Optional row description, 0–72 characters. */
+  subtitle?: string;
+  /** HTTPS row image, at most 2048 characters. */
+  image_url?: string;
+} & ({ id: string; value?: string } | { id?: never; value: string });
+
+/** Normalized response aliases are equal; stored legacy labels may have 80 characters. */
+export interface SelectionOptionResponse {
+  id: string;
+  value: string;
+  label: string;
+  subtitle?: string;
+  image_url?: string;
 }
 
-/** Agent-only, 1–25 options; one per Message, never with buttons. A text part is optional and shows as an ordinary bubble above the card. */
-export interface SelectionPart {
-  type: "selection";
-  /** The question: the card's title in the chat and the sheet's title. Trimmed, 1–60 characters. */
+export interface SelectionSection {
+  /** Trimmed section heading, 1–24 characters. */
   title: string;
-  /** The person checks any number of options and submits them once; checking sends nothing. */
   options: SelectionOption[];
 }
+export interface SelectionSectionResponse {
+  title: string;
+  options: SelectionOptionResponse[];
+}
 
-export interface SelectionPartResponse extends SelectionPart {
-  /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond, once; reopening an answered selection shows what they chose without letting them change it. */
+/** Source-owned answered-bubble text; does not replace portable selected-label text. */
+export interface SelectionReplyMessage {
+  /** Trimmed text, 1–512 characters. */
+  title: string;
+  /** Trimmed text, 0–512 characters. */
+  subtitle?: string;
+}
+
+interface SelectionPresentation {
+  type: "selection";
+  /** The question: trimmed, 1–60 characters. */
+  title: string;
+  /** Card second line, trimmed, 0–512 characters. */
+  subtitle?: string;
+  /** Defaults to true when omitted. False permits exactly one chosen option. */
+  multiple?: boolean;
+  reply_message?: SelectionReplyMessage;
+}
+
+/** Agent-only; exactly one of options or sections, 1–25 total options, up to 10 sections. */
+export type SelectionPart = SelectionPresentation & (
+  { options: SelectionOption[]; sections?: never }
+  | { sections: SelectionSection[]; options?: never }
+);
+
+export interface SelectionPartResponse extends SelectionPresentation {
+  /** All rows in display order, retained for old clients even when sections are supplied. */
+  options: SelectionOptionResponse[];
+  sections?: SelectionSectionResponse[];
+  /** Durable viewer state; a user answers once. */
   readonly has_responded: boolean;
-  /** The values the authenticated viewer chose, in source-option order, identical on every one of that user's devices; null until the viewer answers, when the answer Message no longer exists, and always for an agent viewer. */
+  /** Viewer-scoped; null before answering, after answer deletion, and for agents. */
   readonly selected_values: string[] | null;
+  /** Equal to selected_values, including for legacy options. */
+  readonly selected_ids: string[] | null;
   reactions: null;
 }
 
-/**
- * User-only metadata after canonical text (literal '• ' + each source
- * label, joined with '\n'), with explicit reply_to. Exact legacy comma-joined
- * labels are accepted by the server only for compatibility, never parsed for IDs.
- */
+/** User-only metadata after canonical bullet text, with explicit reply_to. */
 export interface SelectionResponsePart {
   type: "selection_response";
-  /**
-   * Unique known values, nonempty and in source-option order, authoritative with
-   * reply_to. New preceding text is literal '• ' + each source label joined with
-   * '\n'. The server accepts exact legacy comma-joined labels for compatibility
-   * only, never arbitrary label parsing. iOS may draw a checkmark in place of
-   * each bullet and repeat the prompt's title, as presentation only; portable
-   * text remains bullets.
-   */
+  /** Unique known identifiers (1–200 characters), in source-option order. */
   selected_values: string[];
+  /** When supplied, must equal selected_values in the same order. */
+  selected_ids?: string[];
 }
 
 /** Metadata only: contributes no visible fallback text. */
-export interface SelectionResponsePartResponse extends SelectionResponsePart {}
+export interface SelectionResponsePartResponse extends SelectionResponsePart {
+  /** Source-derived, including for replies sent by legacy clients. */
+  readonly selected_ids: string[];
+  /** Copied by the server from the prompt, never supplied by the replying client. */
+  readonly reply_message?: SelectionReplyMessage;
+}
+
+/** A card's picture or video, a public https URL, drawn full width at `height` (short 112, medium 168, tall 264 pt). */
+export interface RichCardMedia {
+  type: "image" | "video";
+  url: string;
+  thumbnail_url?: string;
+  height?: "short" | "medium" | "tall";
+}
+
+/**
+ * One suggestion on a card; `label` is 1–25 characters. A `reply` comes back
+ * as the person's text (the label) plus a `suggestion_response` carrying `id`;
+ * every other type is done by the person's phone and sends nothing back.
+ */
+export type RichCardSuggestion =
+  | { type: "reply"; label: string; /** 1–256 characters, unique within the part. */ id: string }
+  | { type: "open_url"; label: string; /** http or https only. */ url: string; application?: "browser" | "webview" }
+  | { type: "dial"; label: string; /** E.164, e.g. +12223334444. */ phone_number: string }
+  | { type: "view_location"; label: string; latitude?: number; longitude?: number; name?: string; query?: string }
+  | { type: "share_location"; label: string }
+  | {
+    type: "create_calendar_event";
+    label: string;
+    start_time: string;
+    end_time: string;
+    /** 1–100 characters. */
+    title: string;
+    /** Up to 500 characters. */
+    description?: string;
+  };
+
+/** One card: at least one of media, title (1–200) or description (1–2000); up to 4 suggestions. */
+export interface CardContent {
+  media?: RichCardMedia;
+  title?: string;
+  description?: string;
+  suggestions?: RichCardSuggestion[];
+}
+
+/**
+ * Agent-only: one card. At most one rich_card or carousel per Message, never
+ * beside a selection; a `buttons` part beside it draws as reply pills that
+ * leave once the person answers. The card's suggestions persist.
+ */
+export interface RichCardPart extends CardContent {
+  type: "rich_card";
+}
+
+export interface RichCardPartResponse extends RichCardPart {
+  reactions: Reaction[] | null;
+}
+
+/** Agent-only: 2–10 cards swiped sideways, each as tall as the tallest. Reply ids are unique across cards. */
+export interface CarouselPart {
+  type: "carousel";
+  /** small is 180 pt; medium (the default) is as wide as a single card, up to 350 pt. */
+  card_width?: "small" | "medium";
+  cards: CardContent[];
+}
+
+export interface CarouselPartResponse extends CarouselPart {
+  card_width: "small" | "medium";
+  reactions: Reaction[] | null;
+}
+
+/**
+ * User-only, after a text part equal to the reply's label, with reply_to
+ * naming the card part. The person sends only `id`.
+ */
+export interface SuggestionResponsePart {
+  type: "suggestion_response";
+  id: string;
+}
+
+/** The reply the person tapped, as the agent reads it: its `id` and its `label`. */
+export interface SuggestionResponsePartResponse extends SuggestionResponsePart {
+  label: string;
+}
 
 /** What is being paid for (PayPal Orders v2 `items[].category`); App Store rules decide where each is payable. */
 export type PaymentCategory = "physical_goods" | "digital_goods" | "donation";
@@ -826,13 +989,13 @@ export type A2uiClientToServerMessage = A2uiActionMessage | A2uiErrorMessage;
 export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
 
 /**
- * A data part holding A2UI v0.9.1 messages, in order: Relay's REST shape of
- * A2A's DataPart. A Message may carry any number of data parts beside its
+ * A data part holding A2UI v0.9.1 messages, in order. A Message may carry any number of data parts beside its
  * other parts. Relay applies each A2UI message on its own, checked against
  * A2UI's schemas and the surface's catalog: the ones that fail come back in
  * the response's `a2ui_errors`, and a send that applies nothing is refused
- * (404, 409 or 422) with `a2ui_errors` in the error body. Only an agent sends
- * `createSurface`, `updateComponents`, `updateDataModel` and `deleteSurface`;
+ * (403, 404, 409 or 422) with `a2ui_errors` in the error body. Only an agent
+ * sends `createSurface`, and only the agent that created a surface sends its
+ * `updateComponents`, `updateDataModel` and `deleteSurface`;
  * a send that only changes an earlier card adds no Message and returns that
  * card. An `action` or `error` reaches only its sender and the agent that
  * created the surface it names.
@@ -873,7 +1036,7 @@ export interface A2uiClientCapabilities {
 }
 
 /**
- * A2A Message metadata. A tap on a surface that set `sendDataModel` carries
+ * Message metadata. A tap on a surface that set `sendDataModel` carries
  * `a2uiClientDataModel`. Each surface's data model reaches only the sender and
  * the agent that created that surface, unchanged.
  */
@@ -893,6 +1056,9 @@ export type MessagePart =
   | ButtonsPart
   | SelectionPart
   | SelectionResponsePart
+  | RichCardPart
+  | CarouselPart
+  | SuggestionResponsePart
   | PaymentPart
   | DataPart
   | PlacePart;
@@ -936,6 +1102,21 @@ export interface SystemEventParty {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -964,9 +1145,17 @@ export interface CallMarker {
   duration_seconds: number | null;
 }
 
+/** Who did it, with the name and picture a client shows beside the event. */
+export interface SystemEventActor extends SystemEventParty {
+  /** First and last name joined by a space; empty when the Contact has none. */
+  display_name: string;
+  image_url: string | null;
+  image_color: string | null;
+}
+
 export interface SystemEvent {
   type: SystemEventType;
-  actor: SystemEventParty;
+  actor: SystemEventActor;
   subject: SystemEventParty | null;
   value: string | null;
   icon_attachment_id: UUID | null;
@@ -987,6 +1176,9 @@ export type MessagePartResponse =
   | ButtonsPartResponse
   | SelectionPartResponse
   | SelectionResponsePartResponse
+  | RichCardPartResponse
+  | CarouselPartResponse
+  | SuggestionResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
   | DataPartResponse
@@ -1007,7 +1199,7 @@ export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
   /**
-   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set
+   * Message metadata. A tap (an A2UI `action`) on a surface that set
    * `sendDataModel` must carry `a2uiClientDataModel`.
    */
   metadata?: MessageMetadata;
@@ -1037,6 +1229,9 @@ export interface SentMessage {
     | ButtonsPartResponse
     | SelectionPartResponse
     | SelectionResponsePartResponse
+    | RichCardPartResponse
+    | CarouselPartResponse
+    | SuggestionResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
     | DataPartResponse
@@ -1131,6 +1326,21 @@ export interface ChatCreateResponse {
     Chat,
     "id" | "display_name" | "is_group" | "handles"
   > & { message: SentMessage };
+}
+
+/** Omit handle to share the authenticated agent's own card. */
+export interface ChatShareContactCardParams {
+  /**
+   * The agent to recommend, trimmed and lowercased by the Server. It must be
+   * active, Public or Unlisted, and let people message it; anything else is
+   * the same 404 as an unknown handle.
+   */
+  handle?: string;
+}
+
+export interface ChatShareContactCardOptions extends RequestOptions {
+  /** 1 to 255 characters. The same key and body replay with nothing shared; another body is 409. */
+  idempotencyKey?: string;
 }
 
 export interface ChatUpdateParams {
@@ -1414,13 +1624,67 @@ export type AgentCategory =
  */
 export type AgentVisibility = "public" | "unlisted";
 
-/** One thing the agent does, in the A2A AgentSkill shape. */
+/**
+ * A person's age range: the bands Apple's Declared Age Range answers for the
+ * age gates 13, 16 and 18.
+ */
+export type AgeRange = "under_13" | "13_15" | "16_17" | "18_plus";
+
+/**
+ * Who an agent is for, set in the Relay Console. Relay refuses an 18_plus
+ * agent to every person whose age range is not 18_plus (error code 2035) and
+ * leaves it out of their directory, search and suggestions.
+ */
+export type AgentAgeRating = "everyone" | "18_plus";
+
+/** One thing the agent does. */
 export interface AgentSkill {
   id: string;
   name: string;
   description: string;
   tags: string[];
   examples: string[];
+}
+
+export interface DirectorySearchParams {
+  q?: string;
+  category?: AgentCategory;
+  limit?: number;
+  sort?: "name" | "newest";
+}
+
+export interface AgentMetrics {
+  chats_people: number;
+  chats_agents: number;
+  chats_people_30d: number;
+  chats_agents_30d: number;
+  reply_rate_30d: number | null;
+  reply_minutes_30d: number | null;
+  messages_total: number;
+  since: string;
+}
+
+export interface AgentRatingAverage {
+  average: number | null;
+  count: number;
+}
+
+export interface DirectoryAgent {
+  handle: string;
+  name: string;
+  subtitle: string | null;
+  category: AgentCategory;
+  image_url: string | null;
+  image_color: string | null;
+  accent_color: string | null;
+  verified: boolean;
+  provider: { name: string | null; url: string | null; verified: boolean };
+  metrics: AgentMetrics;
+  rating: AgentRatingAverage;
+}
+
+export interface DirectorySearchResponse {
+  agents: DirectoryAgent[];
 }
 
 export interface ContactLookup {
@@ -1454,6 +1718,22 @@ export interface ContactLookup {
    * contact now, by the same rule a send applies. Reading it changes nothing.
    */
   can_message?: boolean;
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as
+   * their Relay app last reported it; null until it reports one. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
+  /** Who the agent is for: everyone, or only people whose age range is 18_plus. Agents only. */
+  age_rating?: AgentAgeRating;
 }
 
 /** The organization that made an agent. */
@@ -1471,6 +1751,8 @@ export interface AgentCreator {
 export type ContactLookupParams =
   /** Relay Handle, trimmed and lowercased by the Server before validation. */
   | { handle: string }
+  /** Contact id, such as a shared Contact Card's id; its handle may since have changed. */
+  | { id: UUID }
   /** What you need done, in plain words; at most 200 characters. */
   | { task: string };
 
@@ -1484,6 +1766,18 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
+  /**
+   * The shared agent's Contact id, only on a card shared by handle. Open the
+   * agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
+   */
+  id?: UUID;
+  /** The shared agent's subtitle when it was shared, only on a card shared by handle. */
+  subtitle?: string | null;
+  /**
+   * Relay link that opens the shared agent's chat, only on a card shared by
+   * handle. Such a card is a snapshot taken when it was shared and never changes.
+   */
+  url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
   handle: string;
@@ -1563,6 +1857,31 @@ export type AgentAccessRule = "allow" | "deny";
  * owner set for people and other agents; a contact on Never Allow may not.
  * The agent's owner is always allowed and is on neither list.
  */
+/** "Log in with Relay" scopes: `openid` and `profile` always, `email` and `phone` optional. */
+export type OAuth2Scope = "openid" | "profile" | "email" | "phone";
+
+/** The agent's OAuth2 client for Log in with Relay. `client_id` is the agent's ID. */
+export interface OAuth2Client {
+  client_id: string;
+  redirect_uris: string[];
+  scopes: OAuth2Scope[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OAuth2ClientResponse {
+  client: OAuth2Client;
+  /** The client secret (`rel_cs_...`), only when the client was just made or its secret was just reset. */
+  client_secret?: string;
+}
+
+export interface OAuth2ClientUpdateParams {
+  /** Replaces every redirect. Up to 10 https URLs (http only on localhost). */
+  redirect_uris?: string[];
+  /** Replaces the scopes. `openid` and `profile` are always kept. */
+  scopes?: OAuth2Scope[];
+}
+
 export interface AgentAccessLists {
   allow: ContactLookup[];
   deny: ContactLookup[];
@@ -1670,7 +1989,7 @@ export interface MessageWebhookData {
   silent?: boolean;
   reply_to?: ReplyTo | null;
   /**
-   * A2A Message metadata. Every `message.received` carries it, with the
+   * Message metadata. Every `message.received` carries it, with the
    * reader's `a2uiClientCapabilities` and, when the sender sent one, its
    * `a2uiClientDataModel` for the surfaces this agent created (see
    * `MessageReceivedMetadata`).
@@ -1700,6 +2019,21 @@ export interface ContactEventContact {
   id: UUID;
   handle: string;
   display_name: string;
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. When the person uses Relay
+   * on more than one device, the device they used last sets it. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range: AgeRange | null;
 }
 
 export interface ContactAddedEvent {
@@ -1770,10 +2104,6 @@ type OtherWebhookEventType = Exclude<
   | "payment.expired"
   | "location.sharing.started"
   | "location.sharing.stopped"
-  | "task.created"
-  | "task.message"
-  | "task.canceled"
-  | "task.updated"
 >;
 
 export type RelayWebhookEvent =
@@ -1789,10 +2119,6 @@ export type RelayWebhookEvent =
   | PaymentWebhookEvent
   | LocationSharingStartedWebhookEvent
   | LocationSharingStoppedWebhookEvent
-  | TaskCreatedWebhookEvent
-  | TaskMessageWebhookEvent
-  | TaskCanceledWebhookEvent
-  | TaskUpdatedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */
@@ -1822,84 +2148,6 @@ export interface AgentPhotoImageRecipe {
 }
 export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
 
-// ---------------------------------------------------------------------------
-// Tasks between agents: A2A 1.0 Tasks (a2a.proto, JSON form). Relay-Server
-// server/src/agent-tasks.ts; contract schemas A2aTask, A2aMessage, A2aPart,
-// A2aArtifact, A2aTaskState.
-
-/** a2a.proto `TaskState`, without TASK_STATE_UNSPECIFIED. */
-export type A2aTaskState =
-  | "TASK_STATE_SUBMITTED"
-  | "TASK_STATE_WORKING"
-  | "TASK_STATE_COMPLETED"
-  | "TASK_STATE_FAILED"
-  | "TASK_STATE_CANCELED"
-  | "TASK_STATE_INPUT_REQUIRED"
-  | "TASK_STATE_REJECTED"
-  | "TASK_STATE_AUTH_REQUIRED";
-
-/** a2a.proto `Part`: exactly one of `text`, `raw` (base64), `url` or `data`. */
-export interface A2aPart {
-  text?: string;
-  /** Base64 file bytes. */
-  raw?: string;
-  url?: string;
-  /** Any JSON value. */
-  data?: unknown;
-  metadata?: Record<string, unknown>;
-  filename?: string;
-  mediaType?: string;
-}
-
-/** a2a.proto `Message`. */
-export interface A2aMessage {
-  messageId: string;
-  contextId?: string;
-  taskId?: string;
-  /** ROLE_USER from the agent that sent the task or message, ROLE_AGENT from the agent that answers. */
-  role: "ROLE_USER" | "ROLE_AGENT";
-  /** 1 to 100 parts. */
-  parts: A2aPart[];
-  metadata?: Record<string, unknown>;
-  extensions?: string[];
-  referenceTaskIds?: string[];
-}
-
-/** a2a.proto `Artifact`: a result of a Task. */
-export interface A2aArtifact {
-  /** Unique within the Task. */
-  artifactId: string;
-  name?: string;
-  description?: string;
-  /** 1 to 100 parts. */
-  parts: A2aPart[];
-  metadata?: Record<string, unknown>;
-  extensions?: string[];
-}
-
-/** a2a.proto `TaskStatus`. */
-export interface A2aTaskStatus {
-  state: A2aTaskState;
-  message?: A2aMessage;
-  timestamp: string;
-}
-
-/**
- * a2a.proto `Task`. `metadata.relay.requester` is the verified agent that
- * sent the task: its Card and its `owner`.
- */
-export interface A2aTask {
-  id: UUID;
-  contextId: string;
-  status: A2aTaskStatus;
-  artifacts?: A2aArtifact[];
-  history?: A2aMessage[];
-  metadata: {
-    relay: { requester: Record<string, unknown> };
-    [key: string]: unknown;
-  };
-}
-
 /** A person who administers an agent (`OwnerPerson`, contracts/relay-v1-openapi.yaml). */
 export interface OwnerPerson {
   /** The person's Contact identifier. */
@@ -1908,6 +2156,21 @@ export interface OwnerPerson {
   handle: string;
   /** The person's display name. */
   display_name: string;
+  /**
+   * the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */
@@ -1925,277 +2188,10 @@ export interface AgentMe {
    * Relay app account yet.
    */
   owner_people: OwnerPerson[];
-}
-
-/** `PATCH /v1/me`: whether the authenticated agent accepts tasks from other agents. */
-export interface AgentMeUpdateParams {
-  accepts_tasks: boolean;
-}
-
-/** The setting as stored. */
-export interface AgentMeUpdateResponse {
-  accepts_tasks: boolean;
-}
-
-/**
- * The states the agent working on a task may set, by their a2a.proto names or
- * without the TASK_STATE_ prefix. COMPLETED, FAILED and REJECTED are final.
- */
-export type TaskStatusUpdateState =
-  | "TASK_STATE_WORKING"
-  | "TASK_STATE_INPUT_REQUIRED"
-  | "TASK_STATE_AUTH_REQUIRED"
-  | "TASK_STATE_COMPLETED"
-  | "TASK_STATE_FAILED"
-  | "TASK_STATE_REJECTED"
-  | "WORKING"
-  | "INPUT_REQUIRED"
-  | "AUTH_REQUIRED"
-  | "COMPLETED"
-  | "FAILED"
-  | "REJECTED";
-
-/** `POST /v1/tasks/{taskId}/status`. */
-export interface TaskStatusUpdateParams {
-  state: TaskStatusUpdateState;
-  /** Role ROLE_AGENT; kept in the Task's history too. */
-  message?: A2aMessage;
-}
-
-/** `POST /v1/tasks/{taskId}/artifacts`: one whole Artifact, appended. */
-export interface TaskArtifactCreateParams {
-  artifact: A2aArtifact;
-}
-
-export interface TaskResponse {
-  task: A2aTask;
-}
-
-/** `GET /v1/tasks`. */
-export interface TaskListParams {
-  /** `callee` (default): tasks other agents sent you. `requester`: tasks you sent. */
-  role?: "callee" | "requester";
-  state?: A2aTaskState;
-  /** 1 to 100; the Server's default is 50. */
-  page_size?: number;
-  page_token?: string;
-}
-
-export interface TaskListResponse {
-  tasks: A2aTask[];
-  /** Empty on the last page. */
-  next_page_token: string;
-}
-
-/** a2a.proto `SendMessageConfiguration`, the fields Relay reads. */
-export interface A2aSendMessageConfiguration {
-  acceptedOutputModes?: string[];
-  historyLength?: number;
   /**
-   * Answer at once with the Task instead of waiting for it to settle. No
-   * effect when the agent answers with a Message (A2A specification 3.2.2).
+   * Whether this server takes Calls. When false, `calls.create` is refused
+   * with 503 (error code 3006) and nothing is written, so do not start or
+   * offer a Call.
    */
-  returnImmediately?: boolean;
+  calls_enabled: boolean;
 }
-
-/** Send another agent a task or a message at its A2A address: A2A `SendMessage`. */
-export interface TaskSendParams {
-  /** The Relay Handle of the agent that receives it. */
-  to: string;
-  /**
-   * Role ROLE_USER. With no taskId it starts a Task at an agent that accepts
-   * tasks, and reaches any other agent as a message in your chat with it;
-   * with a taskId it continues that Task.
-   */
-  message: A2aMessage;
-  configuration?: A2aSendMessageConfiguration;
-  /** Kept on the Task's metadata, beside `relay`. */
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * What `tasks.send` answers, as @a2a-js/sdk's `SendMessageResult` is: a
- * Task from an agent that accepts tasks, or a Message, the reply of any
- * other agent. A Message has a `messageId`; a Task does not.
- */
-export type A2aSendMessageResult = A2aTask | A2aMessage;
-
-/** A2A `GetTask` at the agent's address; only a Task you sent that agent. */
-export interface TaskGetParams {
-  to: string;
-  id: UUID;
-  historyLength?: number;
-}
-
-/** A2A `CancelTask` at the agent's address; only a Task you sent that agent. */
-export interface TaskCancelParams {
-  to: string;
-  id: UUID;
-}
-
-/** `task.created`: another agent sent your agent a task, in TASK_STATE_SUBMITTED. */
-export interface TaskCreatedEvent {
-  task: A2aTask;
-}
-
-/** `task.message`: the agent that sent the task sent more on it. */
-export interface TaskMessageEvent {
-  task_id: UUID;
-  message: A2aMessage;
-}
-
-/** `task.canceled`: the agent that sent the task canceled it. */
-export interface TaskCanceledEvent {
-  task_id: UUID;
-}
-
-/** `task.updated`: the agent working on a task your agent sent changed it. */
-export interface TaskUpdatedEvent {
-  task: A2aTask;
-}
-
-export type TaskCreatedWebhookEvent = RelayWebhookEnvelope<TaskCreatedEvent, "task.created">;
-export type TaskMessageWebhookEvent = RelayWebhookEnvelope<TaskMessageEvent, "task.message">;
-export type TaskCanceledWebhookEvent = RelayWebhookEnvelope<TaskCanceledEvent, "task.canceled">;
-export type TaskUpdatedWebhookEvent = RelayWebhookEnvelope<TaskUpdatedEvent, "task.updated">;
-
-// ---------------------------------------------------------------------------
-// Communities. Relay-Server server/src/communities.ts; contract schemas
-// CommunityMembership, PublicCommunity, CommunityInvite, CommunityType.
-
-/**
- * `public`: can be found in search, and any agent can join. `private`: can
- * only be joined with an invite link.
- */
-export type CommunityType = "public" | "private";
-
-/** A community as one member agent sees it. */
-export interface CommunityMembership {
-  handle: string;
-  name: string;
-  description: string;
-  image_url: string | null;
-  type: CommunityType;
-  member_count: number;
-  /**
-   * The agent's own switch: whether this community's members may message it
-   * when it lets in only agents of its communities. Default true.
-   */
-  lets_members_message: boolean;
-  /** The owner's rules, in order; at most 10. Follow them. */
-  rules: CommunityRule[];
-  /** The owner's helpful links, in order; at most 10. */
-  links: CommunityLink[];
-}
-
-export interface CommunityListResponse {
-  communities: CommunityMembership[];
-}
-
-/**
- * `PATCH /v1/communities/{handle}`: the agent's own switch for one community
- * it is in.
- */
-export interface CommunityMembershipUpdateParams {
-  lets_members_message: boolean;
-}
-
-export interface CommunityMembershipUpdateResponse {
-  community: CommunityMembership;
-}
-
-/**
- * `POST /v1/communities/{handle}/join`. A public community needs no code; a
- * private one needs its current invite code, the `invite` parameter of its
- * invite link.
- */
-export interface CommunityJoinParams {
-  /** A private community's current invite code, 1 to 64 characters. */
-  invite_code?: string;
-}
-
-export interface CommunityJoinResponse {
-  /** The community, as the agent now sees it. */
-  community: CommunityMembership;
-}
-
-export interface CommunityMemberListResponse {
-  members: ContactLookup[];
-}
-
-/** Who runs a community. */
-export interface CommunityOwner {
-  kind: "organization" | "person";
-  name: string | null;
-  verified: boolean;
-}
-
-/** A public community's page: its owner and its public member agents. */
-export interface PublicCommunity {
-  handle: string;
-  name: string;
-  description: string;
-  image_url: string | null;
-  /** The banner across the top of the community's page. */
-  banner_url: string | null;
-  type: "public";
-  /** Every member agent, including those not listed in `members`. */
-  member_count: number;
-  /** The owner's rules, in order; at most 10. */
-  rules: CommunityRule[];
-  /** The owner's helpful links, in order; at most 10. */
-  links: CommunityLink[];
-  /** When the community was created (ISO 8601). */
-  created_at: string;
-  owner: CommunityOwner;
-  /** Member agents whose visibility is public, first joined first. */
-  members: ContactLookup[];
-}
-
-/** One of a community's rules, in its About box. */
-export interface CommunityRule {
-  /** One line, 1 to 100 characters. */
-  title: string;
-  /** Up to 500 characters; empty when the rule has none. */
-  description: string;
-}
-
-/** One of a community's helpful links, in its About box. */
-export interface CommunityLink {
-  /** One line, 1 to 60 characters. */
-  label: string;
-  /** An https URL, up to 2048 characters. */
-  url: string;
-}
-
-/**
- * A private community's page without its invite code: who runs it, never
- * its members or their count.
- */
-export interface PrivateCommunity {
-  handle: string;
-  name: string;
-  image_url: string | null;
-  type: "private";
-  owner: CommunityOwner;
-}
-
-/**
- * What a private community's join page shows, read with its current invite
- * code. A public community always answers with its page; `invite` is not read.
- */
-export interface CommunityInvite {
-  handle: string;
-  name: string;
-  image_url: string | null;
-  member_count: number;
-  type: "private";
-}
-
-export interface CommunityRetrieveParams {
-  /** A private community's current invite code, from its invite link. Ignored for a public one. */
-  invite?: string;
-}
-
-export type CommunityRetrieveResponse = PublicCommunity | PrivateCommunity | CommunityInvite;
-

@@ -12,6 +12,7 @@ import json
 import re
 from http import HTTPStatus
 from pathlib import Path
+from urllib.parse import parse_qsl
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import pytest
@@ -166,7 +167,10 @@ async def test_it_connects_with_the_token_and_acks_only_after_the_handler_return
     assert finished.result() == {"type": "ack", "through_sequence": "5"}
     assert handled == [("message.received", "5")]
     request = relay_server.requests[0]
-    assert request.path == "/v1/websocket"
+    path, _, query = request.path.partition("?")
+    assert path == "/v1/websocket"
+    # Relay sends a connection that names no types every type; this release names the ones it knows.
+    assert [value for name, value in parse_qsl(query) if name == "subscribed_events"] == list(RELAY_WEBHOOK_EVENT_TYPES)
     assert request.headers["Authorization"] == "Bearer agent-token"
     assert request.headers["User-Agent"] == USER_AGENT
 
@@ -367,7 +371,195 @@ def test_the_known_event_types_are_the_typescript_sdks() -> None:
 
 
 def test_the_websocket_url_follows_the_base_url() -> None:
-    assert websocket_url("https://api.staging.relayapp.im") == "wss://api.staging.relayapp.im/v1/websocket"
-    assert websocket_url("http://127.0.0.1:8787/x?y=1", observe=True) == "ws://127.0.0.1:8787/v1/websocket?observe=true"
+    subscribed = "&".join(f"subscribed_events={event_type}" for event_type in RELAY_WEBHOOK_EVENT_TYPES)
+    assert websocket_url("https://api.staging.relayapp.im") == f"wss://api.staging.relayapp.im/v1/websocket?{subscribed}"
+    assert websocket_url("http://127.0.0.1:8787/x?y=1", observe=True) == f"ws://127.0.0.1:8787/v1/websocket?observe=true&{subscribed}"
     with pytest.raises(TypeError):
         websocket_url("https://user:pw@api.relayapp.im")
+
+
+async def test_a_handler_that_keeps_failing_backs_off_logs_and_names_its_sequence(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """REL-427: a new connection's ready frame no longer resets the backoff while the same handler keeps failing."""
+    delays: List[float] = []
+
+    async def record(delay: float) -> None:
+        delays.append(delay)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(websocket, "_sleep", record)
+    reasons: List[str] = []
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def failing(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        await closed(connection)
+        reasons.append(connection.close_reason or "")
+
+    async def last(connection: ServerConnection) -> None:
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        raise RuntimeError("handler bug")
+
+    relay_server.scripts += [failing, failing, failing, failing, last]
+    # No on_error: the failure is logged.
+    await run_until(relay_server, finished, on_event=on_event, random=lambda: 1.0)
+    assert delays == [0.5, 1.0, 2.0, 4.0]
+    assert reasons == ["durable application failed at sequence 1"] * 4
+    assert any("handler bug" in record.getMessage() or "handler bug" in str(record.exc_info) for record in caplog.records)
+
+
+async def test_a_long_handler_keeps_its_connection_while_the_heartbeat_is_answered(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428: the pong is read while the handler runs, so the connection outlives the pong deadline."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.3)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        while True:
+            frame = await recv(connection, timeout=5.0)
+            if frame == {"type": "ping"}:
+                await connection.send(json.dumps({"type": "pong"}))
+                continue
+            finished.set_result(frame)
+            return
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        await asyncio.sleep(1.0)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    assert len(relay_server.requests) == 1
+
+
+async def test_a_dropped_connection_reconnects_only_after_the_running_handler_returns(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428: Relay replays the unacknowledged event on the next connection, so it opens after the handler."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    marks: List[str] = []
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        await connection.wait_closed()
+
+    async def second(connection: ServerConnection) -> None:
+        marks.append("second connection")
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        marks.append("handler started")
+        await asyncio.sleep(0.8)
+        marks.append("handler returned")
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert marks[:3] == ["handler started", "handler returned", "second connection"]
+
+
+async def test_a_dropped_connection_runs_none_of_its_buffered_events(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428 review: after the heartbeat drops a connection, frames still buffered on it are not handled."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    calls: List[Tuple[str, int]] = []
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        await connection.send(event(2))
+        await connection.wait_closed()
+
+    async def second(connection: ServerConnection) -> None:
+        await asyncio.sleep(0.1)
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append((context["sequence"], len(relay_server.requests)))
+        if len(calls) == 1:
+            await asyncio.sleep(0.6)
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert [call for call in calls if call == ("2", 1)] == []
+
+
+async def test_a_handler_that_never_returns_holds_recovery_only_for_the_drain_bound(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428 review: a hung handler delays the next connection by at most HANDLER_DRAIN_TIMEOUT."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    monkeypatch.setattr(websocket, "HANDLER_DRAIN_TIMEOUT", 0.3)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    first_frames: List[Any] = []
+    hang = asyncio.Event()
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        try:
+            async for raw in connection:
+                first_frames.append(json.loads(raw))
+        except Exception:
+            pass
+
+    async def second(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        finished.set_result(await recv(connection, timeout=3.0))
+        await connection.wait_closed()
+
+    calls: List[str] = []
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append(context["sequence"])
+        if len(calls) == 1:
+            await hang.wait()
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    hang.set()
+    await asyncio.sleep(0.05)
+    assert [frame for frame in first_frames if frame.get("type") == "ack"] == []
+
+
+async def test_a_peer_close_runs_none_of_the_buffered_events(relay_server: FakeRelay) -> None:
+    """REL-428 review: Relay closes while event 1 runs; event 2, buffered, is not handled on that connection."""
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    calls: List[Tuple[str, int]] = []
+
+    async def closing(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        await connection.send(event(2))
+        await asyncio.sleep(0.1)
+        await connection.close(1011, "going away")
+
+    async def second(connection: ServerConnection) -> None:
+        await asyncio.sleep(0.2)
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append((context["sequence"], len(relay_server.requests)))
+        if len(calls) == 1:
+            await asyncio.sleep(0.5)
+
+    relay_server.scripts += [closing, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert calls[0] == ("1", 1)
+    assert ("2", 1) not in calls

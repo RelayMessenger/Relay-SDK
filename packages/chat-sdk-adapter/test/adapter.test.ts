@@ -103,7 +103,7 @@ function adapterHarness(options: { typing?: boolean } = {}) {
 }
 
 describe("RelayAdapter interface", () => {
-  it("satisfies the current chat@4.39.0 Adapter interface", () => {
+  it("satisfies the current chat@4.41.0 Adapter interface", () => {
     const { adapter } = adapterHarness();
     const typed: Adapter = adapter;
     expect(typed.name).toBe("relay");

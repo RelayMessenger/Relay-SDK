@@ -8,6 +8,7 @@ import { releaseKeys, releasePackages } from "./release-packages.mjs";
 import {
   applyPins,
   applyVersion,
+  compareBase,
   differingFiles,
   nextVersion,
   parseStagingVersion,
@@ -104,6 +105,50 @@ test("a candidate npm already holds is skipped", () => {
     isPublished: (candidate) => candidate === "0.4.0-staging.6",
   });
   assert.equal(incremented.version, "0.4.0-staging.7");
+});
+
+test("a catalog minimumBase above the tree's base moves to it, content changed or not", () => {
+  // Owner decision 2026-09-30: the SDK's next release is 0.4.0, not 0.3.7.
+  for (const [versionPublished, basePublished, contentChanged] of [
+    [true, false, false],
+    [true, false, true],
+    [false, false, null],
+    [true, true, true],
+  ]) {
+    const decision = nextVersion({
+      version: "0.3.7-staging.14",
+      versionPublished,
+      basePublished,
+      contentChanged,
+      isPublished: never,
+      minimumBase: "0.4.0",
+    });
+    assert.deepEqual([decision.action, decision.version], ["bump", "0.4.0-staging.0"]);
+  }
+});
+
+test("a minimumBase the tree has reached changes nothing", () => {
+  for (const version of ["0.4.0-staging.0", "0.4.1-staging.3", "1.0.0-staging.0"]) {
+    const facts = { version, versionPublished: true, basePublished: false, contentChanged: false, isPublished: never };
+    assert.deepEqual(nextVersion({ ...facts, minimumBase: "0.4.0" }), nextVersion(facts));
+  }
+});
+
+test("a minimumBase skips taken prereleases and refuses a floor already released", () => {
+  const taken = new Set(["0.4.0-staging.0", "0.4.0-staging.1"]);
+  const facts = { version: "0.3.7-staging.14", versionPublished: true, basePublished: false, contentChanged: false };
+  assert.equal(nextVersion({ ...facts, minimumBase: "0.4.0", isPublished: (v) => taken.has(v) }).version, "0.4.0-staging.2");
+  assert.throws(
+    () => nextVersion({ ...facts, minimumBase: "0.4.0", isPublished: (v) => v === "0.4.0" }),
+    /minimumBase 0\.4\.0 is already on npm/u,
+  );
+});
+
+test("compareBase orders X.Y.Z numerically and refuses other shapes", () => {
+  assert.equal(compareBase("0.3.7", "0.4.0"), -1);
+  assert.equal(compareBase("0.10.0", "0.9.9"), 1);
+  assert.equal(compareBase("0.4.0", "0.4.0"), 0);
+  assert.throws(() => compareBase("0.4", "0.4.0"), /is not an X\.Y\.Z version/u);
 });
 
 test("differing files lists changed, added, and removed paths", () => {

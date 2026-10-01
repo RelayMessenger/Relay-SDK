@@ -62,7 +62,9 @@ const selectionMessage: MessageContent = {
 };
 await relay.chats.messages.send("chat-id", { message: selectionMessage });
 const viewerSelection: SelectionPartResponse = {
-  ...topics, has_responded: false, selected_values: null, reactions: null,
+  type: "selection", title: "Topics",
+  options: [{ id: "research", value: "research", label: "Research" }],
+  has_responded: false, selected_values: null, selected_ids: null, reactions: null,
 };
 // @ts-expect-error Viewer state is read-only.
 viewerSelection.has_responded = true;
@@ -95,6 +97,40 @@ const content: MessageContent = {
 
 await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
+await relay.chats.shareContactCard("chat-id", { handle: "travel_bot" });
+await relay.chats.shareContactCard("chat-id", {});
+await relay.chats.shareContactCard("chat-id", undefined, { timeout: 1000 });
+await relay.chats.shareContactCard("chat-id", { headers: { "x-fixture": "legacy" } });
+// @ts-expect-error A shared handle must be a string.
+await relay.chats.shareContactCard("chat-id", { handle: 42 });
+// @ts-expect-error Sharing does not accept a task payload.
+await relay.chats.shareContactCard("chat-id", { task: "plan a trip" });
+const directoryParams: import("@relaymessenger/sdk").DirectorySearchParams = {
+  q: "plan a trip", category: "travel", limit: 7, sort: "newest",
+};
+const directory: import("@relaymessenger/sdk").DirectorySearchResponse = await relay.directory.search(directoryParams);
+await relay.directory.search();
+await relay.directory.search({}, { timeout: 1000 });
+const directoryResource: import("@relaymessenger/sdk").Directory = relay.directory;
+const agent: import("@relaymessenger/sdk").DirectoryAgent | undefined = directory.agents[0];
+if (agent) {
+  agent.category satisfies import("@relaymessenger/sdk").AgentCategory;
+  agent.metrics.reply_rate_30d satisfies number | null;
+  agent.rating.average satisfies number | null;
+  agent.provider.name satisfies string | null;
+}
+void directoryResource;
+// @ts-expect-error The directory uses the canonical category enum.
+await relay.directory.search({ category: "invented" });
+// @ts-expect-error Only name and newest are directory sorts.
+await relay.directory.search({ sort: "rating" });
+// @ts-expect-error A limit is numeric.
+await relay.directory.search({ limit: "7" });
+// @ts-expect-error Search text must be a string.
+await relay.directory.search({ q: 42 });
+// @ts-expect-error Directory search uses q, not contacts.lookup's task.
+await relay.directory.search({ task: "plan a trip" });
+
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 const activityParams: ChatSetActivityParams = { text: "Generating image", emoji: "🖼️" };
@@ -215,10 +251,6 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -228,11 +260,19 @@ async function requestPayment(chatId: string): Promise<void> {
     { idempotencyKey: "order-42" },
   );
   request.checkout_url satisfies string;
+  request.application_fee_amount satisfies number;
+  const { application_fee_amount, ...withoutFee } = request;
+  // @ts-expect-error Every PaymentRequest includes its fee, even when it is 0.
+  const missingFee: PaymentRequest = withoutFee;
+  // @ts-expect-error The fee is a number, never a string.
+  const stringFee: PaymentRequest = { ...request, application_fee_amount: "120" };
+  void [application_fee_amount, missingFee, stringFee];
   await relay.chats.messages.send(chatId, {
     message: { parts: [{ type: "payment", checkout_url: request.checkout_url }] },
   });
   (await relay.paymentRequests.list({ status: "requested" })).payment_requests satisfies PaymentRequest[];
   (await relay.paymentRequests.cancel(request.id)).status satisfies PaymentStatus;
+  (await relay.paymentRequests.retrieve(request.id)).application_fee_amount satisfies number;
 }
 void requestPayment;
 
@@ -296,39 +336,15 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// An agent's own settings are only whether it accepts tasks.
+// GET /v1/me says whether this server takes Calls (AgentMe.calls_enabled).
+const callsEnabled: boolean = (await relay.me.retrieve()).calls_enabled;
+void callsEnabled;
+// @ts-expect-error Communities were removed (2026-09-30).
+relay.communities;
+// @ts-expect-error A2A and tasks were removed (2026-09-30): agents message each other.
+relay.tasks;
+// @ts-expect-error An agent has no settings of its own to update.
 await relay.me.update({ accepts_tasks: true });
-// tasks.send answers a Task or a Message, as @a2a-js/sdk's sendMessage does.
-const answered = await relay.tasks.send({
-  to: "relay",
-  message: { messageId: "hello-relay-1", role: "ROLE_USER", parts: [{ text: "What can you do?" }] },
-});
-if ("messageId" in answered) answered.parts[0]?.text satisfies string | undefined;
-else answered.status.state satisfies string;
-// @ts-expect-error The answer may be a Message, which has no status.
-answered.status;
-// The agent's own reach switch for one community.
-(await relay.communities.update("chess", { lets_members_message: false })).community.lets_members_message satisfies boolean;
-// @ts-expect-error The community feed is removed: no notifications bell.
-await relay.communities.update("chess", { lets_members_message: true, notifications: true });
-// @ts-expect-error The community feed is removed: no posts.
-relay.communities.posts;
-// An agent joins by itself, with a private community's invite code, and leaves.
-(await relay.communities.join("chess")).community.rules[0]?.title satisfies string | undefined;
-(await relay.communities.join("chess", { invite_code: "k3y" })).community.links[0]?.url satisfies string | undefined;
-(await relay.communities.leave("chess")) satisfies void;
-(await relay.communities.list()).communities[0]?.rules[0]?.description satisfies string | undefined;
-// @ts-expect-error The join body takes only invite_code.
-await relay.communities.join("chess", { invite: "k3y" });
-// A public community's page carries its About box.
-const communityPage = await relay.communities.retrieve("chess");
-if (communityPage.type === "public" && "rules" in communityPage) {
-  communityPage.rules[0]?.title satisfies string | undefined;
-  communityPage.rules[0]?.description satisfies string | undefined;
-  communityPage.links[0]?.label satisfies string | undefined;
-  communityPage.links[0]?.url satisfies string | undefined;
-  communityPage.created_at satisfies string;
-}
 // @ts-expect-error Person settings remain outside the public SDK contract.
 await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.
@@ -539,3 +555,38 @@ const browserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser
 // @ts-expect-error A Browser card sends only its three taps.
 const notABrowserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser.pause";
 void [everyBrowserProperty, titledBrowser, browserTap, notABrowserTap];
+
+const sharedCard: import("@relaymessenger/sdk").ContactCardItem = {
+  handle: "travel_bot", first_name: "Travel", last_name: null, image_url: null,
+  kind: "agent", is_active: true, id: "contact-id", subtitle: null,
+  url: "https://relayapp.im/travel_bot",
+};
+sharedCard.id satisfies string | undefined;
+sharedCard.subtitle satisfies string | null | undefined;
+sharedCard.url satisfies string | undefined;
+// @ts-expect-error A shared card URL is a string when present, not null.
+sharedCard.url = null;
+// @ts-expect-error A subtitle is text or null, not a number.
+sharedCard.subtitle = 42;
+// List-picker input and projected output are different wire models.
+const groupedPicker = selectionPart({
+  title: "Shipping", subtitle: "Choose a service", multiple: false,
+  sections: [{ title: "Fast", options: [{ id: "priority / 1", label: "Priority", subtitle: "Tomorrow", image_url: "https://example.test/priority.png" }] }],
+  reply_message: { title: "Shipping saved", subtitle: "Thank you" },
+});
+if (typeof groupedPicker === "string") throw new Error(groupedPicker);
+await relay.chats.messages.send("chat-id", { message: { parts: partsWithSelection(undefined, groupedPicker) } });
+const selectedIds: string[] | null = viewerSelection.selected_ids;
+// @ts-expect-error Viewer-scoped IDs are read-only.
+viewerSelection.selected_ids = [];
+const submittedPicker: import("@relaymessenger/sdk").SelectionResponsePart = {
+  type: "selection_response", selected_values: ["priority / 1"], selected_ids: ["priority / 1"],
+};
+// @ts-expect-error Answered-bubble metadata is server-owned, not reply input.
+submittedPicker.reply_message = { title: "Forged" };
+// @ts-expect-error A prompt cannot send flat options and sections together.
+const mixedPicker: import("@relaymessenger/sdk").SelectionPart = { type: "selection", title: "T", options: [], sections: [] };
+// @ts-expect-error A row needs id or the legacy value alias.
+const missingId: import("@relaymessenger/sdk").SelectionOption = { label: "Not an ID" };
+const storedLegacy: import("@relaymessenger/sdk").SelectionOptionResponse = { id: "legacy", value: "legacy", label: "x".repeat(80) };
+void [selectedIds, submittedPicker, mixedPicker, missingId, storedLegacy];

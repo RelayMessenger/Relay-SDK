@@ -38,30 +38,25 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "9448e92fb7465bdf30bad37475e5f3017460799b", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "349431592ca866731a95407ab8836611989371d2", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
-// carry. The websocket is a transport, not a client method. The directory
-// and rating routes landed on the Server after the last contract carry; the
-// selection carry pins the Server bytes that include them, and their client
-// methods arrive with their own carry.
+// carry. WebSocket endpoints are transports, not REST resource methods.
+// Rating methods arrive with their own carry.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
   { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
-  { method: "GET", path: "/v1/directory", operationId: "listDirectory" },
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
-  // POST /v1/tasks is the REST twin of A2A SendMessage; the SDK sends tasks
-  // at the agent's A2A address instead (tasks.send), through the official A2A
-  // client. Always and Never Allow (Server 00093564) is client.access.
-  { method: "POST", path: "/v1/tasks", operationId: "createTask" },
+  // Server #467: a person's address-book counts, person token only; an agent
+  // SDK has no caller for it.
+  { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
   "GET /v1/me",
-  "PATCH /v1/me",
   "POST /v1/chats",
   "GET /v1/chats",
   "GET /v1/chats/{chatId}",
@@ -95,18 +90,13 @@ const allowedOperationSignatures = [
   "GET /v1/blocked_handles",
   "POST /v1/blocked_handles",
   "DELETE /v1/blocked_handles",
-  "GET /v1/tasks",
-  "POST /v1/tasks/{taskId}/status",
-  "POST /v1/tasks/{taskId}/artifacts",
   "GET /v1/access",
+  "GET /v1/oauth2_client",
+  "POST /v1/oauth2_client",
+  "PATCH /v1/oauth2_client",
+  "POST /v1/oauth2_client/reset_secret",
   "PUT /v1/access/{handle}",
   "DELETE /v1/access/{handle}",
-  "GET /v1/communities",
-  "GET /v1/communities/{handle}",
-  "PATCH /v1/communities/{handle}",
-  "POST /v1/communities/{handle}/join",
-  "POST /v1/communities/{handle}/leave",
-  "GET /v1/communities/{handle}/members",
   "GET /v1/webhook-events",
   "POST /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions",
@@ -114,6 +104,7 @@ const allowedOperationSignatures = [
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
   "POST /v1/contacts/lookup",
+  "GET /v1/directory",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -131,14 +122,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 62);
-assert.equal(manifest.path_count, 42);
-assert.equal(manifest.source_path_count, 47);
-assert.equal(manifest.source_schema_count, 220);
-assert.equal(manifest.callback_count, 28);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
-assert.equal(operationJSON.length, 62);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
+assert.equal(manifest.operation_count, 57);
+assert.equal(manifest.path_count, 37);
+assert.equal(manifest.source_path_count, 42);
+assert.equal(manifest.source_schema_count, 219);
+assert.equal(manifest.callback_count, 24);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
+assert.equal(operationJSON.length, 57);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -240,13 +231,13 @@ assert.deepEqual(Object.keys(client).sort(), [
   "blockedHandles",
   "calls",
   "chats",
-  "communities",
   "contactCard",
   "contacts",
+  "directory",
   "me",
   "messages",
+  "oauth2Client",
   "paymentRequests",
-  "tasks",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
@@ -255,12 +246,8 @@ assert.deepEqual(Object.keys(client).sort(), [
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
-assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
-assert.deepEqual(publicMethods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
-assert.deepEqual(publicMethods(client.communities.members), ["list"]);
-assert.deepEqual(publicMethods(client.tasks), [
-  "addArtifact", "cancel", "get", "list", "send", "updateStatus",
-]);
+assert.deepEqual(publicMethods(client.me), ["retrieve"]);
+assert.equal("tasks" in client, false, "A2A and tasks were removed (Server PR 462).");
 assert.deepEqual(publicMethods(client.calls), [
   "create", "end", "list", "retrieve", "room",
 ]);
@@ -308,6 +295,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "update",
 ]);
 assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
+assert.deepEqual(publicMethods(client.directory), ["search"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -353,17 +341,58 @@ const validateOpenAPI = () => {
   assert.equal(document.paths["/v1/agents"], undefined);
   assert.equal(document.components.schemas.CreateAgentRequest, undefined);
   const schemas = document.components.schemas;
+  const share = document.paths["/v1/chats/{chatId}/share_contact_card"].post;
+  assert.equal(share.requestBody.required, false);
+  assert.equal(share.requestBody.content["application/json"].schema.$ref, "#/components/schemas/ShareContactCardRequest");
+  const shareBody = schemas.ShareContactCardRequest;
+  assert.equal(shareBody.additionalProperties, false);
+  assert.equal(shareBody.required, undefined);
+  assert.deepEqual(Object.keys(shareBody.properties), ["handle"]);
+  assert.equal(shareBody.properties.handle.type, "string");
+  assert.equal(shareBody.properties.handle.minLength, 1);
+  assert.equal(shareBody.properties.handle.maxLength, 255);
+  for (const field of ["id", "subtitle", "url"]) {
+    assert.ok(schemas.ContactCardItem.properties[field]);
+    assert.equal(schemas.ContactCardItem.required.includes(field), false);
+  }
+  assert.match(declaredTypes, /id\?: UUID;/u);
+  assert.match(declaredTypes, /url\?: string;/u);
+
   const option = schemas.SelectionOption;
   assert.equal(option.additionalProperties, false);
-  assert.deepEqual(option.required, ["value", "label"]);
-  assert.equal(option.properties.value.maxLength, 100);
-  assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
+  assert.deepEqual(option.required, ["label"]);
+  assert.equal(option.properties.id.maxLength, 200);
+  assert.deepEqual(option.allOf[0].anyOf, [{ required: ["id"] }, { required: ["value"] }]);
+  assert.equal(option.allOf[1].then.properties.label.maxLength, 24);
+  assert.equal(option.allOf[1].else.properties.value.maxLength, 100);
+  assert.equal(option.properties.value.maxLength, 200);
+  assert.equal(option.allOf[1].else.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
   assert.equal(option.properties.label.maxLength, 80);
   const selection = schemas.SelectionPart;
   assert.doesNotMatch(selection.description, /Coming soon/u);
   assert.doesNotMatch(selection.description, /Clear/u);
   assert.equal(selection.additionalProperties, false);
-  assert.deepEqual(selection.required, ["type", "title", "options"]);
+  assert.deepEqual(selection.required, ["type", "title"]);
+  assert.deepEqual(selection.oneOf, [
+    { required: ["options"], not: { required: ["sections"] } },
+    { required: ["sections"], not: { required: ["options"] } },
+  ]);
+  assert.equal(selection.properties.multiple.default, true);
+  assert.equal(selection.properties.subtitle.maxLength, 512);
+  assert.equal(selection.properties.sections.maxItems, 10);
+  assert.equal(schemas.SelectionSection.properties.title.maxLength, 24);
+  assert.equal(option.properties.subtitle.maxLength, 72);
+  assert.equal(option.properties.image_url.maxLength, 2048);
+  assert.equal(option.properties.image_url.pattern, "^https://");
+  assert.equal(schemas.SelectionReplyMessage.properties.title.maxLength, 512);
+  assert.equal(schemas.SelectionReplyMessage.properties.subtitle.maxLength, 512);
+  assert.deepEqual(schemas.SelectionOptionResponse.required, ["id", "value", "label"]);
+  assert.equal(schemas.SelectionOptionResponse.properties.label.maxLength, 80);
+  assert.equal(schemas.SelectionPartResponse.properties.options.items.$ref, "#/components/schemas/SelectionOptionResponse");
+  assert.equal(schemas.SelectionSectionResponse.properties.options.items.$ref, "#/components/schemas/SelectionOptionResponse");
+  assert.equal(schemas.SelectionPartResponse.properties.sections.items.$ref, "#/components/schemas/SelectionSectionResponse");
+  assert.ok(schemas.SelectionPartResponse.required.includes("selected_ids"));
+  assert.equal(schemas.SelectionPartResponse.properties.selected_ids.readOnly, true);
   assert.deepEqual(selection.properties.type.enum, ["selection"]);
   assert.equal(selection.properties.title.type, "string");
   assert.equal(selection.properties.title.minLength, 1);
@@ -388,16 +417,19 @@ const validateOpenAPI = () => {
   assert.equal(response.properties.selected_values.uniqueItems, true);
   assert.equal(response.properties.selected_values.minItems, 1);
   assert.equal(response.properties.selected_values.maxItems, 25);
-  assert.equal(response.properties.selected_values.items.pattern, option.properties.value.pattern);
+  assert.equal(response.properties.selected_values.items.maxLength, 200);
+  assert.equal(response.properties.selected_ids.items.maxLength, 200);
+  assert.equal(response.properties.reply_message, undefined);
   assert.equal(response.properties.value, undefined, "metadata must not add visible fallback text");
   assert.match(response.description, /User-only metadata, exactly the second part after plain text/u);
   assert.match(response.description, /source-option order/u);
   assert.ok(response.description.includes("literal '• '"));
   assert.ok(response.description.includes("joined with '\\n'"));
-  assert.match(response.description, /exact legacy source labels/u);
-  assert.match(response.description, /arbitrary label parsing is never accepted/u);
+  assert.match(response.description, /exact legacy source labels/iu);
   assert.match(response.description, /409\/1005/u);
-  assert.deepEqual(schemas.SelectionResponsePartResponse.allOf, [{ $ref: "#/components/schemas/SelectionResponsePart" }]);
+  assert.deepEqual(schemas.SelectionResponsePartResponse.required, ["type", "selected_values", "selected_ids"]);
+  assert.equal(schemas.SelectionResponsePartResponse.properties.selected_ids.readOnly, true);
+  assert.equal(schemas.SelectionResponsePartResponse.properties.reply_message.readOnly, true);
   for (const name of ["SelectionPart", "SelectionResponsePart", "ButtonsPart"]) {
     assert.ok(schemas.MessagePart.oneOf.some((part) => part.$ref === `#/components/schemas/${name}`));
   }
@@ -410,7 +442,7 @@ const validateOpenAPI = () => {
     }
   }
   assert.match(declaredTypes, /type: "selection"/u);
-  assert.match(declaredTypes, /interface SelectionPart \{\s+type: "selection";\s+\/\*\*[^\n]*\*\/\s+title: string;/u);
+  assert.match(declaredTypes, /type SelectionPart = SelectionPresentation/u);
   assert.match(declaredTypes, /type: "selection_response"/u);
   assert.match(declaredTypes, /selected_values: string\[\]/u);
 
@@ -421,7 +453,7 @@ const validateOpenAPI = () => {
     ["EC8A3C", "C85F1C"], ["E0567A", "AD2A52"], ["D05FC6", "93217E"],
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
-  assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  assert.equal(document.components.schemas.ContactCardItem.properties.id.format, "uuid");
   for (const name of [
     "ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest",
     "SetContactCardRequest", "ContactLookup",
@@ -433,49 +465,19 @@ const validateOpenAPI = () => {
     assert.deepEqual(description.type, ["string", "null"]);
     assert.equal(description.maxLength, 2000);
   }
-  // /v1/me is the agent's own: GET reads its owner, PATCH sets only
-  // accepts_tasks. A person's message_requests_from stays out of the contract.
-  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get", "patch"]);
-  const meBody = document.paths["/v1/me"].patch.requestBody.content["application/json"].schema;
-  assert.equal(meBody.additionalProperties, false);
-  assert.deepEqual(meBody.required, ["accepts_tasks"]);
-  assert.deepEqual(Object.keys(meBody.properties), ["accepts_tasks"]);
-  assert.match(declaredTypes, /accepts_tasks: boolean/u);
-  // Server 5c5ba4df: each member agent's own switch for its community's messages.
-  const membership = document.components.schemas.CommunityMembership;
-  assert.ok(membership.required.includes("lets_members_message"));
-  assert.equal(document.components.schemas.CommunitySummary, undefined);
-  const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
-  assert.equal(membershipPatch.operationId, "updateCommunityMembership");
-  assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
-  // The community feed is removed (Server 3972ba8a, PR 416): no posts,
-  // comments, votes, post search or notifications bell. lets_members_message
-  // is the one switch left on a membership.
-  assert.equal(membership.properties.notifications, undefined);
-  const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
-  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message"]);
-  assert.deepEqual(membershipBody.required, ["lets_members_message"]);
-  assert.match(declaredTypes, /lets_members_message: boolean/u);
-  const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
-  assert.doesNotMatch(membershipType, /notifications/u, "CommunityMembership must not declare notifications");
-  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /^\/v1\/communities\/\{handle\}\/posts/u);
-  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^Community(Post|Comment|Author)/u);
-  assert.doesNotMatch(declaredTypes, /\bCommunity(Post|Comment|Author)\w*|community\.(post|comment)\.created|contributor_count/u);
-  // Server 6645d5f8 (PR 407): an agent joins and leaves a community by
-  // itself, and each membership carries the owner's rules and links.
-  assert.ok(membership.required.includes("rules") && membership.required.includes("links"));
-  assert.match(membershipType, /\n\s+rules: CommunityRule\[\];/u, "CommunityMembership must declare rules");
-  assert.match(membershipType, /\n\s+links: CommunityLink\[\];/u, "CommunityMembership must declare links");
-  const join = document.paths["/v1/communities/{handle}/join"].post;
-  assert.equal(join.operationId, "joinCommunity");
-  assert.deepEqual(join.security, [{ BearerAuth: [] }]);
-  assert.equal(join.requestBody.required, false);
-  assert.deepEqual(Object.keys(join.requestBody.content["application/json"].schema.properties), ["invite_code"]);
-  assert.match(declaredTypes, /export interface CommunityJoinParams \{[\s\S]*?\n\s+invite_code\?: string;\n\}/u);
-  const leave = document.paths["/v1/communities/{handle}/leave"].post;
-  assert.equal(leave.operationId, "leaveCommunity");
-  assert.equal(leave.requestBody, undefined);
-  assert.equal(leave.responses["204"].content, undefined);
+  // /v1/me is the agent's own and read-only: GET reads its owner. A
+  // person's message_requests_from stays out of the contract.
+  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get"]);
+  // A2A and tasks are removed (Server PR 462, owner ruling 2026-09-30): no
+  // task path, schema or event, no a2a field, and no declared type for them.
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /\/v1\/tasks/u);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^(A2a|Task)/u);
+  assert.doesNotMatch(declaredTypes, /\bA2a|accepts_tasks|"task\.|\bTask[A-Z]|MessageReceivedA2a/u);
+  // Communities are removed (Server add9a085, owner decision 2026-09-30),
+  // after their feed (3972ba8a): no path, schema, event or declared type.
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /communit/iu);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /communit/iu);
+  assert.doesNotMatch(declaredTypes, /\bCommunit|lets_members_message|community\.|contributor_count/u);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
@@ -486,14 +488,9 @@ const validateOpenAPI = () => {
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
-      // The public directory listing is deliberately unauthenticated on the
-      // Server; this SDK carries no client for it yet, so it is not held to
-      // the agent-token rule that every SDK operation satisfies.
       if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
-      // A community's page is public (communities.ts isPublicCommunityPath):
-      // the SDK reads it with the agent's token, which the Server ignores.
-      if (method === "get" && path === "/v1/communities/{handle}") {
-        assert.deepEqual(operation.security, [], "a community's page needs no credential");
+      if (method === "get" && path === "/v1/directory") {
+        assert.deepEqual(operation.security, [], "the public directory needs no credential");
         continue;
       }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
@@ -516,14 +513,19 @@ const validateOpenAPI = () => {
   assert.equal(lookup.post.operationId, "lookupContact");
   assert.equal(
     lookup.post.description,
-    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
+    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send id instead to look one up by its Contact id, as a shared Contact Card opens its agent (the card's handle may since have changed). Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
   );
-  // The lookup body is one of two closed shapes: the original handle lookup,
-  // unchanged, or the task search the Server added with the agent directory.
+  // The lookup body is one of three closed shapes: the original handle
+  // lookup, unchanged; a Contact id, which a shared Contact Card opens by; or
+  // the task search the Server added with the agent directory.
   const lookupBody = lookup.post.requestBody.content["application/json"].schema;
   assert.equal(lookupBody.properties, undefined);
-  assert.equal(lookupBody.oneOf.length, 2);
-  const [lookupByHandle, lookupByTask] = lookupBody.oneOf;
+  assert.equal(lookupBody.oneOf.length, 3);
+  const [lookupByHandle, lookupByID, lookupByTask] = lookupBody.oneOf;
+  assert.deepEqual(lookupByID.required, ["id"]);
+  assert.deepEqual(Object.keys(lookupByID.properties), ["id"]);
+  assert.equal(lookupByID.additionalProperties, false);
+  assert.equal(lookupByID.properties.id.format, "uuid");
   assert.deepEqual(lookupByHandle.required, ["handle"]);
   assert.deepEqual(Object.keys(lookupByHandle.properties), ["handle"]);
   assert.equal(lookupByHandle.additionalProperties, false);
@@ -565,18 +567,21 @@ const validateOpenAPI = () => {
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
     // Server 00093564: handle lookups say whether the caller may message now.
     "can_message",
+    // Server 461: a person's IANA time zone.
+    "timezone",
+    // Server 468: a person's age range, then an agent's age rating.
+    "age_range",
+    "age_rating",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
   assert.equal("about" in contactLookup.properties, false);
-  // Server 414: Relay takes no fee on payments. The business receives the
-  // full amount, less Stripe's own processing fees.
-  assert.equal(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"), false);
-  assert.equal("application_fee_amount" in document.components.schemas.PaymentRequest.properties, false);
-  assert.doesNotMatch(declaredTypes, /application_fee/u);
-  assert.doesNotMatch(document.paths["/v1/payment_requests"].post.description, /Relay takes \d+%|application fee/u);
+  assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
+  assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
+  assert.match(declaredTypes, /application_fee_amount: number/u);
+  assert.match(document.paths["/v1/payment_requests"].post.description, /Relay takes a 5% fee/u);
   assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,
@@ -812,12 +817,61 @@ const validateOpenAPI = () => {
       "verified",
       // Server 972cde2e: an agent's handle names its owner.
       "owner",
+      // Server 461: a person's handle names their IANA time zone.
+      "timezone",
+      // Server 468: and their age range.
+      "age_range",
       "is_contact",
       "activity_version",
       "activity",
     ],
   );
   assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
+  // A person's time zone (Server 461) rides every person object the SDK types.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}timezone\?: string \| null;/u, `${name} must type timezone`);
+  }
+  // The contract requires it on a contact event's person: required, nullable.
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}timezone: string \| null;/u,
+    "ContactEventContact must require timezone",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}timezone\?: string \| null;[^}]*\n\};/u, "HandleOwner user must type timezone");
+  assert.match(declaredTypes, /export type TypingContact = SystemEventParty;/u);
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson",
+  ]) {
+    const timezone = document.components.schemas[name].properties.timezone;
+    assert.deepEqual(timezone.type, ["string", "null"], `${name}.timezone`);
+    assert.equal(timezone.maxLength, 64);
+  }
+  // A person's age range (Server 468) rides beside the time zone on every
+  // person object the SDK types; an agent's lookup names its age rating.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}age_range\?: AgeRange \| null;/u, `${name} must type age_range`);
+  }
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}age_range: AgeRange \| null;/u,
+    "ContactEventContact must require age_range",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}age_range\?: AgeRange \| null;\n\};/u, "HandleOwner user must type age_range");
+  assert.match(declaredTypes, /export type AgeRange = "under_13" \| "13_15" \| "16_17" \| "18_plus";/u);
+  assert.match(declaredTypes, /export type AgentAgeRating = "everyone" \| "18_plus";/u);
+  assert.match(declaredTypes, /\n {4}age_rating\?: AgentAgeRating;/u);
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson",
+  ]) {
+    const ageRange = document.components.schemas[name].properties.age_range;
+    assert.deepEqual(ageRange.type, ["string", "null"], `${name}.age_range`);
+    assert.deepEqual(ageRange.enum, ["under_13", "13_15", "16_17", "18_plus", null], `${name}.age_range`);
+  }
+  assert.deepEqual(document.components.schemas.AgentAgeRating.enum, ["everyone", "18_plus"]);
   const activityPath = document.paths["/v1/chats/{chatId}/activity"];
   assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
   assert.equal(activityPath.get.operationId, "getActivity");
@@ -954,7 +1008,7 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name"],
+    ["id", "handle", "display_name", "timezone", "age_range"],
   );
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post

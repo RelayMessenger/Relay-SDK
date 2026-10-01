@@ -71,6 +71,12 @@ export interface WebSocketRunOptions {
   maxReconnectDelayMs?: number;
   random?: () => number;
   /**
+   * Must be idempotent: deduplicate by `event_id`. Relay delivers an event
+   * again after a failed handler or a dropped connection, and when a handler
+   * outlives its dropped connection by 60 seconds the next connection gets
+   * the event while that first call may still run. Its result is then never
+   * acknowledged.
+   *
    * In default consuming mode, commit to a durable inbox before resolving.
    * Resolution advances only the transport checkpoint, not Delivered or Read.
    * With observe:true, this is a notification and never authorizes an ACK.
@@ -88,7 +94,12 @@ export interface WebSocketRunOptions {
    * Connection failures before each reconnect, and a
    * `RelayUnknownEventTypeError` the first time an event type this release
    * does not know arrives. Such events are skipped and acknowledged; upgrade
-   * the SDK to receive them.
+   * the SDK to receive them. Without `onError`, each is written with
+   * `console.error`.
+   *
+   * When `onEvent` throws, the connection closes and the event comes back on
+   * the next one, after a delay that doubles from `minReconnectDelayMs` to
+   * `maxReconnectDelayMs` until an event is acknowledged again.
    */
   onError?(error: unknown): void;
 }
@@ -160,6 +171,14 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "full_sync_mismatch",
 ]);
 const HEARTBEAT_PONG_TIMEOUT_MS = 60_000;
+/**
+ * How long a dropped connection waits for the handler still running on it
+ * before the next connection opens. Waiting keeps one event from running
+ * twice at once; the bound keeps a handler that never returns from stopping
+ * delivery for good. Past it, Relay sends the event again while the old call
+ * may still run, which handlers already dedupe by event id.
+ */
+const HANDLER_DRAIN_TIMEOUT_MS = 60_000;
 /**
  * The exact text frame Relay answers without waking the Agent's Durable
  * Object. It must stay byte-identical to the server's configured
@@ -355,7 +374,12 @@ class WebSocketStoppedError extends Error {
 class DurableApplicationError extends Error {
   readonly closeCode = CLIENT_CLOSE_DURABLE_ACCEPTANCE;
 
-  constructor(operation: "event" | "FULL sync", cause: unknown) {
+  constructor(
+    operation: "event" | "FULL sync",
+    cause: unknown,
+    /** The event's sequence, named in the close reason so Relay records the failure against it. */
+    readonly sequence?: string,
+  ) {
     super(
       `Relay WebSocket durable ${operation} application failed: ${
         cause instanceof Error ? cause.message : String(cause)
@@ -438,8 +462,38 @@ const deriveWebSocketURL = (baseURL: string, observe = false): string => {
   url.pathname = "/v1/websocket";
   url.search = "";
   if (observe) url.searchParams.set("observe", "true");
+  // Relay sends a connection only the event types it names, and every type,
+  // including ones added later, when it names none. Naming every type this
+  // release knows keeps a newer type it cannot decode from being sent to it.
+  for (const type of RELAY_WEBHOOK_EVENT_TYPES) {
+    url.searchParams.append("subscribed_events", type);
+  }
   url.hash = "";
   return url.toString();
+};
+
+/**
+ * The answer to this client's own heartbeat, read as it arrives rather than
+ * behind the event being handled: the heartbeat proves the connection, not the
+ * handler, so a long handler keeps its connection and the events Relay sent on
+ * it (the SQS visibility-timeout extension; REL-428). Anything else, and a
+ * frame that is not text yet (a Blob), goes through the ordered chain.
+ */
+const isHeartbeatAnswer = (data: unknown): boolean => {
+  const raw = typeof data === "string"
+    ? data
+    : data instanceof ArrayBuffer || ArrayBuffer.isView(data)
+      ? new TextDecoder().decode(data)
+      : undefined;
+  if (raw === undefined) return false;
+  try {
+    const frame = JSON.parse(raw) as unknown;
+    if (!isRecord(frame) || frame.type !== "pong") return false;
+    parsePong(frame);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const runConnection = (
@@ -449,6 +503,7 @@ const runConnection = (
   Constructor: WebSocketConstructor,
   onReady: (frame: WebSocketReadyFrame & { observational?: true }) => void,
   onUnknownEvent: (eventType: string, sequence: string) => void,
+  onAcknowledged: () => void,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = new Constructor(url, {
@@ -463,8 +518,14 @@ const runConnection = (
     let fullSyncThrough: bigint | null | undefined;
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     let lastPongAt = 0;
+    // Set when this client drops the connection itself; the run ends with it
+    // once the handler that is still running returns.
+    let dropped: RetryableWebSocketError | undefined;
+    // Set on every way the connection ends: a peer close, a socket error, an
+    // abort, or this client's own drop. No buffered event runs after it.
+    let gone = false;
 
-    const finish = (error?: unknown): void => {
+    const finish = (error: unknown = dropped): void => {
       if (settled) return;
       settled = true;
       if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
@@ -478,8 +539,18 @@ const runConnection = (
       else reject(error);
     };
     const stopReceiving = (): void => {
+      gone = true;
       socket.removeEventListener("message", onMessage);
     };
+    /** The running handler's end, or HANDLER_DRAIN_TIMEOUT_MS, whichever is first. */
+    const drained = (): Promise<void> => new Promise((resolveDrain) => {
+      const timer = setTimeout(resolveDrain, HANDLER_DRAIN_TIMEOUT_MS);
+      const done = (): void => {
+        clearTimeout(timer);
+        resolveDrain();
+      };
+      chain.then(done, done);
+    });
     const send = (frame: unknown): void => {
       try {
         socket.send(JSON.stringify(frame));
@@ -491,12 +562,21 @@ const runConnection = (
         );
       }
     };
+    /**
+     * The next connection is opened only after the handler still running on
+     * this one returns. Relay sends that connection every event not yet
+     * acknowledged, so opening it sooner would run the same event twice at
+     * the same time (REL-428).
+     */
     const closeForRetry = (error: RetryableWebSocketError): void => {
       stopReceiving();
+      if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+      dropped ??= error;
       try {
         socket.close(error.closeCode, "Relay requested reconnect");
       } finally {
-        finish(error);
+        void drained().then(() => finish(error));
       }
     };
     /**
@@ -554,8 +634,14 @@ const runConnection = (
       });
     };
     const onMessage = (message: { data: unknown }): void => {
+      if (isHeartbeatAnswer(message.data)) {
+        lastPongAt = Date.now();
+        return;
+      }
       chain = chain.then(async () => {
-        if (settled || options.signal?.aborted) return;
+        // A dropped connection runs none of the events still buffered on it:
+        // Relay sends them again on the next one.
+        if (settled || gone || options.signal?.aborted) return;
         let frame: unknown;
         try {
           frame = JSON.parse(await text(message.data)) as unknown;
@@ -666,13 +752,14 @@ const runConnection = (
           } catch (cause) {
             throw new DurableApplicationError("FULL sync", cause);
           }
-          if (options.signal?.aborted) return;
+          if (options.signal?.aborted || gone || settled) return;
           send({
             type: "full_sync_complete",
             through_sequence: fullSync.through_sequence,
           });
           acceptedThrough = fullSyncThrough;
           fullSyncThrough = null;
+          onAcknowledged();
           return;
         }
         if (fullSyncThrough !== null) {
@@ -699,7 +786,7 @@ const runConnection = (
           try {
             await options.onEvent(event.event, { sequence: event.sequence });
           } catch (cause) {
-            throw new DurableApplicationError("event", cause);
+            throw new DurableApplicationError("event", cause, event.sequence);
           }
         } else {
           // Skipped, then acknowledged below exactly like a handled event.
@@ -713,12 +800,15 @@ const runConnection = (
         if (sequence === acceptedThrough + 1n) {
           acceptedThrough = sequence;
         }
-        if (options.signal?.aborted) return;
+        if (options.signal?.aborted || gone || settled) return;
         send({
           type: "ack",
           through_sequence: acceptedThrough.toString(),
         });
+        onAcknowledged();
       }).catch((error) => {
+        // A handler that outlived its connection's drain: that run is over.
+        if (settled) return;
         stopReceiving();
         socket.close(
           error instanceof WebSocketStoppedError
@@ -734,14 +824,16 @@ const runConnection = (
               ? "protocol error"
               : error instanceof RetryableWebSocketError
                 ? "Relay requested reconnect"
-                : "durable application failed",
+                : error instanceof DurableApplicationError && error.sequence !== undefined
+                  ? `durable application failed at sequence ${error.sequence}`
+                  : "durable application failed",
         );
         finish(error);
       });
     };
     const onClose = (event: { code?: number; reason?: string }): void => {
       stopReceiving();
-      void chain.then(() => {
+      void drained().then(() => {
         if (options.signal?.aborted) {
           finish();
           return;
@@ -782,16 +874,16 @@ const runConnection = (
           return;
         }
         finish();
-      }, finish);
+      });
     };
     const onSocketError = (): void => {
       stopReceiving();
       if (options.signal?.aborted) {
-        void chain.then(() => finish(), finish);
+        void drained().then(() => finish());
         return;
       }
       const error = new Error("Relay WebSocket connection failed.");
-      void chain.then(() => finish(error), finish);
+      void drained().then(() => finish(error));
     };
     const onAbort = (): void => {
       stopReceiving();
@@ -837,14 +929,24 @@ export const runWebSocket = async (
   }
   const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
+  // A failure nobody is told about is a failure nobody fixes: without onError,
+  // report to the console (REL-427).
+  const report = options.onError ?? ((error: unknown): void => {
+    console.error("[relay] WebSocket:", error);
+  });
   let attempt = 0;
+  // True from a handler failure until an event is acknowledged again. While
+  // it holds, a new connection's ready frame does not reset the backoff, so a
+  // handler that keeps failing is retried at 0.5, 1, 2 ... 30 s, not twice a
+  // second (REL-427).
+  let failing = false;
   // Each event type this release does not know is reported once per run,
   // however many events of it arrive, so onError is not flooded.
   const reportedUnknown = new Set<string>();
   const onUnknownEvent = (eventType: string, sequence: string): void => {
     if (reportedUnknown.has(eventType)) return;
     reportedUnknown.add(eventType);
-    options.onError?.(new RelayUnknownEventTypeError(eventType, sequence));
+    report(new RelayUnknownEventTypeError(eventType, sequence));
   };
 
   while (!options.signal?.aborted) {
@@ -856,15 +958,20 @@ export const runWebSocket = async (
         options,
         Constructor,
         frame => {
-          attempt = 0;
+          if (!failing) attempt = 0;
           options.onConnectionState?.("ready");
           options.onReady?.(frame);
         },
         onUnknownEvent,
+        () => {
+          failing = false;
+          attempt = 0;
+        },
       );
     } catch (error) {
       if (options.signal?.aborted) return;
-      options.onError?.(error);
+      report(error);
+      if (error instanceof DurableApplicationError) failing = true;
       if (
         error instanceof WebSocketStoppedError
         || error instanceof WebSocketProtocolError

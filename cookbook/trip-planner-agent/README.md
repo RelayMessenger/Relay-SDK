@@ -95,7 +95,7 @@ decide" rather than an invented price, address or opening time.
 ## Replace the model
 
 [`src/model.ts`](src/model.ts) is the only file that knows which model wrote
-the plan. It calls `claude-sonnet-5` with `output_config.format`, so the API
+the plan. It calls `claude-sonnet-5-5` with `output_config.format`, so the API
 returns the plan shape directly and there is no response parsing to repair.
 Implement `TripPlanner` against any other provider and nothing else changes.
 

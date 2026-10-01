@@ -16,11 +16,6 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "getMe"
   },
   {
-    "method": "PATCH",
-    "path": "/v1/me",
-    "operationId": "updateAgentMe"
-  },
-  {
     "method": "POST",
     "path": "/v1/chats",
     "operationId": "createChat"
@@ -187,23 +182,28 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
-    "path": "/v1/tasks",
-    "operationId": "listTasks"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/tasks/{taskId}/status",
-    "operationId": "updateTaskStatus"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/tasks/{taskId}/artifacts",
-    "operationId": "addTaskArtifact"
+    "path": "/v1/access",
+    "operationId": "listAgentAccess"
   },
   {
     "method": "GET",
-    "path": "/v1/access",
-    "operationId": "listAgentAccess"
+    "path": "/v1/oauth2_client",
+    "operationId": "getOAuth2Client"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/oauth2_client",
+    "operationId": "createOAuth2Client"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/oauth2_client",
+    "operationId": "updateOAuth2Client"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/oauth2_client/reset_secret",
+    "operationId": "resetOAuth2ClientSecret"
   },
   {
     "method": "PUT",
@@ -214,36 +214,6 @@ export const RELAY_V1_OPERATIONS = [
     "method": "DELETE",
     "path": "/v1/access/{handle}",
     "operationId": "removeAgentAccess"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities",
-    "operationId": "listCommunities"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities/{handle}",
-    "operationId": "getCommunity"
-  },
-  {
-    "method": "PATCH",
-    "path": "/v1/communities/{handle}",
-    "operationId": "updateCommunityMembership"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/join",
-    "operationId": "joinCommunity"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/leave",
-    "operationId": "leaveCommunity"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities/{handle}/members",
-    "operationId": "listCommunityMembers"
   },
   {
     "method": "GET",
@@ -279,6 +249,11 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/contacts/lookup",
     "operationId": "lookupContact"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/directory",
+    "operationId": "listDirectory"
   },
   {
     "method": "GET",
@@ -342,8 +317,4 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated",
 ] as const;

@@ -5,18 +5,24 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { isDeepStrictEqual } from 'node:util';
 import { WebSocketServer } from 'ws';
 const consumer = process.argv[2];
 const require = createRequire(join(consumer, 'package.json'));
-const { default: Relay } = await import(pathToFileURL(require.resolve('@relaymessenger/sdk')).href);
+const { default: Relay, RELAY_WEBHOOK_EVENT_TYPES } = await import(pathToFileURL(require.resolve('@relaymessenger/sdk')).href);
+// The SDK names every event type it knows with subscribed_events after observe=true (#397),
+// so the observer upgrade carries exactly that query, from the installed package's own list.
+assert.ok(Array.isArray(RELAY_WEBHOOK_EVENT_TYPES) && RELAY_WEBHOOK_EVENT_TYPES.length > 0, 'installed SDK must export RELAY_WEBHOOK_EVENT_TYPES');
+const expectedUpgrade = { pathname: '/v1/websocket', query: [['observe', 'true'], ...RELAY_WEBHOOK_EVENT_TYPES.map(type => ['subscribed_events', type])] };
+const upgrade = raw => { const url = new URL(raw, 'http://127.0.0.1'); return { pathname: url.pathname, query: [...url.searchParams] }; };
 const ready = { type: 'ready', connection_id: '01993d50-ef7b-7b37-886b-23fd80c7ec10', acked_through: '0', full_sync_required: false, full_sync_through: null, heartbeat_interval_ms: 30000, max_in_flight: 2 };
 const event = sequence => ({ type: 'event', sequence, event: { api_version: 'v1', webhook_version: '2026-08-30', event_type: 'message.received', event_id: '01993d50-ef7b-7b37-886b-23fd80c7ec11', created_at: '2026-09-08T00:00:00Z', trace_id: 'native-installed-observer', agent_id: '01993d50-d2a8-7fe2-8b76-9eaf04816377', data: {} } });
 const cases = [];
 for (const mode of ['confirmed', 'reconnect', 'missing-marker', 'false-marker', 'full-sync']) {
   const server = createServer(); const wss = new WebSocketServer({ server });
-  const frames = []; const sequences = []; let connections = 0; let fullSync = 0; let queryConfirmed = false; let authConfirmed = false;
+  const frames = []; const sequences = []; let connections = 0; let fullSync = 0; let queryConfirmed = false; let authConfirmed = false; const requestURLs = [];
   wss.on('connection', (socket, request) => {
-    connections++; queryConfirmed = request.url === '/v1/websocket?observe=true'; authConfirmed = request.headers.authorization === 'Bearer owned-offline-observer';
+    connections++; requestURLs.push(request.url); queryConfirmed = requestURLs.every(url => isDeepStrictEqual(upgrade(url), expectedUpgrade)); authConfirmed = request.headers.authorization === 'Bearer owned-offline-observer';
     const connection = connections;
     socket.on('message', raw => {
       frames.push(JSON.parse(raw.toString()));
@@ -50,7 +56,7 @@ for (const mode of ['confirmed', 'reconnect', 'missing-marker', 'false-marker', 
       assert.deepEqual(sequences, []); assert.deepEqual(frames, []);
     }
     assert.equal(timedOut, false); assert.equal(connections, mode === 'reconnect' ? 2 : 1); assert.equal(fullSync, 0);
-    assert.equal(queryConfirmed, true); assert.equal(authConfirmed, true);
+    assert.deepEqual(requestURLs.map(upgrade), requestURLs.map(() => expectedUpgrade)); assert.equal(queryConfirmed, true); assert.equal(authConfirmed, true);
     cases.push({ mode, passed: true, connections, sequences, frames, fullSync, queryConfirmed, authConfirmed });
   } finally {
     clearTimeout(deadline); control.abort(); await run;

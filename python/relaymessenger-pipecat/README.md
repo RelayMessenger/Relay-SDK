@@ -51,7 +51,7 @@ async def answer(call_id: str) -> None:
 ```
 
 Joining answers a ringing Call, so start the pipeline within the Call's
-ten-second ring. The pipeline starts once the agent has joined the Call's
+32-second ring. The pipeline starts once the agent has joined the Call's
 room, while its media is still connecting, so the bot can start its greeting
 on `on_call_state_updated` with `in-progress`; `on_connected` fires when
 media connects. The bot's audio is held until the caller is receiving it,
