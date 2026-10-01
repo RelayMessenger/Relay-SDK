@@ -19,7 +19,7 @@ Call the agent from Relay on your phone.
 | Setting | Default |
 | --- | --- |
 | Speech to text | `ElevenLabsRealtimeSTTService` (Scribe) |
-| LLM | `OpenAIResponsesHttpLLMService` on xAI's Responses API (`https://api.x.ai/v1`), model `grok-4.7` (`XAI_MODEL`), reasoning effort `low` |
+| LLM | `OpenAIResponsesHttpLLMService` on xAI's Responses API (`https://api.x.ai/v1`), model `grok-4.20-0309-non-reasoning` (`XAI_MODEL`) |
 | Voice | `ElevenLabsTTSService`, model `eleven_flash_v2_5` |
 | Voice ID | `SOYHLrjzK2X1ezoPC6cr` (`ELEVENLABS_VOICE_ID`) |
 | Voice settings | stability 0.3, similarity boost 0.75, style 0, speaker boost on, speed 1.2 |
@@ -28,3 +28,8 @@ The default voice is Diego's: "Harry", the highest-pitched male premade voice,
 which every ElevenLabs plan can use through the API. A voice from the Voice Library or Voice Design needs a paid
 ElevenLabs plan. `AGENT_PERSONA` replaces the system prompt; `RELAY_BASE_URL`
 selects another Relay API origin, such as `https://api.staging.relayapp.im`.
+
+The call uses `grok-4.20-0309-non-reasoning` because a spoken reply must start
+in under a second: it answered in 0.4 to 0.6 s, and `grok-4.7` took 1.7 to
+3.3 s even at its lowest reasoning effort. The Grok Imagine chat agent keeps
+`grok-4.7`, where a few seconds do not matter. `XAI_MODEL` overrides either.

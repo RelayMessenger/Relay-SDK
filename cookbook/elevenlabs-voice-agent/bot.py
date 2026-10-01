@@ -29,7 +29,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesReasoningConfig
+from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.workers.runner import WorkerRunner
 
 from relaymessenger_pipecat import RelayParams, RelayTransport
@@ -39,7 +39,9 @@ BASE_URL = os.environ.get("RELAY_BASE_URL", "https://api.relayapp.im")
 # plan can use through the API.
 # Set ELEVENLABS_VOICE_ID to use another voice.
 VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "SOYHLrjzK2X1ezoPC6cr")
-GROK_MODEL = os.environ.get("XAI_MODEL", "grok-4.7")
+# A call needs a reply in under a second: the non-reasoning model answered in
+# 0.4-0.6 s, grok-4.7 in 1.7-3.3 s even at its lowest reasoning effort.
+GROK_MODEL = os.environ.get("XAI_MODEL", "grok-4.20-0309-non-reasoning")
 # xAI serves the Responses API at this origin; Pipecat's Responses service speaks it.
 XAI_BASE_URL = "https://api.x.ai/v1"
 PERSONA = os.environ.get(
@@ -87,9 +89,6 @@ def build(token: str, call_id: str, xai_key: str, elevenlabs_key: str) -> tuple[
         settings=OpenAIResponsesHttpLLMService.Settings(
             model=GROK_MODEL,
             system_instruction=PERSONA,
-            # grok-4.7 reasons at "high" by default; "low" (its lowest documented
-            # effort) keeps a spoken answer quick.
-            reasoning=OpenAIResponsesReasoningConfig(effort="low"),
         ),
     )
     tts = ElevenLabsTTSService(
