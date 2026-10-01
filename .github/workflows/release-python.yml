@@ -3,19 +3,19 @@ name: Release the Python packages to PyPI
 # Publishes one of the three Python packages to PyPI under its directory's
 # name: python/relaymessenger (the SDK), python/relaymessenger-pipecat and
 # python/relaymessenger-livekit (which need the SDK on PyPI first, so publish
-# relaymessenger before either), with PyPI Trusted Publishing: GitHub's OIDC
-# token, no stored PyPI token.
-# The shape is the Python Packaging User Guide's, copied as written
-# (packaging.python.org, "Publishing package distribution releases using
-# GitHub Actions CI/CD workflows"): one job builds the dists and uploads them
-# as an artifact, and a separate job in the `pypi` environment, holding only
-# `id-token: write`, downloads them and runs pypa/gh-action-pypi-publish.
-# Building in the publishing job is unsupported by that guide.
-#
-# PyPI accepts each project's upload only from this file name, in this
-# repository, in the `pypi` environment, as registered on pypi.org once per
-# project (Your account -> Publishing -> pending publisher). Renaming this
-# file breaks publishing.
+# relaymessenger before either), with the account's PyPI API token. The token
+# lives in Infisical (project relay-yscy, env prod, path /ci/pypi, key
+# PYPI_API_TOKEN) and reaches the job over GitHub OIDC through the shared CI
+# identity, the org's CI pattern (Relay-Admin's deploy.yml); no PyPI token is
+# stored in GitHub. PyPI Trusted Publishing is not used: only relaymessenger
+# has a pending publisher, and the other two packages have none.
+# The shape is the Python Packaging User Guide's (packaging.python.org,
+# "Publishing package distribution releases using GitHub Actions CI/CD
+# workflows"): one job builds the dists and uploads them as an artifact, and
+# a separate job in the `pypi` environment downloads them, loads the token,
+# and runs pypa/gh-action-pypi-publish with it. Building in the publishing
+# job is unsupported by that guide. PEP 740 attestations need Trusted
+# Publishing, so they are off.
 #
 # Two ways in, and only one of them can publish:
 #   pull_request touching python/ or this file -> test, build, twine check
@@ -97,12 +97,26 @@ jobs:
       name: pypi
       url: https://pypi.org/p/${{ inputs.package }}
     permissions:
-      id-token: write # mandatory for Trusted Publishing
+      id-token: write # the OIDC token Infisical exchanges for the PyPI token
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         name: Download all the dists
         with:
           name: python-package-distributions-${{ inputs.package }}
           path: dist/
+      - uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+        name: Load the PyPI API token from Infisical
+        with:
+          method: oidc
+          identity-id: 35c5afed-649f-4b2d-8e73-cf70338b3994
+          project-slug: relay-yscy
+          env-slug: prod
+          secret-path: /ci/pypi
+      - name: Refuse to publish without a token
+        run: test -n "$PYPI_API_TOKEN"
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1 (v1.14.2)
         name: Publish the distribution packages to PyPI
+        with:
+          password: ${{ env.PYPI_API_TOKEN }}
+          attestations: false
+          print-hash: true
