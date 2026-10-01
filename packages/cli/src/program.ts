@@ -31,11 +31,15 @@ import Relay, {
   type ChatUpdateParams,
   type ContactCardCreateParams,
   type ContactCardUpdateParams,
+  type ContactLookupParams,
   type DirectorySearchParams,
   type MessageAddReactionParams,
-  type MessageContent,
   type MessageCreateParams,
   type MessageSendParams,
+  type PaymentCategory,
+  type PaymentMode,
+  type PaymentRequestCreateParams,
+  type PaymentStatus,
   type RelayWebhookEvent,
   type SupportedContentType,
   type WebhookEventType,
@@ -70,6 +74,7 @@ import { AGENT_MODES, CLAUDE_CODE_HINT, DOCS_LLMS_URL, agentDetectedLines, agent
 import { supportedAgentsLine } from "./coding-agents.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
+import { messageContent, messagePartOptions, type MessagePartOptions } from "./message-parts.js";
 import { CliError } from "./error-codes.js";
 import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
@@ -198,17 +203,8 @@ const events = (values: string[]): WebhookEventType[] => {
 const globals = (command: Command): GlobalOptions =>
   command.optsWithGlobals<GlobalOptions>();
 
-const textContent = (
-  text: string,
-  idempotencyKey?: string,
-  silent?: boolean,
-): MessageContent => ({
-  parts: [{ type: "text", value: nonempty("Message text", text) }],
-  ...(idempotencyKey
-    ? { idempotency_key: nonempty("Idempotency key", idempotencyKey) }
-    : {}),
-  ...(silent ? { silent: true } : {}),
-});
+const idempotencyKeyOrNew = (key: string | undefined): string =>
+  key === undefined ? crypto.randomUUID() : nonempty("Idempotency key", key);
 
 async function readImageRecipe(path: string): Promise<AgentImageRecipe> {
   try {
@@ -1170,22 +1166,21 @@ again with --number and --code.
     .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.retrieve(chatID)));
-  chats
+  messagePartOptions(chats
     .command("create")
     .description("create a chat with up to 7 participants")
-    .requiredOption("--from <handle>", "sender handle", handle)
+    .requiredOption("--from <handle>", "sender handle", handle))
     .requiredOption("--to <handles...>", "up to six recipients, repeated or comma-separated", recipients)
-    .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "duplicate-send prevention key")
     .action(async (
-      options: { from: string; to: string[]; text: string; idempotencyKey: string },
+      options: MessagePartOptions & { from: string; to: string[]; idempotencyKey: string },
       command: Command,
     ) => {
       if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         from: options.from,
         to: options.to,
-        message: textContent(options.text, options.idempotencyKey),
+        message: messageContent(options, nonempty("Idempotency key", options.idempotencyKey)),
       } satisfies ChatCreateParams;
       output(await (await clientFor(command)).chats.create(body));
     });
@@ -1345,6 +1340,20 @@ again with --number and --code.
       ),
     ));
 
+  const location = chats.command("location").description("ask for and read a person's live location");
+  location
+    .command("request")
+    .description("ask the person in a chat to share location")
+    .argument("<chat-id>", "the chat ID")
+    .action(async (chatID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).chats.location.request(chatID)));
+  location
+    .command("get")
+    .description("read the location shared in a chat")
+    .argument("<chat-id>", "the chat ID")
+    .action(async (chatID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).chats.location.retrieve(chatID)));
+
   const chatMessages = chats.command("messages").description("read and send messages in a chat");
   chatMessages
     .command("list")
@@ -1373,20 +1382,19 @@ again with --number and --code.
       );
       output({ messages: page.messages, next_cursor: page.nextCursor });
     });
-  chatMessages
+  messagePartOptions(chatMessages
     .command("send")
-    .description("send a text message to a chat")
-    .argument("<chat-id>", "the chat ID")
-    .requiredOption("--text <text>", "the text to send")
+    .description("send a message to a chat")
+    .argument("<chat-id>", "the chat ID"))
     .option("--idempotency-key <key>", "duplicate-send prevention key")
     .option("--silent", "delivery without a banner or sound")
     .action(async (
       chatID: string,
-      options: { text: string; idempotencyKey?: string; silent?: boolean },
+      options: MessagePartOptions & { idempotencyKey?: string; silent?: boolean },
       command: Command,
     ) => {
       const body = {
-        message: textContent(options.text, options.idempotencyKey ?? crypto.randomUUID(), options.silent),
+        message: messageContent(options, idempotencyKeyOrNew(options.idempotencyKey), options.silent),
       } satisfies MessageSendParams;
       output(await (await clientFor(command)).chats.messages.send(chatID, body));
     });
@@ -1417,21 +1425,20 @@ again with --number and --code.
     });
 
   const messages = program.command("messages", { hidden: true }).description("read, send and react to messages").helpGroup(HELP_GROUPS.everythingElse);
-  messages
+  messagePartOptions(messages
     .command("send")
     .description("send a message to the handles you name")
-    .requiredOption("--to <handles...>", "up to six recipients, repeated or comma-separated", recipients)
-    .requiredOption("--text <text>", "the text to send")
+    .requiredOption("--to <handles...>", "up to six recipients, repeated or comma-separated", recipients))
     .option("--idempotency-key <key>", "duplicate-send prevention key")
     .option("--silent", "delivery without a banner or sound")
     .action(async (
-      options: { to: string[]; text: string; idempotencyKey?: string; silent?: boolean },
+      options: MessagePartOptions & { to: string[]; idempotencyKey?: string; silent?: boolean },
       command: Command,
     ) => {
       if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         to: options.to,
-        message: textContent(options.text, options.idempotencyKey ?? crypto.randomUUID(), options.silent),
+        message: messageContent(options, idempotencyKeyOrNew(options.idempotencyKey), options.silent),
       } satisfies MessageCreateParams;
       output(await (await clientFor(command)).messages.create(body));
     });
@@ -1591,6 +1598,135 @@ again with --number and --code.
       await (await clientFor(command)).attachments.delete(attachmentID);
       output(voidResult);
     });
+
+  const payments = program.command("payment-requests", { hidden: true }).description("ask people to pay and track the requests").helpGroup(HELP_GROUPS.everythingElse);
+  payments
+    .command("create")
+    .description("create a payment request to send as a card")
+    .requiredOption("--description <text>", "the card's title, 1 to 32 characters")
+    .addOption(new Option("--category <category>", "what is sold").choices(["physical_goods", "digital_goods", "donation"]).makeOptionMandatory())
+    .option("--amount <number>", "the price in the currency's minor units", positiveInteger)
+    .option("--currency <code>", "a 3-letter ISO 4217 code")
+    .addOption(new Option("--mode <mode>", "payment or subscription").choices(["payment", "subscription"]))
+    .option("--price-id <id>", "a recurring Stripe price, for subscriptions")
+    .option("--quantity <number>", "units of the price", positiveInteger)
+    .option("--customer-id <id>", "an existing Stripe customer")
+    .option("--image-url <url>", "an https product picture")
+    .option("--coupon <id>", "a Stripe coupon to apply")
+    .option("--promotion-code <id>", "a Stripe promotion code ID")
+    .option("--discount-label <text>", "your name for the discount")
+    .option("--metadata <key=value>", "your own data, repeated", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--idempotency-key <key>", "duplicate-request prevention key")
+    .action(async (
+      options: {
+        description: string; category: PaymentCategory; amount?: number; currency?: string; mode?: PaymentMode;
+        priceId?: string; quantity?: number; customerId?: string; imageUrl?: string;
+        coupon?: string; promotionCode?: string; discountLabel?: string; metadata?: string[]; idempotencyKey?: string;
+      },
+      command: Command,
+    ) => {
+      const metadata: Record<string, string> = {};
+      for (const entry of options.metadata ?? []) {
+        const at = entry.indexOf("=");
+        if (at < 1) throw new Error("--metadata must be key=value.");
+        metadata[entry.slice(0, at)] = entry.slice(at + 1);
+      }
+      const discount = {
+        ...(options.coupon === undefined ? {} : { coupon: options.coupon }),
+        ...(options.promotionCode === undefined ? {} : { promotion_code: options.promotionCode }),
+        ...(options.discountLabel === undefined ? {} : { label: options.discountLabel }),
+      };
+      const body = {
+        description: options.description,
+        category: options.category,
+        ...(options.amount === undefined ? {} : { amount: options.amount }),
+        ...(options.currency === undefined ? {} : { currency: options.currency }),
+        ...(options.mode === undefined ? {} : { mode: options.mode }),
+        ...(options.priceId === undefined ? {} : { price_id: options.priceId }),
+        ...(options.quantity === undefined ? {} : { quantity: options.quantity }),
+        ...(options.customerId === undefined ? {} : { customer_id: options.customerId }),
+        ...(options.imageUrl === undefined ? {} : { image_url: options.imageUrl }),
+        ...(Object.keys(discount).length ? { discount } : {}),
+        ...(Object.keys(metadata).length ? { metadata } : {}),
+      } satisfies PaymentRequestCreateParams;
+      output(await (await clientFor(command)).paymentRequests.create(body, { idempotencyKey: idempotencyKeyOrNew(options.idempotencyKey) }));
+    });
+  payments
+    .command("list")
+    .description("list this agent's payment requests, newest first")
+    .addOption(new Option("--status <status>", "only requests in this state").choices(["requested", "succeeded", "canceled", "expired"]))
+    .option("--cursor <cursor>", "the cursor from the previous page")
+    .option("--limit <number>", "page size", positiveInteger)
+    .action(async (options: { status?: PaymentStatus; cursor?: string; limit?: number }, command: Command) =>
+      output(await (await clientFor(command)).paymentRequests.list(options)));
+  payments
+    .command("get")
+    .description("show one payment request")
+    .argument("<payment-request-id>", "the payment request ID")
+    .action(async (id: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).paymentRequests.retrieve(id)));
+  payments
+    .command("cancel")
+    .description("cancel a payment request nobody has paid")
+    .argument("<payment-request-id>", "the payment request ID")
+    .action(async (id: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).paymentRequests.cancel(id)));
+
+  const calls = program.command("calls", { hidden: true }).description("start, list and end calls").helpGroup(HELP_GROUPS.everythingElse);
+  calls
+    .command("create")
+    .description("call the person in a chat")
+    .argument("<chat-id>", "the chat ID")
+    .requiredOption("--to <handle>", "the person to call", handle)
+    .option("--idempotency-key <key>", "duplicate-call prevention key")
+    .action(async (chatID: string, options: { to: string; idempotencyKey?: string }, command: Command) =>
+      output(await (await clientFor(command)).calls.create(chatID, { to: [options.to] },
+        { idempotencyKey: idempotencyKeyOrNew(options.idempotencyKey) })));
+  calls
+    .command("list")
+    .description("list a chat's calls, one page at a time")
+    .argument("<chat-id>", "the chat ID")
+    .option("--cursor <cursor>", "the cursor from the previous page")
+    .option("--limit <number>", "page size", positiveInteger)
+    .action(async (chatID: string, options: { cursor?: string; limit?: number }, command: Command) =>
+      output(await (await clientFor(command)).calls.list(chatID, options)));
+  calls
+    .command("get")
+    .description("show one call")
+    .argument("<call-id>", "the call ID")
+    .action(async (callID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).calls.retrieve(callID)));
+  calls
+    .command("end")
+    .description("end a call")
+    .argument("<call-id>", "the call ID")
+    .action(async (callID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).calls.end(callID)));
+
+  const contacts = program.command("contacts", { hidden: true }).description("look up a person or agent").helpGroup(HELP_GROUPS.everythingElse);
+  contacts
+    .command("lookup")
+    .description("find a person or agent by handle or need")
+    .option("--handle <handle>", "the contact's handle", handle)
+    .option("--id <id>", "the contact's ID, such as a card's")
+    .option("--task <text>", "what you need done, in plain words")
+    .action(async (options: { handle?: string; id?: string; task?: string }, command: Command) => {
+      const given = [options.handle, options.id, options.task].filter((value) => value !== undefined);
+      if (given.length !== 1) throw new Error("Choose exactly one of --handle, --id or --task.");
+      const body: ContactLookupParams = options.handle !== undefined
+        ? { handle: options.handle }
+        : options.id !== undefined
+        ? { id: nonempty("ID", options.id) }
+        : { task: nonempty("Task", options.task!) };
+      output(await (await clientFor(command)).contacts.lookup(body));
+    });
+
+  program
+    .command("me", { hidden: true })
+    .description("show the agent this token signs in as")
+    .helpGroup(HELP_GROUPS.everythingElse)
+    .action(async (_options: object, command: Command) =>
+      output(await (await clientFor(command)).me.retrieve()));
 
   const blocked = program.command("blocked-handles", { hidden: true }).description("block, unblock and list handles").helpGroup(HELP_GROUPS.everythingElse);
   blocked
@@ -1910,10 +2046,15 @@ again with --number and --code.
     .argument("<chat-id>", "the chat ID")
     .option("--handle <handle>", "share this agent's card instead of yours",
       (value: string) => handle(value).toLowerCase())
-    .action(async (chatID: string, options: { handle?: string }, command: Command) => {
+    .option("--user-id <id>", "share this person's card instead of yours")
+    .action(async (chatID: string, options: { handle?: string; userId?: string }, command: Command) => {
+      if (options.handle !== undefined && options.userId !== undefined) {
+        throw new Error("Choose --handle or --user-id, not both.");
+      }
       const client = await clientFor(command);
-      if (options.handle === undefined) await client.chats.shareContactCard(chatID);
-      else await client.chats.shareContactCard(chatID, { handle: options.handle });
+      if (options.handle !== undefined) await client.chats.shareContactCard(chatID, { handle: options.handle });
+      else if (options.userId !== undefined) await client.chats.shareContactCard(chatID, { user_id: nonempty("User ID", options.userId) });
+      else await client.chats.shareContactCard(chatID);
       output(voidResult);
     });
 
