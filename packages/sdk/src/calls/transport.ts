@@ -1,5 +1,6 @@
 import type {
   CallRoom,
+  CallRoomRiveFrame,
   CallRoomCloseEvent,
   CallRoomEndedFrame,
   CallRoomErrorFrame,
@@ -19,6 +20,7 @@ import {
   type TrackPublishOptions,
 } from "./video.js";
 import type { RelayVideoFactory } from "./video.js";
+import { RIVE_CHANNEL, RIVE_CHANNEL_OPTIONS, RelayRive } from "./rive.js";
 
 export {
   LocalVideoTrack,
@@ -98,6 +100,22 @@ export interface RelayAudioSourceLike {
   waitForDrain?(): Promise<void>;
   /** Drop audio accepted but not yet written to RTP. */
   clear?(): void;
+  /**
+   * The RTP timestamp of the next packet to be written, in milliseconds since
+   * the track's first packet (48 kHz clock, silence included).
+   */
+  mediaTimeMs?(): number;
+}
+
+/** @internal */
+export interface RelayDataChannelLike {
+  readonly readyState: string;
+  onopen?: (() => void) | null | undefined;
+  onclose?: (() => void) | null | undefined;
+  /** W3C `MessageEvent` shape; werift passes `{ data }` with a string or Buffer. */
+  onmessage?: ((event: { data: unknown }) => void) | null | undefined;
+  send(data: string): void;
+  close(): void;
 }
 
 /** @internal */
@@ -149,6 +167,11 @@ export interface RelayPeerConnectionLike {
   setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void>;
   addEventListener(type: "icegatheringstatechange", listener: () => void): void;
   removeEventListener(type: "icegatheringstatechange", listener: () => void): void;
+  /** W3C `createDataChannel`; werift has it, the `wrtc` binding is not used for data. */
+  createDataChannel?(
+    label: string,
+    init: { negotiated: true; id: number; ordered: boolean; maxRetransmits: number },
+  ): RelayDataChannelLike;
   /** W3C `getStats()`; the report is Map-like (werift `buildStatsReport`, libwebrtc `RTCStatsReport`). */
   getStats?(): Promise<{ forEach(callback: (stat: Record<string, unknown>) => void): void }>;
   close(): void;
@@ -401,6 +424,8 @@ const STALL_AFTER_MS = 2_000;
  * 5 s timer is the trigger that fires in practice.
  */
 export const RESTART_CONNECT_TIMEOUT_MS = 5_000;
+/** How long `rive()` waits for the room to open the channel. */
+export const RIVE_OPEN_TIMEOUT_MS = 10_000;
 export const RESTART_DISCONNECTED_MS = 7_000;
 export const RESTART_INITIAL_DELAY_MS = 250;
 export const RESTART_BACKOFF_FACTOR = 1.1;
@@ -698,6 +723,11 @@ export class RelayCallTransport {
   #addTrackPending = false;
   #deferredOffer: CallRoomSubscriptionOfferFrame | undefined;
   #lastAnswerSdp: string | undefined;
+  /** The agent's Rive handle, once `rive()` was called; kept across restarts. */
+  #rive: RelayRive | undefined;
+  /** The `rive` channel on the current peer. */
+  #riveChannel: RelayDataChannelLike | undefined;
+  readonly #riveWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
 
   constructor(options: RelayCallTransportOptions) {
     if (!options.callId.trim()) throw new Error("callId is required.");
@@ -1005,6 +1035,107 @@ export class RelayCallTransport {
   }
 
   /**
+   * Where the next sample `writeAudio` accepts will sit on this agent's audio
+   * track, in milliseconds since the track's first RTP packet: the RTP time
+   * already sent plus everything queued. Read it just before `writeAudio` and
+   * add offsets inside that audio to time Rive messages (`at`). The track
+   * sends silence whenever nothing is queued, so the clock runs from connect
+   * and survives restarts. Audio held before the person receives this track
+   * starts later than this estimate, by the time the hold lasts.
+   */
+  audioTimeMs(): number {
+    const source = this.#audioSource;
+    if (!source?.mediaTimeMs) throw new RelayCallTransportError('This engine has no RTP audio clock; use the "werift" engine.');
+    return source.mediaTimeMs() + this.queuedAudioMs();
+  }
+
+  /**
+   * Open this agent's `rive` data channel and resolve with its handle: set
+   * View Model values, fire triggers and switch files on the Rive the phone
+   * draws, timed against this agent's audio, and hear what the phone writes
+   * back. The same handle is returned on every call. After a restart the
+   * transport asks for the channel again on the new session and replays the
+   * scene and the latest values. Requires `connect()` and the werift engine;
+   * rejects after `timeoutMs` when the room opens no channel.
+   */
+  async rive(options: { timeoutMs?: number } = {}): Promise<RelayRive> {
+    if (this.#closed || this.#ended) throw new RelayCallTransportError("Relay Call transport is closed.");
+    if (!this.#reportedConnected || !this.#peer) throw new RelayCallTransportError("Relay Call transport is not connected.");
+    if (!this.#peer.createDataChannel || !this.#audioSource?.mediaTimeMs) {
+      throw new RelayCallTransportError('This engine cannot open the rive channel; use the "werift" engine.');
+    }
+    this.#rive ??= new RelayRive({
+      send: (text) => {
+        const channel = this.#riveChannel;
+        if (channel?.readyState !== "open") return false;
+        try {
+          channel.send(text);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+    const rive = this.#rive;
+    if (this.#riveChannel?.readyState === "open") return rive;
+    // One request per wait: callers that overlap share it; one after a timeout asks again.
+    if (this.#riveWaiters.size === 0) this.#room.send({ type: RIVE_CHANNEL });
+    const timeoutMs = options.timeoutMs ?? RIVE_OPEN_TIMEOUT_MS;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#riveWaiters.delete(waiter);
+        reject(new RelayCallTransportError("Relay Call room opened no rive channel.", "rive_timeout"));
+      }, timeoutMs);
+      timer.unref?.();
+      const waiter = {
+        resolve: () => { clearTimeout(timer); this.#riveWaiters.delete(waiter); resolve(); },
+        reject: (error: Error) => { clearTimeout(timer); this.#riveWaiters.delete(waiter); reject(error); },
+      };
+      this.#riveWaiters.add(waiter);
+    });
+    return rive;
+  }
+
+  /** The room created the channel on this peer's session: open its negotiated end. */
+  #openRiveChannel(frame: CallRoomRiveFrame): void {
+    const peer = this.#peer;
+    const rive = this.#rive;
+    if (!peer?.createDataChannel || !rive || this.#closed || this.#ended) return;
+    this.#riveChannel?.close();
+    const channel = peer.createDataChannel(RIVE_CHANNEL, {
+      negotiated: true,
+      id: frame.id,
+      ...RIVE_CHANNEL_OPTIONS,
+    });
+    this.#riveChannel = channel;
+    const opened = (): void => {
+      if (this.#riveChannel !== channel) return;
+      for (const text of rive._replay()) {
+        try { channel.send(text); } catch { /* lossy by design */ }
+      }
+      for (const waiter of [...this.#riveWaiters]) waiter.resolve();
+    };
+    channel.onmessage = (event) => {
+      if (this.#riveChannel === channel) rive._receive(event.data);
+    };
+    if (channel.readyState === "open") opened();
+    else channel.onopen = opened;
+  }
+
+  #closeRiveChannel(): void {
+    const channel = this.#riveChannel;
+    this.#riveChannel = undefined;
+    if (!channel) return;
+    channel.onopen = null;
+    channel.onmessage = null;
+    try { channel.close(); } catch { /* already closed */ }
+  }
+
+  #rejectRive(error: Error): void {
+    for (const waiter of [...this.#riveWaiters]) waiter.reject(error);
+  }
+
+  /**
    * Resolves once `peerAudio` has fired (at once if it already has). Rejects
    * after `timeoutMs`, or when the Call ends or the transport closes first.
    */
@@ -1302,6 +1433,10 @@ export class RelayCallTransport {
       this.#roomOffers += 1;
       this.#queueNegotiation(() => this.#serverOffer(frame));
     });
+    this.#room.on("rive", (frame: CallRoomRiveFrame) => {
+      // Queued behind the establish offer's answer, so the SCTP transport exists.
+      this.#queueNegotiation(async () => this.#openRiveChannel(frame));
+    });
     this.#room.on("roomState", (frame: CallRoomStateFrame) => {
       this.#roomStates += 1;
       this.#callStatus = frame.call?.status;
@@ -1428,6 +1563,8 @@ export class RelayCallTransport {
         // Sent for every new session: the room re-pulls a restarted participant's
         // tracks once it reports `connected` (PROTOCOL.md section 2).
         this.#room.connected();
+        // A new session has no rive channel: ask for it again.
+        if (this.#rive && this.#reportedConnected) this.#room.send({ type: RIVE_CHANNEL });
         if (!this.#reportedConnected) {
           this.#reportedConnected = true;
           this.#resolveReady();
@@ -1538,6 +1675,7 @@ export class RelayCallTransport {
     this.#lastAnswerSdp = undefined;
     this.#addTrackPending = false;
     this.#deferredOffer = undefined;
+    this.#closeRiveChannel();
     this.#remoteVideoTrack?._detach();
     this.#remoteVideoEngineTrack = undefined;
     if (this.#remoteSink) {
@@ -1765,6 +1903,8 @@ export class RelayCallTransport {
   }
 
   #shutdownMedia(): void {
+    this.#closeRiveChannel();
+    this.#rejectRive(new RelayCallTransportError("Relay Call ended before the rive channel opened."));
     this.#stopStallGuard();
     this.#clearTimer("connect");
     this.#clearTimer("disconnect");

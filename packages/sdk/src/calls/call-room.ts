@@ -1,6 +1,7 @@
 import NodeWebSocket from "ws";
 import type {
   Call,
+  CallRoomRiveFrame,
   CallRoomClientFrame,
   CallRoomEndedFrame,
   CallRoomErrorCode,
@@ -38,8 +39,9 @@ const TERMINAL_STATUSES = new Set<CallTerminalStatus>([
  * only breaks).
  */
 const KNOWN_SERVER_FRAME_TYPES: ReadonlySet<string> = new Set([
-  "heartbeat", "iceServers", "roomState", "answer", "offer", "ended", "error",
+  "heartbeat", "iceServers", "roomState", "answer", "offer", "rive", "ended", "error",
 ]);
+const TRACK_NAMES: ReadonlySet<unknown> = new Set(["audio", "video", "rive"]);
 const ROOM_ERROR_CODES = new Set<CallRoomErrorCode>([
   "invalid_frame", "not_allowed", "media_unavailable",
 ]);
@@ -89,6 +91,8 @@ export type CallRoomEventMap = {
   roomState: [CallRoomStateFrame];
   offer: [CallRoomSubscriptionOfferFrame];
   answer: [CallRoomServerAnswerFrame];
+  /** The room opened this agent's `rive` data channel; see `CallRoomRiveFrame`. */
+  rive: [CallRoomRiveFrame];
   ended: [CallRoomEndedFrame];
   error: [CallRoomErrorFrame | Error];
   /** The room socket closed and the room will not reopen it by itself. */
@@ -130,14 +134,14 @@ const validCall = (value: unknown): value is Call => {
 const PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"] as const;
 
 /**
- * `tracks`: `[]` before the participant's first offer, then `["audio"]` or
- * `["audio", "video"]` (PROTOCOL.md section 3). `receiving` has the same shape
- * (section 6b).
+ * `tracks`: `[]` before the participant's first offer, then some of `audio`,
+ * `video` and an agent's `rive` channel (PROTOCOL.md section 3). `receiving`
+ * has the same shape (section 6b).
  */
 const validTracks = (value: unknown): boolean =>
   Array.isArray(value)
-  && value.length <= 2
-  && value.every((name) => name === "audio" || name === "video")
+  && value.length <= TRACK_NAMES.size
+  && value.every((name) => TRACK_NAMES.has(name))
   && new Set(value).size === value.length;
 
 const validParticipant = (value: unknown): value is CallRoomParticipant =>
@@ -202,9 +206,16 @@ export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | 
       return value as unknown as CallRoomServerAnswerFrame;
     case "offer":
       if (!hasExactKeys(value, ["type", "session_description", "track"])
-        || (value.track !== "audio" && value.track !== "video")
+        || !TRACK_NAMES.has(value.track)
         || !validDescription(value.session_description, "offer")) break;
       return value as unknown as CallRoomSubscriptionOfferFrame;
+    case "rive":
+      // SCTP stream ids are 0-65534 (RFC 8831 section 6.6; 65535 is reserved).
+      if (!hasExactKeys(value, ["type", "id"])
+        || !Number.isInteger(value.id)
+        || (value.id as number) < 0
+        || (value.id as number) > 65_534) break;
+      return value as unknown as CallRoomRiveFrame;
     case "ended":
       if (!hasExactKeys(value, ["type", "reason"])
         || !TERMINAL_STATUSES.has(value.reason as CallTerminalStatus)) break;
@@ -629,6 +640,9 @@ export class CallRoom {
         return;
       case "answer":
         this.#emit("answer", frame);
+        return;
+      case "rive":
+        this.#emit("rive", frame);
         return;
       case "ended":
         this.#ended = true;

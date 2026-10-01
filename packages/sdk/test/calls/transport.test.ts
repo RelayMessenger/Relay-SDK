@@ -70,7 +70,12 @@ class FakeAudioSource implements RelayAudioSourceLike {
   /** Set to make the fake engine report outbound packet counts. */
   sourceStats: RelayAudioSourceStats | undefined;
   starts = 0;
+  /** RTP time of the next packet, as the werift source reports it. */
+  rtpMs = 0;
+  queued = 0;
   createTrack(): RelayMediaStreamTrackLike { return this.track; }
+  mediaTimeMs(): number { return this.rtpMs; }
+  queuedMs(): number { return this.queued; }
   start(): void { this.starts += 1; }
   onData(data: Parameters<RelayAudioSourceLike["onData"]>[0]): void {
     this.data.push({ ...data, samples: data.samples.slice() });
@@ -93,6 +98,22 @@ class FakeAudioSink implements RelayAudioSinkLike {
       rtpPackets: 0, decodeFailures: 0, firstRtpAt: undefined, lastRtpAt: undefined, recentRtpPackets: 0,
     };
   }
+}
+
+class FakeDataChannel {
+  readyState = "connecting";
+  onopen: (() => void) | null | undefined = null;
+  onclose: (() => void) | null | undefined = null;
+  onmessage: ((event: { data: unknown }) => void) | null | undefined = null;
+  readonly sent: string[] = [];
+  closed = false;
+  constructor(readonly label: string, readonly init: Record<string, unknown>) {}
+  send(data: string): void {
+    if (this.readyState !== "open") throw new Error("not open");
+    this.sent.push(data);
+  }
+  close(): void { this.closed = true; this.readyState = "closed"; }
+  open(): void { this.readyState = "open"; this.onopen?.(); }
 }
 
 class FakePeer implements RelayPeerConnectionLike {
@@ -142,6 +163,12 @@ class FakePeer implements RelayPeerConnectionLike {
   }
   addEventListener(): void {}
   removeEventListener(): void {}
+  readonly channels: FakeDataChannel[] = [];
+  createDataChannel(label: string, init: { negotiated: true; id: number; ordered: boolean; maxRetransmits: number }): FakeDataChannel {
+    const channel = new FakeDataChannel(label, init);
+    this.channels.push(channel);
+    return channel;
+  }
   close(): void { this.closed = true; this.connectionState = "closed"; }
 }
 
@@ -1406,5 +1433,125 @@ it("drops held audio on clearAudio(), the Call ending, or close(); every held wr
 
   personReceivesAudio(room);
   expect(webRTC.source.data).toHaveLength(0);
+  transport.close();
+});
+
+const riveRequests = (room: FakeRoom): number =>
+  room.sent.filter((frame) => (frame as { type: string }).type === "rive").length;
+
+it("opens the rive channel the room creates, with the agreed negotiated options", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const opening = transport.rive();
+  await flush();
+  expect(riveRequests(room)).toBe(1);
+  // The room establishes the SCTP transport with a pull offer for `rive`, then names the stream.
+  room.emit("offer", {
+    type: "offer",
+    session_description: { type: "offer", sdp: "sfu-establish-offer" },
+    track: "rive",
+  } as CallRoomSubscriptionOfferFrame);
+  room.emit("rive", { type: "rive", id: 3 });
+  await flush();
+  const peer = webRTC.peers[0]!;
+  expect(room.sent.at(-1)).toEqual({ type: "answer", session_description: { type: "answer", sdp: "answer-sdp" } });
+  expect(peer.channels).toHaveLength(1);
+  const channel = peer.channels[0]!;
+  expect(channel.label).toBe("rive");
+  expect(channel.init).toEqual({ negotiated: true, id: 3, ordered: false, maxRetransmits: 0 });
+  channel.open();
+  const rive = await opening;
+  expect(await transport.rive()).toBe(rive);
+  expect(riveRequests(room)).toBe(1);
+
+  expect(rive.set({ viseme: 3, speaking: true }, { at: 1840.4 })).toBe(true);
+  expect(rive.trigger("nod", { at: 2600 })).toBe(true);
+  expect(rive.show({ file: "https://cdn.relay/rive/q.riv", artboard: "Quiz", view_model: { question: "Capital of France?" } })).toBe(true);
+  expect(channel.sent.map((text) => JSON.parse(text))).toEqual([
+    { t: 1840, view_model: { viseme: 3, speaking: true } },
+    { t: 2600, trigger: "nod" },
+    { file: "https://cdn.relay/rive/q.riv", artboard: "Quiz", view_model: { question: "Capital of France?" } },
+  ]);
+
+  const values: unknown[] = [];
+  const triggers: string[] = [];
+  rive.on("view_model", (value) => values.push(value));
+  rive.on("trigger", (name) => triggers.push(name));
+  channel.onmessage?.({ data: JSON.stringify({ view_model: { answer: "B" } }) });
+  channel.onmessage?.({ data: Buffer.from(JSON.stringify({ trigger: "tapped_start", extra: 1 })) });
+  channel.onmessage?.({ data: "not json" });
+  channel.onmessage?.({ data: JSON.stringify({ view_model: { answer: { nested: true } } }) });
+  expect(values).toEqual([{ answer: "B" }]);
+  expect(triggers).toEqual(["tapped_start"]);
+  transport.close();
+  expect(channel.closed).toBe(true);
+});
+
+it("asks for the rive channel again after a restart and replays the scene and latest values", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const opening = transport.rive();
+  room.emit("rive", { type: "rive", id: 1 });
+  await flush();
+  const first = webRTC.peers[0]!;
+  first.channels[0]!.open();
+  const rive = await opening;
+  rive.show({ file: "https://cdn.relay/rive/a.riv", state_machine: "Main" });
+  rive.set({ mood: "happy", viseme: 2 });
+  rive.set({ viseme: 5 }, { at: 100 });
+
+  first.connectionState = "failed";
+  first.onconnectionstatechange?.();
+  expect(first.channels[0]!.closed).toBe(true);
+  // While the channel is down, sends report the drop and still update the replayed state.
+  expect(rive.set({ viseme: 0 })).toBe(false);
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  answerLatest(room, "relay-answer-2");
+  await flush();
+  expect(riveRequests(room)).toBe(2);
+  room.emit("rive", { type: "rive", id: 7 });
+  await flush();
+  const second = webRTC.peers[1]!;
+  second.channels[0]!.open();
+  expect(second.channels[0]!.init).toMatchObject({ id: 7 });
+  expect(second.channels[0]!.sent.map((text) => JSON.parse(text))).toEqual([
+    { file: "https://cdn.relay/rive/a.riv", state_machine: "Main" },
+    { view_model: { mood: "happy", viseme: 0 } },
+  ]);
+  transport.close();
+});
+
+it("rejects rive() when the room opens no channel, and asks again on the next call", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const first = transport.rive({ timeoutMs: 1_000 });
+  const rejected = expect(first).rejects.toMatchObject({ code: "rive_timeout" });
+  await vi.advanceTimersByTimeAsync(1_000);
+  await rejected;
+  void transport.rive({ timeoutMs: 1_000 }).catch(() => undefined);
+  expect(riveRequests(room)).toBe(2);
+  transport.close();
+});
+
+it("reads the audio clock as RTP time sent plus everything queued", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  webRTC.source.rtpMs = 12_340;
+  webRTC.source.queued = 60;
+  expect(transport.audioTimeMs()).toBe(12_400);
+  // Held audio (the person does not receive this track yet) counts too.
+  void transport.writeAudio({ samples: new Int16Array(4_800), sampleRate: 48_000, channelCount: 1 });
+  expect(transport.audioTimeMs()).toBe(12_500);
   transport.close();
 });
