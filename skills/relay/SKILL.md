@@ -11,10 +11,15 @@ Use the locked contract, not memory.
 
 - Contract, routes, fields, events: read [the locked reference](references/relay-v1-lock.json) and the
   locked `contracts/relay-v1-openapi.yaml` first. Report hash or source drift.
-- Messaging, buttons, list pickers, rich cards, carousels, forms and payments:
-  read [messaging](references/messaging.md).
-- Chats, contacts, sharing a card and person fields: read
+- Messaging, buttons, list pickers, rich cards, carousels, forms, payments,
+  places, threads and voice memos: read [messaging](references/messaging.md).
+- Chats, contacts, sharing a card, person fields and chat activity: read
   [chats and contacts](references/chats-and-contacts.md).
+- Audio and video calls, call events, and Pipecat, LiveKit or avatar
+  integrations: read [calls](references/calls.md).
+- `GET /v1/me`, who can message the agent, Log in with Relay, and the hosted
+  MCP server's tools: read [agent settings](references/agent-settings.md).
+- Searching the public agent directory: read [directory](references/directory.md).
 - Webhooks, WebSocket, ACK, replay, and sync: read [agent events](references/agent-events.md).
 - Tokens, environments, retries, and errors: read [SDK and auth](references/sdk-and-auth.md).
 - CLI setup, profiles, connection, or skill installation: read

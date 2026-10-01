@@ -52,10 +52,21 @@ A Message contains ordered `parts`:
 - `rich_card` or `carousel` (see Rich cards and carousels);
 - `form` (see Forms);
 - `payment` as the only part, carrying a payment request's `checkout_url`
-  (see Payment).
+  (see Payment);
+- `place`: one place sent once (see Places).
 
 Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 `reply_to.part_index`.
+
+`GET /v1/messages/{messageId}/thread` (`relay.messages.listMessagesThread`)
+lists a Message and its replies, from the ID of any Message in the thread.
+It takes `cursor`, `limit` (1 to 100, default 50) and `order` (`asc`, the
+default, or `desc`):
+
+```typescript
+const thread = await relay.messages.listMessagesThread(messageId, { limit: 50 });
+for (const message of thread.data) console.log(message.id);
+```
 
 ## Selection
 
@@ -192,6 +203,32 @@ The list picker. Use it when the person picks from a list.
 - The person's card is a `location` part with `state` `live` or `ended`; it
   never carries a position.
 
+## Places
+
+A `place` part is a place sent once: a current location, a dropped pin, or a
+place the agent names. People and agents both send it, alone or beside text.
+`latitude` (-90 to 90) and `longitude` (-180 to 180) are required, in WGS 84
+degrees; `name` and `address` are optional, trimmed, 1 to 256 characters. An
+out-of-range or missing coordinate is 400 (`1005`). Clients that do not draw it
+show the name, else the address, else "Dropped Pin".
+
+```typescript
+await relay.chats.messages.send(chatId, {
+  message: {
+    parts: [{
+      type: "place",
+      latitude: 37.44216251868683,
+      longitude: -122.16153582049394,
+      name: "Philz Coffee",
+      address: "101 Forest Ave, Palo Alto, CA 94301",
+    }],
+    idempotency_key: idempotencyKey,
+  },
+});
+```
+
+A `place` never updates. For a position that moves, use Location.
+
 ## Attachments
 
 Allocate with `POST /v1/attachments`, upload raw bytes with the returned method
@@ -200,7 +237,49 @@ The allocation and upload byte length and content type must match. Relay
 accepts any `type/subtype` media type and stores the bytes unchanged. Only
 pictures and group icons must be images.
 
-Voice memos use the dedicated Chat voice-memo operation after uploading audio.
+## Voice memos
+
+A voice memo plays as a voice memo on the person's phone, not as a file.
+
+1. Upload the audio as an Attachment with an `audio/*` content type, and give
+   `duration_ms` in the allocation so the app shows its length.
+2. Send `POST /v1/chats/{chatId}/voicememo` (`relay.chats.sendVoicememo`) with
+   exactly one of `attachment_id` (a completed audio upload) or
+   `voice_memo_url` (a public HTTPS audio URL, at most 10 MiB, checked like
+   other URL media).
+
+```typescript
+import { readFile } from "node:fs/promises";
+
+const audio = await readFile("reply.m4a");
+const upload = await relay.attachments.create({
+  filename: "reply.m4a",
+  content_type: "audio/x-m4a",
+  size_bytes: audio.byteLength,
+  duration_ms: 4200,
+});
+await relay.attachments.upload(upload, audio);
+const { voice_memo } = await relay.chats.sendVoicememo(chatId, {
+  attachment_id: upload.attachment_id,
+});
+```
+
+```bash
+curl -sS -X POST "${RELAY_API_URL:-https://api.relayapp.im}/v1/chats/$CHAT_ID/voicememo" \
+  -H "Authorization: Bearer $RELAY_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"attachment_id\":\"$ATTACHMENT_ID\"}"
+```
+
+Relay answers `202` with `voice_memo`: the Message `id`, `status`, `chat`, and
+a `voice_memo` object with the Attachment `id`, download `url`, `filename`,
+`mime_type`, `size_bytes` and `duration_ms`. The stored Message has one
+`media` part holding the audio Attachment, so history and events carry it as a
+media part.
+
+Failures: `400`/`1005` for both fields or neither; `404`/`2001` for an unknown
+Chat or Attachment; `413`/`2006` for a URL over 10 MiB; `422`/`2006` for an
+upload that is not complete or not audio, or a URL that fails a check.
 
 ## Reactions and mentions
 
