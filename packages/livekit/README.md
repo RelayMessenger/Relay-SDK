@@ -126,10 +126,11 @@ avatar.rive?.on("trigger", (name) => console.log("the person fired", name));
 ```
 
 Each reply sets the View Model's `speaking` true at the moment its first
-sample plays and false, with `viseme` 0, when it ends or is interrupted.
+sample plays and false, with `viseme` 0, where its audio ends (at once when it
+is interrupted).
 Rename them with `speakingProperty` and `visemeProperty`, or pass `null`.
 `avatar.rive` sets any other value, fires triggers and switches files; time a
-value to speech with `{ at }` from `call.transport.audioTimeMs()`.
+value to speech with `{ at }` from the start `call.transport.writeAudio` resolves with.
 Word-timed mouth shapes need the session's transcription output, whose
 `TextOutput` class `@livekit/agents` 1.9 does not export; the Python
 `relaymessenger-livekit` reads TTS-aligned words and sends them.

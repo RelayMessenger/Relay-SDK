@@ -188,13 +188,14 @@ rive.show({ file: card.rive!.file, artboard: "Quiz", view_model: { question: "2+
 rive.on("view_model", (values) => {}); // what the person changed in the file
 rive.on("trigger", (name) => {});
 
-// Time a change to speech: audio-track milliseconds, read before writeAudio.
-const at = transport.audioTimeMs();
-await transport.writeAudio(frame);
-for (const cue of visemesFromAlignment(alignment)) rive.set({ viseme: cue.viseme }, { at: at + cue.t });
+// Time a change to speech: writeAudio resolves with where the audio starts on the track.
+const start = await transport.writeAudio(frame);
+if (start !== undefined) {
+  for (const cue of visemesFromAlignment(alignment)) rive.set({ viseme: cue.viseme }, { at: start + cue.t });
+}
 ```
 
-Python: `await call.rive()`, `rive.set(values, at=...)`, `call.audio_time_ms()`,
+Python: `await call.rive()`, `rive.set(values, at=...)`, `await call.write_audio(...)` (the start, or `None` while held),
 `visemes_from_alignment`. Pipecat: `RelayRiveProcessor(transport)` right after
 TTS. LiveKit: `await RelayRive().start(session, call)`. Messages are JSON of at
 most 1 KB on an unordered, lossy channel; each overwrites what it sets. If Relay

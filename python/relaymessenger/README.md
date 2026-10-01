@@ -273,9 +273,10 @@ An agent whose profile names a Rive file (`rive`) can drive what the phone
 draws instead of sending video. `rive()` opens the call's `rive` data channel;
 `set` writes View Model Instance values, `trigger` fires a trigger, `show`
 switches to another Relay-hosted file, and the phone's own changes arrive as
-events. Time a message to the agent's speech with `at`: read
-`audio_time_ms()` just before `write_audio` and add the offset inside that
-audio; the phone applies it when that audio plays.
+events. Time a message to the agent's speech with `at`: `write_audio` returns
+where that audio starts on the agent's track (or `None` while it is held until
+the person can hear it); add the offset inside that audio, and the phone
+applies it when that audio plays.
 
 ```python
 from relaymessenger.calls import visemes_from_alignment
@@ -285,10 +286,10 @@ rive.set({"mood": "happy"})
 rive.trigger("wave")
 rive.on("trigger", lambda name: print("the person fired", name))
 
-at = call.audio_time_ms()
-await call.write_audio(frame)
-for cue in visemes_from_alignment(alignment):  # ElevenLabs character timings for that audio
-    rive.set({"viseme": cue.viseme}, at=at + cue.t)
+start = await call.write_audio(frame)
+if start is not None:
+    for cue in visemes_from_alignment(alignment):  # ElevenLabs character timings for that audio
+        rive.set({"viseme": cue.viseme}, at=start + cue.t)
 ```
 
 Messages are at most 1 KB, unordered and may be lost; each one overwrites
