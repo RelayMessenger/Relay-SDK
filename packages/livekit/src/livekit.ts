@@ -219,6 +219,11 @@ export class RelayAudioOutput extends AudioOutput {
   /** Bumped by `clearBuffer()`; a frame the transport dropped across it is not counted (agents-js `interruptionGeneration`). */
   #interruptionGeneration = 0;
   #closed = false;
+  /**
+   * Where the open segment's first sample sits on the agent's audio track
+   * (what `writeAudio` resolved with), for timing Rive messages.
+   */
+  segmentStartMs: number | undefined;
 
   constructor(transport: RelayCallTransport, sampleRate = 48_000) {
     super(sampleRate, undefined, { pause: false });
@@ -238,8 +243,8 @@ export class RelayAudioOutput extends AudioOutput {
       await this.#flushTask;
     }
     const interruptionGeneration = this.#interruptionGeneration;
-    // Resolves once the slices are queued; the engine's pump paces the wire.
-    await this.#transport.writeAudio({
+    // Resolves once the slices are queued, with where they start on the track; the engine's pump paces the wire.
+    const startMs = await this.#transport.writeAudio({
       samples: frame.data,
       sampleRate: frame.sampleRate,
       channelCount: frame.channels,
@@ -248,6 +253,7 @@ export class RelayAudioOutput extends AudioOutput {
     await super.captureFrame(frame);
     if (!this.#firstFrameEmitted) {
       this.#firstFrameEmitted = true;
+      this.segmentStartMs = typeof startMs === "number" ? startMs : undefined;
       this.onPlaybackStarted(Date.now());
     }
     this.#pushedDuration += frame.samplesPerChannel / frame.sampleRate;

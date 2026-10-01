@@ -86,6 +86,37 @@ class FakeTransceiver:
         self.codecs = codecs
 
 
+class FakeDataChannel(EventEmitter[str]):
+    """aiortc's RTCDataChannel surface: pyee events, ``readyState``, ``send``, ``close``."""
+
+    def __init__(self, label: str, options: dict[str, Any]) -> None:
+        super().__init__()
+        self.label = label
+        self.options = options
+        self.readyState = "connecting"
+        self.sent: list[str] = []
+
+    def on(self, event: str, callback: Optional[Callable[..., Any]] = None) -> Any:
+        if callback is None:
+            return lambda cb: super(FakeDataChannel, self).on(event, cb)
+        return super().on(event, callback)
+
+    def remove_all_listeners(self) -> None:
+        self._events.clear()
+
+    def send(self, data: str) -> None:
+        if self.readyState != "open":
+            raise RuntimeError("not open")
+        self.sent.append(data)
+
+    def close(self) -> None:
+        self.readyState = "closed"
+
+    def open(self) -> None:
+        self.readyState = "open"
+        self.emit("open")
+
+
 class FakePeer(EventEmitter[str]):
     instances: list["FakePeer"] = []
 
@@ -100,7 +131,13 @@ class FakePeer(EventEmitter[str]):
         self.localDescription: Optional[Desc] = None
         self.remoteDescription: Optional[Desc] = None
         self.closed = False
+        self.channels: list[FakeDataChannel] = []
         FakePeer.instances.append(self)
+
+    def createDataChannel(self, label: str, **options: Any) -> FakeDataChannel:
+        channel = FakeDataChannel(label, options)
+        self.channels.append(channel)
+        return channel
 
     def on(self, event: str, callback: Optional[Callable[..., Any]] = None) -> Any:  # pyee-style decorator
         if callback is None:
@@ -655,4 +692,161 @@ async def test_clearing_held_audio_drops_it_and_a_restart_holds_audio_again() ->
     assert await pull(FakePeer.instances[1], 2) == [silence] * 2
     room.emit("room_state", receiving_state(["audio"]))
     assert await pull(FakePeer.instances[1], 3) == [*queued, silence]
+    await transport.aclose()
+
+
+def rive_requests(room: FakeRoom) -> int:
+    return sum(1 for frame in room.sent if frame.get("type") == "rive")
+
+
+async def test_rive_opens_the_negotiated_channel_and_carries_both_directions() -> None:
+    import json
+
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    assert rive_requests(room) == 1
+    room.emit("offer", {"type": "offer", "session_description": {"type": "offer", "sdp": "v=0 establish"}, "track": "rive"})
+    room.emit("rive", {"type": "rive", "id": 3})
+    await settle()
+    assert room.sent[-1]["type"] == "answer"
+    peer = FakePeer.instances[0]
+    channel = peer.channels[0]
+    assert channel.label == "rive"
+    assert channel.options == {"negotiated": True, "id": 3, "ordered": False, "maxRetransmits": 0}
+    channel.open()
+    rive = await opening
+    assert await transport.rive() is rive and rive_requests(room) == 1
+    assert rive.set({"viseme": 3, "speaking": True}, at=1840.5)
+    assert rive.trigger("nod", at=2600)
+    assert rive.show("https://cdn.relay/rive/q.riv", artboard="Quiz", view_model={"question": "Capital of France?"})
+    assert [json.loads(text) for text in channel.sent] == [
+        {"t": 1841, "view_model": {"viseme": 3, "speaking": True}},
+        {"t": 2600, "trigger": "nod"},
+        {"file": "https://cdn.relay/rive/q.riv", "artboard": "Quiz", "view_model": {"question": "Capital of France?"}},
+    ]
+    values: list[Any] = []
+    triggers: list[str] = []
+    rive.on("view_model", values.append)
+    rive.on("trigger", triggers.append)
+    channel.emit("message", json.dumps({"view_model": {"answer": "B"}}))
+    channel.emit("message", json.dumps({"trigger": "tapped_start", "extra": 1}).encode())
+    channel.emit("message", "not json")
+    assert values == [{"answer": "B"}] and triggers == ["tapped_start"]
+    await transport.aclose()
+    assert channel.readyState == "closed"
+
+
+async def test_rive_is_asked_for_again_after_a_restart_and_replays_state() -> None:
+    import json
+
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    room.emit("rive", {"type": "rive", "id": 1})
+    await settle()
+    first = FakePeer.instances[0]
+    first.channels[0].open()
+    rive = await opening
+    rive.show("https://cdn.relay/rive/a.riv", state_machine="Main")
+    rive.set({"mood": "happy", "viseme": 2})
+    first.set_state("failed")
+    await settle()
+    assert first.channels[0].readyState == "closed"
+    assert rive.set({"viseme": 0}) is False
+    await asyncio.sleep(0.3)
+    await settle()
+    room.emit("answer", answer("v=0 second\r\n"))
+    await settle()
+    FakePeer.instances[-1].set_state("connected")
+    await settle()
+    assert rive_requests(room) == 2
+    room.emit("rive", {"type": "rive", "id": 7})
+    await settle()
+    second = FakePeer.instances[-1].channels[0]
+    second.open()
+    assert second.options["id"] == 7
+    assert [json.loads(text) for text in second.sent] == [
+        {"file": "https://cdn.relay/rive/a.riv", "state_machine": "Main"},
+        {"view_model": {"mood": "happy", "viseme": 0}},
+    ]
+    await transport.aclose()
+
+
+async def test_rive_times_out_when_the_room_opens_no_channel_and_asks_again() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    with pytest.raises(RelayCallTransportError) as raised:
+        await transport.rive(timeout_ms=20)
+    assert raised.value.code == "rive_timeout"
+    with pytest.raises(RelayCallTransportError):
+        await transport.rive(timeout_ms=20)
+    assert rive_requests(room) == 2
+    await transport.aclose()
+
+
+async def test_audio_time_is_rtp_time_sent_plus_queued() -> None:
+    import numpy as np
+
+    from relaymessenger.calls.transport import RelayAudioFrame
+
+    transport, room = make()
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    source._pts = 960 * 617  # 617 packets of 20 ms sent
+    assert transport.audio_time_ms() == pytest.approx(12_340)
+    await transport.write_audio(RelayAudioFrame(samples=np.zeros(4_800, dtype=np.int16), sample_rate=48_000, channel_count=1))
+    assert transport.audio_time_ms() == pytest.approx(12_440)
+    await transport.aclose()
+
+
+async def test_rive_is_rejected_at_once_when_the_room_refuses_the_channel() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    room.emit("error", {"type": "error", "code": "media_unavailable", "message": "The rive channel is unavailable."})
+    with pytest.raises(RelayCallTransportError) as raised:
+        await asyncio.wait_for(opening, 1)
+    assert raised.value.code == "media_unavailable"
+    assert not FakePeer.instances[0].closed
+    await transport.aclose()
+
+
+async def test_write_audio_returns_the_frames_track_start_once_the_person_receives_it() -> None:
+    import numpy as np
+
+    from relaymessenger.calls.transport import RelayAudioFrame
+
+    transport, room = make()
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    source._pts = 960 * 100  # 2 s of RTP sent
+    frame = RelayAudioFrame(samples=np.zeros(960, dtype=np.int16), sample_rate=48_000, channel_count=1)
+    # Held: the start is known only when the person starts receiving.
+    assert await transport.write_audio(frame) is None
+    room.emit("room_state", receiving_state(["audio"]))
+    assert transport.subscribed
+    # 20 ms already queued ahead of it.
+    assert await transport.write_audio(frame) == pytest.approx(2_020)
+    await transport.aclose()
+
+
+async def test_rive_keeps_the_open_channel_when_relay_repeats_its_id() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    room.emit("rive", {"type": "rive", "id": 2})
+    await settle()
+    peer = FakePeer.instances[0]
+    peer.channels[0].open()
+    await opening
+    room.emit("rive", {"type": "rive", "id": 2})
+    await settle()
+    assert len(peer.channels) == 1 and peer.channels[0].readyState == "open"
     await transport.aclose()

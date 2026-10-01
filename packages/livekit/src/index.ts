@@ -9,6 +9,7 @@ export {
   type RelayLiveKitAudioOptions,
   type RelayLiveKitConnectOptions,
 } from "./livekit.js";
+export { RelayRive, type RelayRiveOptions } from "./rive.js";
 export {
   LocalVideoTrack,
   RemoteVideoTrack,

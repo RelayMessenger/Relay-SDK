@@ -20351,9 +20351,11 @@ var KNOWN_SERVER_FRAME_TYPES = /* @__PURE__ */ new Set([
   "roomState",
   "answer",
   "offer",
+  "rive",
   "ended",
   "error"
 ]);
+var TRACK_NAMES = /* @__PURE__ */ new Set(["audio", "video", "rive"]);
 var ROOM_ERROR_CODES = /* @__PURE__ */ new Set([
   "invalid_frame",
   "not_allowed",
@@ -20373,7 +20375,7 @@ var validCall = (value) => {
   return typeof value.id === "string" && typeof value.chat_id === "string" && (status === "ringing" || status === "in-progress" || TERMINAL_STATUSES.has(status));
 };
 var PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"];
-var validTracks = (value) => Array.isArray(value) && value.length <= 2 && value.every((name) => name === "audio" || name === "video") && new Set(value).size === value.length;
+var validTracks = (value) => Array.isArray(value) && value.length <= TRACK_NAMES.size && value.every((name) => TRACK_NAMES.has(name)) && new Set(value).size === value.length;
 var validParticipant = (value) => isRecord(value) && (hasExactKeys(value, PARTICIPANT_KEYS) || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"]) || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks", "receiving"])) && (value.video === void 0 || typeof value.video === "boolean") && (value.tracks === void 0 || validTracks(value.tracks)) && (value.receiving === void 0 || validTracks(value.receiving)) && typeof value.contact_id === "string" && (value.kind === "user" || value.kind === "agent") && typeof value.attached === "boolean" && (value.track === "audio" || value.track === null) && typeof value.muted === "boolean" && typeof value.connected === "boolean";
 var validIceServer = (value) => isRecord(value) && Object.keys(value).every((key) => key === "urls" || key === "username" || key === "credential") && Array.isArray(value.urls) && value.urls.length >= 1 && value.urls.length <= 16 && value.urls.every((url) => typeof url === "string" && /^(stun|turns?):/u.test(url)) && (value.username === void 0 || typeof value.username === "string") && (value.credential === void 0 || typeof value.credential === "string");
 var parseCallRoomServerFrame = (value) => {
@@ -20401,7 +20403,11 @@ var parseCallRoomServerFrame = (value) => {
         break;
       return value;
     case "offer":
-      if (!hasExactKeys(value, ["type", "session_description", "track"]) || value.track !== "audio" && value.track !== "video" || !validDescription(value.session_description, "offer"))
+      if (!hasExactKeys(value, ["type", "session_description", "track"]) || !TRACK_NAMES.has(value.track) || !validDescription(value.session_description, "offer"))
+        break;
+      return value;
+    case "rive":
+      if (!hasExactKeys(value, ["type", "id"]) || !Number.isInteger(value.id) || value.id < 0 || value.id > 65534)
         break;
       return value;
     case "ended":
@@ -20827,6 +20833,9 @@ var CallRoom = class {
         return;
       case "answer":
         this.#emit("answer", frame);
+        return;
+      case "rive":
+        this.#emit("rive", frame);
         return;
       case "ended":
         this.#ended = true;

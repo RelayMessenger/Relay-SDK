@@ -145,6 +145,31 @@ back.
 uv run --with 'livekit-agents[google]' examples/gemini_live_video_agent.py
 ```
 
+## Drive a Rive file
+
+Instead of sending video, the agent can have the phone draw its own Rive file
+(the `rive` on its profile). `RelayRive` has the shape of LiveKit's avatar
+plugins, with the Relay call in place of the room:
+
+```python
+from livekit.agents import AgentSession
+from relaymessenger_livekit import RelayLiveKitCall, RelayRive
+
+session = AgentSession(stt=..., llm=..., tts=..., use_tts_aligned_transcript=True)
+call = await RelayLiveKitCall.connect(api_key=token, call_id=call_id)
+call.attach(session)
+avatar = RelayRive()
+await avatar.start(session, call)
+avatar.rive.on("trigger", lambda name: print("the person fired", name))
+```
+
+Each reply sets the View Model's `speaking` true when its audio starts and
+false when it ends. With `use_tts_aligned_transcript=True` and a TTS that
+reports word times (ElevenLabs, Cartesia), each word also becomes `viseme`
+numbers (Preston Blair's ten mouths, 0 rest to 9 WQ) timed against the agent's
+audio. Rename them with `viseme_property=` and `speaking_property=`, or pass
+`None`. `avatar.rive` sets any other value, fires triggers and switches files.
+
 ## ICE servers, TURN, restarts and diagnostics
 
 By default the peer uses the servers the Call room sends after it joins:

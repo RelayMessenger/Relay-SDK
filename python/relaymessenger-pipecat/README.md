@@ -90,6 +90,29 @@ Call: Deepgram, OpenAI and Cartesia make the voice, and Pipecat's
 uv run --with 'pipecat-ai[simli,deepgram,cartesia,openai,silero]' examples/simli_avatar_bot.py
 ```
 
+## Drive a Rive file
+
+Instead of sending video, the agent can have the phone draw its own Rive file
+(the `rive` on its profile) and drive it live. Put `RelayRiveProcessor` right
+after the TTS service: TTS word timestamps become a `viseme` number (Preston
+Blair's ten mouths, 0 rest to 9 WQ) and the bot speaking frames a `speaking`
+boolean on the file's View Model, each timed against the agent's audio so
+the mouth moves when the words are heard.
+
+```python
+from relaymessenger_pipecat import RelayRiveProcessor
+
+pipeline = Pipeline([transport.input(), stt, user_aggregator, llm, tts, RelayRiveProcessor(transport), transport.output(), assistant_aggregator])
+```
+
+Rename the properties with `viseme_property=` and `speaking_property=`, or pass
+`None` to leave one alone. For anything else (a score, a mood, another
+file), use the channel directly: `rive = await transport.call.rive()`, then
+`rive.set(...)`, `rive.trigger(...)`, `rive.show(...)`, and
+`rive.on("view_model" | "trigger", ...)` for what the person does in the file.
+`examples/rive_bot.py` is the Simli example with the processor in place of
+the video service.
+
 ## Use your own TURN servers
 
 Pass `ice_servers` a list of `RTCIceServer` dicts, or an async function that

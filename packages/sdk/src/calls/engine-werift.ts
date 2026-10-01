@@ -268,6 +268,11 @@ class WeriftAudioSource implements RelayAudioSourceLike {
       + (this.#pending.length / WERIFT_CHANNEL_COUNT / WERIFT_SAMPLE_RATE) * 1_000;
   }
 
+  /** RTP time of the next packet; the timestamp starts at 0 and advances 960 (20 ms) per packet, silence included. */
+  mediaTimeMs(): number {
+    return (this.#timestamp / WERIFT_SAMPLE_RATE) * 1_000;
+  }
+
   waitForDrain(): Promise<void> {
     this.#flushPending();
     if (this.#drained()) return Promise.resolve();
@@ -501,8 +506,40 @@ export const createWeriftPeerConnection = (
     },
   });
 
+/**
+ * werift starts SCTP only while it first brings DTLS up (peerConnection.js
+ * `connect()`: `if (checkDtlsConnected()) return;` comes before
+ * `sctpManager.connectSctp()`), so an application m-line added by a later
+ * renegotiation, as Cloudflare's `datachannels/establish` offer adds one,
+ * never associates and its channels stay `connecting` (measured on loopback,
+ * 2026-10-01). Starting the association once the remote description names
+ * the SCTP port is werift's own `connectSctp()`, run late.
+ *
+ * The SFU may already have initiated SCTP before the channel id arrives.
+ * werift's passive handshake reaches `connected` without setting `started`;
+ * calling `connectSctp()` then sends another INIT and moves the association
+ * back to COOKIE_WAIT. The channel still says open, but sends only buffer.
+ * Preserve that connected association instead of starting it again.
+ */
+const createDataChannelAfterRenegotiation = (peer: RTCPeerConnection): RTCPeerConnection => {
+  const create = peer.createDataChannel.bind(peer);
+  const manager = (peer as unknown as { sctpManager: { sctpRemotePort?: number; connectSctp(): Promise<void> } }).sctpManager;
+  let started = false;
+  peer.createDataChannel = (label, options) => {
+    const channel = create(label, options);
+    if (!started && peer.connectionState === "connected" && manager.sctpRemotePort
+      && peer.sctpTransport?.sctp.state !== "connected") {
+      started = true;
+      void manager.connectSctp().catch(() => undefined);
+    }
+    return channel;
+  };
+  return peer;
+};
+
 export const createWeriftWebRTCFactory = (): RelayWebRTCFactory => ({
-  createPeerConnection: (config) => createWeriftPeerConnection(config) as unknown as RelayPeerConnectionLike,
+  createPeerConnection: (config) =>
+    createDataChannelAfterRenegotiation(createWeriftPeerConnection(config)) as unknown as RelayPeerConnectionLike,
   createAudioSource: () => new WeriftAudioSource(),
   createAudioSink: (track, format) => new WeriftAudioSink(track as unknown as MediaStreamTrack, format),
   ...createWeriftVideoFactory(),

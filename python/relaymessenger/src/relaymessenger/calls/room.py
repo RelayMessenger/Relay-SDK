@@ -37,12 +37,13 @@ _ICE_URL = re.compile(r"^(stun|turns?):")
 #: Server frame types this client decodes. Any other type is a frame a newer
 #: Relay added: it is ignored and the socket stays open, as Orange Meets' room
 #: client does (`app/hooks/useRoom.ts` ``onMessage``: its ``default`` case only breaks).
-KNOWN_SERVER_FRAME_TYPES = frozenset({"heartbeat", "iceServers", "roomState", "answer", "offer", "ended", "error"})
+KNOWN_SERVER_FRAME_TYPES = frozenset({"heartbeat", "iceServers", "roomState", "answer", "offer", "rive", "ended", "error"})
+TRACK_NAMES = ("audio", "video", "rive")
 PARTICIPANT_KEYS = frozenset({"contact_id", "kind", "attached", "track", "muted", "connected"})
 
 CallRoomConnectionState = Literal["idle", "connecting", "open", "reconnecting", "closed"]
 CallRoomEvent = Literal[
-    "open", "reconnecting", "ice_servers", "room_state", "offer", "answer", "ended", "error", "close"
+    "open", "reconnecting", "ice_servers", "room_state", "offer", "answer", "rive", "ended", "error", "close"
 ]
 
 
@@ -129,11 +130,11 @@ def _valid_call(value: Any) -> bool:
 
 
 def _valid_tracks(value: Any) -> bool:
-    """``[]`` before the participant's first offer, then ``["audio"]`` or ``["audio", "video"]`` (PROTOCOL.md section 3)."""
+    """``[]`` before the participant's first offer, then some of ``audio``, ``video`` and an agent's ``rive`` channel."""
     return (
         isinstance(value, list)
-        and len(value) <= 2
-        and all(name in ("audio", "video") for name in value)
+        and len(value) <= len(TRACK_NAMES)
+        and all(name in TRACK_NAMES for name in value)
         and len(set(value)) == len(value)
     )
 
@@ -218,8 +219,18 @@ def parse_call_room_server_frame(value: Any) -> Optional[dict[str, Any]]:
     elif kind == "offer":
         if (
             _has_exact_keys(value, {"type", "session_description", "track"})
-            and value.get("track") in ("audio", "video")
+            and value.get("track") in TRACK_NAMES
             and _valid_description(value.get("session_description"), "offer")
+        ):
+            return value
+    elif kind == "rive":
+        # The negotiated SCTP stream id: 0-65534 (RFC 8831 section 6.6; 65535 is reserved).
+        stream = value.get("id")
+        if (
+            _has_exact_keys(value, {"type", "id"})
+            and isinstance(stream, int)
+            and not isinstance(stream, bool)
+            and 0 <= stream <= 65_534
         ):
             return value
     elif kind == "ended":
@@ -666,6 +677,8 @@ class CallRoom(EventEmitter[CallRoomEvent]):
             self.emit("offer", frame)
         elif kind == "answer":
             self.emit("answer", frame)
+        elif kind == "rive":
+            self.emit("rive", frame)
         elif kind == "ended":
             self._ended = True
             self.emit("ended", frame)

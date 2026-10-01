@@ -8,6 +8,7 @@
 export {
   RelayCallTransport,
   RelayCallTransportError,
+  RIVE_OPEN_TIMEOUT_MS,
   type RelayAudioFrame,
   type RelayCallVideoStats,
   type RelayCallEngine,
@@ -31,6 +32,29 @@ export {
   type RelayPeerConnectionLike,
 } from "./transport.js";
 export { createWeriftWebRTCFactory } from "./engine-werift.js";
+export {
+  RIVE_CHANNEL,
+  RIVE_MESSAGE_MAX_BYTES,
+  RelayRive,
+  encodeRiveMessage,
+  parseRiveMessage,
+  type RiveEventMap,
+  type RiveMessage,
+  type RiveScene,
+  type RiveTiming,
+  type RiveValue,
+} from "./rive.js";
+export {
+  VISEMES,
+  alignmentFromWords,
+  visemesFromAlignment,
+  type CharacterAlignment,
+  type Viseme,
+  type VisemeCue,
+  type VisemeName,
+  type VisemeOptions,
+  type WordTiming,
+} from "./visemes.js";
 export {
   LocalVideoTrack,
   RemoteVideoTrack,

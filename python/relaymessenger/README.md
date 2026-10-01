@@ -266,3 +266,32 @@ keyframe request from the SFU, the next frame is a keyframe; if no frame went
 out in the last 1/30 s, the latest frame is sent again at once, so a camera
 that sends a frame a second shows its picture without waiting for its next
 frame.
+
+## Drive a Rive file
+
+An agent whose profile names a Rive file (`rive`) can drive what the phone
+draws instead of sending video. `rive()` opens the call's `rive` data channel;
+`set` writes View Model Instance values, `trigger` fires a trigger, `show`
+switches to another Relay-hosted file, and the phone's own changes arrive as
+events. Time a message to the agent's speech with `at`: `write_audio` returns
+where that audio starts on the agent's track (or `None` while it is held until
+the person can hear it); add the offset inside that audio, and the phone
+applies it when that audio plays.
+
+```python
+from relaymessenger.calls import visemes_from_alignment
+
+rive = await call.rive()
+rive.set({"mood": "happy"})
+rive.trigger("wave")
+rive.on("trigger", lambda name: print("the person fired", name))
+
+start = await call.write_audio(frame)
+if start is not None:
+    for cue in visemes_from_alignment(alignment):  # ElevenLabs character timings for that audio
+        rive.set({"viseme": cue.viseme}, at=start + cue.t)
+```
+
+Messages are at most 1 KB, unordered and may be lost; each one overwrites
+what it sets, and after a media restart the last `show` and the latest values
+are sent again.

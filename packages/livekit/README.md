@@ -108,3 +108,29 @@ diagnostics are documented with the transport in the
 [`@relaymessenger/sdk` README](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/sdk#join-a-call-as-the-agent).
 `@livekit/agents` and `@livekit/rtc-node` are peer dependencies so the host
 agent process owns those runtimes.
+
+## Drive a Rive file
+
+Instead of sending video, the agent can have the phone draw its own Rive file
+(the `rive` on its profile). `RelayRive` has the shape of LiveKit's avatar
+plugins, with the Relay call in place of the room:
+
+```ts
+import { RelayLiveKitCall, RelayRive } from "@relaymessenger/livekit";
+
+const call = await RelayLiveKitCall.connect({ relay, callId });
+call.attach(session);
+const avatar = new RelayRive();
+await avatar.start(session, call);
+avatar.rive?.on("trigger", (name) => console.log("the person fired", name));
+```
+
+Each reply sets the View Model's `speaking` true at the moment its first
+sample plays and false, with `viseme` 0, where its audio ends (at once when it
+is interrupted).
+Rename them with `speakingProperty` and `visemeProperty`, or pass `null`.
+`avatar.rive` sets any other value, fires triggers and switches files; time a
+value to speech with `{ at }` from the start `call.transport.writeAudio` resolves with.
+Word-timed mouth shapes need the session's transcription output, whose
+`TextOutput` class `@livekit/agents` 1.9 does not export; the Python
+`relaymessenger-livekit` reads TTS-aligned words and sends them.

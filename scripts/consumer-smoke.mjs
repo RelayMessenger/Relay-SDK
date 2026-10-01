@@ -115,6 +115,8 @@ try {
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
     "owner",
+    // Server 488: the agent's Rive file for calls.
+    "rive",
   ]);
   assert.deepEqual(interfaceFields("ChatActivity"), [
     "id", "text", "emoji", "updated_at", "expires_at",

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import type { RTCPeerConnection } from "werift";
 import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "../../src/index.js";
 import {
   RelayCallTransport,
@@ -614,3 +615,112 @@ it("resolves waitForPeerAudio after the person's pulled audio arrives over werif
   personTrack.stop();
   sfu.close();
 }, 30_000);
+
+it("opens the negotiated rive channel when the far side's renegotiation offer adds SCTP, and counts RTP time", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const agent = factory.createPeerConnection();
+  const sfu = factory.createPeerConnection();
+  const source = factory.createAudioSource();
+  agent.addTransceiver(source.createTrack(), { direction: "sendonly" });
+  const agentConnected = waitForConnected(agent);
+  const sfuConnected = waitForConnected(sfu);
+  await agent.setLocalDescription(await agent.createOffer());
+  await waitForIce(agent);
+  await sfu.setRemoteDescription({ type: "offer", sdp: agent.localDescription!.sdp });
+  await sfu.setLocalDescription(await sfu.createAnswer());
+  await waitForIce(sfu);
+  await agent.setRemoteDescription({ type: "answer", sdp: sfu.localDescription!.sdp });
+  await Promise.all([agentConnected.within(), sfuConnected.within()]);
+
+  // Cloudflare's `datachannels/establish` answers with an SFU offer that adds the application m-line.
+  const options = { negotiated: true as const, id: 3, ordered: false, maxRetransmits: 0 };
+  const far = sfu.createDataChannel!("rive", options);
+  await sfu.setLocalDescription(await sfu.createOffer());
+  await waitForIce(sfu);
+  await agent.setRemoteDescription({ type: "offer", sdp: sfu.localDescription!.sdp });
+  await agent.setLocalDescription(await agent.createAnswer());
+  await sfu.setRemoteDescription({ type: "answer", sdp: agent.localDescription!.sdp });
+  // The stand-in SFU is werift too, so it needs the same late start the agent's engine does by itself.
+  void (sfu as unknown as { sctpManager: { connectSctp(): Promise<void> } }).sctpManager.connectSctp();
+  const near = agent.createDataChannel!("rive", options);
+  const opened = (channel: typeof near): Promise<void> => new Promise((resolve) => {
+    if (channel.readyState === "open") resolve();
+    else channel.onopen = () => resolve();
+  });
+  await Promise.all([opened(near), opened(far)]);
+  const received = new Promise<string>((resolve) => {
+    far.onmessage = (event) => resolve(String(event.data));
+  });
+  near.send(JSON.stringify({ t: 20, view_model: { viseme: 3 } }));
+  expect(JSON.parse(await received)).toEqual({ t: 20, view_model: { viseme: 3 } });
+
+  // The source's clock is its RTP timestamp: 0 before the first packet, 20 ms per packet after.
+  expect(source.mediaTimeMs!()).toBe(0);
+  source.start!();
+  await sleep(110);
+  const ms = source.mediaTimeMs!();
+  expect(ms % 20).toBe(0);
+  expect(ms).toBeGreaterThanOrEqual(100);
+  agent.close();
+  sfu.close();
+  source.createTrack().stop();
+}, 20_000);
+
+it("keeps SFU-initiated SCTP connected when the negotiated rive id arrives later, and sends both ways", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const agent = factory.createPeerConnection() as unknown as RTCPeerConnection;
+  const sfu = factory.createPeerConnection() as unknown as RTCPeerConnection;
+  const source = factory.createAudioSource();
+  const track = source.createTrack();
+  agent.addTransceiver(track as Parameters<RTCPeerConnection["addTransceiver"]>[0], { direction: "sendonly" });
+  try {
+    const agentConnected = waitForConnected(agent as unknown as RelayPeerConnectionLike);
+    const sfuConnected = waitForConnected(sfu as unknown as RelayPeerConnectionLike);
+    await agent.setLocalDescription(await agent.createOffer());
+    await sfu.setRemoteDescription(agent.localDescription!);
+    await sfu.setLocalDescription(await sfu.createAnswer());
+    await agent.setRemoteDescription(sfu.localDescription!);
+    await Promise.all([agentConnected.within(), sfuConnected.within()]);
+
+    // Unlike the client-started test above, the SFU initiates SCTP before
+    // datachannels/new returns the agent's negotiated channel id.
+    const options = { negotiated: true, id: 2, ordered: false, maxRetransmits: 0 };
+    const far = sfu.createDataChannel("rive", options);
+    await sfu.setLocalDescription(await sfu.createOffer());
+    await agent.setRemoteDescription(sfu.localDescription!);
+    await agent.setLocalDescription(await agent.createAnswer());
+    await sfu.setRemoteDescription(agent.localDescription!);
+    const remoteSctp = sfu.sctpTransport!.sctp;
+    remoteSctp.isServer = false;
+    await remoteSctp.start(5000);
+    await expect.poll(() => agent.sctpTransport!.sctp.state).toBe("connected");
+    await expect.poll(() => far.readyState).toBe("open");
+    // werift's passive handshake does not call SCTP.start().
+    expect(agent.sctpTransport!.sctp.started).toBe(false);
+
+    const near = agent.createDataChannel("rive", options);
+    // Let any asynchronous start attempt settle before application sends.
+    await sleep(50);
+    const agentReceived: string[] = [];
+    const personReceived: string[] = [];
+    near.onmessage = ({ data }) => agentReceived.push(String(data));
+    far.onmessage = ({ data }) => personReceived.push(String(data));
+    const values = Array.from({ length: 17 }, (_, viseme) => JSON.stringify({ view_model: { viseme } }));
+    const reply = JSON.stringify({ view_model: { answer: "B" } });
+    for (const value of values) near.send(value);
+    far.send(reply);
+
+    // A channel can still claim "open" after a second start moves the
+    // association back to COOKIE_WAIT: incoming works, outgoing buffers.
+    expect(near.readyState).toBe("open");
+    await expect.poll(() => agentReceived).toEqual([reply]);
+    await expect.poll(() => personReceived).toHaveLength(values.length);
+    expect(personReceived.slice().sort()).toEqual(values.slice().sort());
+    expect(near.bufferedAmount).toBe(0);
+    expect(agent.sctpTransport!.sctp.state).toBe("connected");
+  } finally {
+    await agent.close();
+    await sfu.close();
+    track.stop();
+  }
+}, 20_000);
