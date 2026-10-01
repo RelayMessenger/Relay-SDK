@@ -950,6 +950,8 @@ class SetContactCardResponse(TypedDict, total=False):
     last_name: Optional[str]
     image_url: Optional[str]
     image_color: Optional[str]
+    #: The agent's Rive file for calls, or None when it has none.
+    rive: Optional[RiveFile]
     is_active: bool
     handle: str
     kind: Literal["user", "agent"]
