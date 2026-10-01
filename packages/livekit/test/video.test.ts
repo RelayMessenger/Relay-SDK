@@ -60,14 +60,12 @@ const remote = (): { track: RemoteVideoTrack; receiver: FakeReceiver } => {
 it("hands the person's camera to LiveKit as rtc-node I420 frames once the track is subscribed", async () => {
   const transport = new FakeTransport();
   const input = new RelayVideoInput(transport as unknown as RelayCallTransport);
-  expect(input.latestFrame).toBeUndefined();
+  const frames = input[Symbol.asyncIterator]();
+  const next = frames.next();
   const { track, receiver } = remote();
   transport.subscribe(track);
   await settle();
   expect(receiver.active).toBe(true);
-
-  const frames = input[Symbol.asyncIterator]();
-  const next = frames.next();
   receiver.emit(7);
   const { value } = await next;
   expect(value).toBeInstanceOf(RtcVideoFrame);
@@ -86,6 +84,7 @@ it("reads a track the transport already had, keeps only the newest unread frame,
   const { track, receiver } = remote();
   transport.remoteVideoTrack = track;
   const input = new RelayVideoInput(transport as unknown as RelayCallTransport);
+  expect(input.latestFrame).toBeUndefined();
   await settle();
 
   receiver.emit(1);
@@ -102,6 +101,41 @@ it("reads a track the transport already had, keeps only the newest unread frame,
   receiver.emit(4);
   expect((await frames.next()).value!.data[0]).toBe(4);
   await input.close();
+});
+
+it("decodes nothing for an audio-only agent: the camera starts on the first read", async () => {
+  const transport = new FakeTransport();
+  const { track, receiver } = remote();
+  transport.remoteVideoTrack = track;
+  const input = new RelayVideoInput(transport as unknown as RelayCallTransport);
+  const later = remote();
+  transport.subscribe(later.track);
+  await settle();
+  expect(receiver.active).toBe(false);
+  expect(later.receiver.active).toBe(false);
+  expect(transport.listeners.size).toBe(0);
+
+  expect(input.latestFrame).toBeUndefined();
+  await settle();
+  expect(later.receiver.active).toBe(true);
+  await input.close();
+});
+
+it("ends iteration when the call's video ends, without close()", async () => {
+  const transport = new FakeTransport();
+  const { track, receiver } = remote();
+  transport.remoteVideoTrack = track;
+  const input = new RelayVideoInput(transport as unknown as RelayCallTransport);
+  const seen: number[] = [];
+  const reading = (async () => { for await (const frame of input) seen.push(frame.data[0]!); })();
+  await settle();
+  receiver.emit(8);
+  await settle();
+  track._end();
+  const outcome = await Promise.race([reading.then(() => "returned"), new Promise((resolve) => setTimeout(() => resolve("hung"), 500))]);
+  expect(outcome).toBe("returned");
+  expect(seen).toEqual([8]);
+  expect(transport.listeners.size).toBe(0);
 });
 
 it("sends rtc-node frames through the Relay encoder, converting what it does not take to I420", () => {

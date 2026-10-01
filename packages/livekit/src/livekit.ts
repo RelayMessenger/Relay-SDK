@@ -111,18 +111,21 @@ export class RelayVideoInput implements AsyncIterable<RtcVideoFrame> {
   #pending: RtcVideoFrame | undefined;
   readonly #waiters = new Set<() => void>();
   #attached = true;
+  #started = false;
   #closed = false;
 
+  /** Nothing is decoded until the first read, so an audio-only agent never decodes the camera. */
   constructor(transport: RelayCallTransport) {
     this.#transport = transport;
     this.#onTrack = (track) => this.#subscribe(track);
-    transport.on("trackSubscribed", this.#onTrack);
-    const existing = transport.remoteVideoTrack;
-    if (existing) this.#subscribe(existing);
   }
 
-  /** The most recent frame from the person's camera, or `undefined` before the first one. */
+  /**
+   * The most recent frame from the person's camera, or `undefined` before the
+   * first one. The first read starts decoding.
+   */
   get latestFrame(): RtcVideoFrame | undefined {
+    this.#start();
     return this.#latest;
   }
 
@@ -131,14 +134,17 @@ export class RelayVideoInput implements AsyncIterable<RtcVideoFrame> {
     this.#attached = attached;
   }
 
+  /** Frames until the call's video ends or `close()`; starting it starts decoding. */
   async *[Symbol.asyncIterator](): AsyncIterator<RtcVideoFrame> {
-    while (!this.#closed) {
+    this.#start();
+    for (;;) {
       const frame = this.#pending;
       if (frame) {
         this.#pending = undefined;
         yield frame;
         continue;
       }
+      if (this.#closed) return;
       await new Promise<void>((resolve) => this.#waiters.add(resolve));
     }
   }
@@ -146,10 +152,19 @@ export class RelayVideoInput implements AsyncIterable<RtcVideoFrame> {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#pending = undefined;
     this.#transport.off("trackSubscribed", this.#onTrack);
     this.#wake();
     await this.#reader?.cancel().catch(() => undefined);
     await this.#reading;
+  }
+
+  #start(): void {
+    if (this.#started || this.#closed) return;
+    this.#started = true;
+    this.#transport.on("trackSubscribed", this.#onTrack);
+    const existing = this.#transport.remoteVideoTrack;
+    if (existing) this.#subscribe(existing);
   }
 
   #subscribe(track: RemoteVideoTrack): void {
@@ -165,7 +180,14 @@ export class RelayVideoInput implements AsyncIterable<RtcVideoFrame> {
         this.#pending = value.frame;
         this.#wake();
       }
-    })().catch(() => undefined);
+    })().catch(() => undefined).finally(() => {
+      // The track ends only when the call does (restarts keep it), so a
+      // reader that never calls close() still gets its loop back.
+      if (this.#closed) return;
+      this.#closed = true;
+      this.#transport.off("trackSubscribed", this.#onTrack);
+      this.#wake();
+    });
   }
 
   #wake(): void {

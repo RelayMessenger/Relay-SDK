@@ -48,6 +48,22 @@ describe("message parts on every send", () => {
     expect(message.parts).toEqual([{ type: "text", value: "👋 hi @atlas, meet Ada", mention: "atlas", mention_range: [6, 12] }]);
   });
 
+  it("marks only a whole @handle, never one inside a longer handle", async () => {
+    const message = await sendParts(["--text", "@bobby and @bob", "--mention", "bob"]);
+    expect(message.parts).toEqual([{ type: "text", value: "@bobby and @bob", mention: "bob", mention_range: [11, 15] }]);
+    const result = await run(["messages", "send", "--to", "ada", "--text", "@bobby only", "--mention", "bob"]);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("Write @bob in --text");
+    expect(result.calls).toHaveLength(0);
+  });
+
+  it("sends the handle lowercase, as Relay stores it, and finds it written in any case", async () => {
+    const message = await sendParts(["--text", "hi @Bob!", "--mention", "Bob"]);
+    expect(message.parts).toEqual([{ type: "text", value: "hi @Bob!", mention: "bob", mention_range: [3, 7] }]);
+    // "İ" lowercases to two code units; the range still counts the text as sent.
+    expect((await sendParts(["--text", "İ @Bob", "--mention", "bob"])).parts[0].mention_range).toEqual([2, 6]);
+  });
+
   it("sends media by URL or attachment ID, a link, buttons, a place and a payment", async () => {
     expect((await sendParts(["--text", "Look", "--media", "https://example.com/a.png", "--media", ATTACHMENT])).parts).toEqual([
       { type: "text", value: "Look" },

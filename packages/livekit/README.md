@@ -62,6 +62,8 @@ read the frames yourself: keep `call.videoInput.latestFrame` for an
 `llm.ImageContent` when the user's turn completes, or iterate
 `call.videoInput` into a realtime model that takes video. A reader always gets
 the newest frame; frames it did not read in time are replaced, not queued.
+Nothing is decoded until the first read, so an agent that never looks pays
+nothing for the camera, and iteration ends when the call does.
 
 ```ts
 import { llm, voice } from "@livekit/agents";

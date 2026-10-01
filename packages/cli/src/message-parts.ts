@@ -123,11 +123,19 @@ const textPart = (text: string, mention: string | undefined): TextPart => {
   const value = text.trim();
   if (!value) throw new Error("Message text cannot be empty.");
   if (mention === undefined) return { type: "text", value };
-  const handle = mention.trim().replace(/^@/u, "");
+  // Relay stores handles lowercase and matches a mention exactly
+  // (Relay-Server messaging.ts, `contact.handle=ANY($2)`), so send it lowercase.
+  const handle = mention.trim().replace(/^@/u, "").toLowerCase();
   const written = `@${handle}`;
-  // UTF-16 code units, the unit the contract measures mention ranges in.
-  const start = value.indexOf(written);
-  if (!handle || start < 0) throw new Error(`Write ${written} in --text to mention it.`);
+  // The first `@handle`, in any case, not followed by another handle
+  // character, so `@bob` is never found inside `@bobby`. JavaScript string
+  // indexes are UTF-16 code units, the unit the contract measures ranges in.
+  // Matched on the text itself, never a lowercased copy, whose length can differ.
+  const found = handle
+    ? new RegExp(`@${handle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?![A-Za-z0-9_])`, "iu").exec(value)
+    : null;
+  if (!found) throw new Error(`Write ${written} in --text to mention it.`);
+  const start = found.index;
   return { type: "text", value, mention: handle, mention_range: [start, start + written.length] };
 };
 
