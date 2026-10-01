@@ -551,10 +551,10 @@ export type HandleOwner =
 
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
-  /** The Rive file this agent shows in its calls, so an app can load it early; null when it has none. */
-  rive?: RiveFile | null;
   /** Who owns this agent. Null for an agent no organization or person owns. */
   owner?: HandleOwner | null;
+  /** The Rive file this agent shows in its calls, so an app can load it early; null when it has none. */
+  rive?: RiveFile | null;
 }
 
 export type ChatHandle = UserChatHandle | AgentChatHandle;
