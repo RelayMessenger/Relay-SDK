@@ -514,6 +514,12 @@ export const createWeriftPeerConnection = (
  * never associates and its channels stay `connecting` (measured on loopback,
  * 2026-10-01). Starting the association once the remote description names
  * the SCTP port is werift's own `connectSctp()`, run late.
+ *
+ * The SFU may already have initiated SCTP before the channel id arrives.
+ * werift's passive handshake reaches `connected` without setting `started`;
+ * calling `connectSctp()` then sends another INIT and moves the association
+ * back to COOKIE_WAIT. The channel still says open, but sends only buffer.
+ * Preserve that connected association instead of starting it again.
  */
 const createDataChannelAfterRenegotiation = (peer: RTCPeerConnection): RTCPeerConnection => {
   const create = peer.createDataChannel.bind(peer);
@@ -521,7 +527,8 @@ const createDataChannelAfterRenegotiation = (peer: RTCPeerConnection): RTCPeerCo
   let started = false;
   peer.createDataChannel = (label, options) => {
     const channel = create(label, options);
-    if (!started && peer.connectionState === "connected" && manager.sctpRemotePort) {
+    if (!started && peer.connectionState === "connected" && manager.sctpRemotePort
+      && peer.sctpTransport?.sctp.state !== "connected") {
       started = true;
       void manager.connectSctp().catch(() => undefined);
     }

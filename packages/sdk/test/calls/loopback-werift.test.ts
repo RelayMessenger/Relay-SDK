@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import type { RTCPeerConnection } from "werift";
 import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "../../src/index.js";
 import {
   RelayCallTransport,
@@ -663,4 +664,63 @@ it("opens the negotiated rive channel when the far side's renegotiation offer ad
   agent.close();
   sfu.close();
   source.createTrack().stop();
+}, 20_000);
+
+it("keeps SFU-initiated SCTP connected when the negotiated rive id arrives later, and sends both ways", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const agent = factory.createPeerConnection() as unknown as RTCPeerConnection;
+  const sfu = factory.createPeerConnection() as unknown as RTCPeerConnection;
+  const source = factory.createAudioSource();
+  const track = source.createTrack();
+  agent.addTransceiver(track as Parameters<RTCPeerConnection["addTransceiver"]>[0], { direction: "sendonly" });
+  try {
+    const agentConnected = waitForConnected(agent as unknown as RelayPeerConnectionLike);
+    const sfuConnected = waitForConnected(sfu as unknown as RelayPeerConnectionLike);
+    await agent.setLocalDescription(await agent.createOffer());
+    await sfu.setRemoteDescription(agent.localDescription!);
+    await sfu.setLocalDescription(await sfu.createAnswer());
+    await agent.setRemoteDescription(sfu.localDescription!);
+    await Promise.all([agentConnected.within(), sfuConnected.within()]);
+
+    // Unlike the client-started test above, the SFU initiates SCTP before
+    // datachannels/new returns the agent's negotiated channel id.
+    const options = { negotiated: true, id: 2, ordered: false, maxRetransmits: 0 };
+    const far = sfu.createDataChannel("rive", options);
+    await sfu.setLocalDescription(await sfu.createOffer());
+    await agent.setRemoteDescription(sfu.localDescription!);
+    await agent.setLocalDescription(await agent.createAnswer());
+    await sfu.setRemoteDescription(agent.localDescription!);
+    const remoteSctp = sfu.sctpTransport!.sctp;
+    remoteSctp.isServer = false;
+    await remoteSctp.start(5000);
+    await expect.poll(() => agent.sctpTransport!.sctp.state).toBe("connected");
+    await expect.poll(() => far.readyState).toBe("open");
+    // werift's passive handshake does not call SCTP.start().
+    expect(agent.sctpTransport!.sctp.started).toBe(false);
+
+    const near = agent.createDataChannel("rive", options);
+    // Let any asynchronous start attempt settle before application sends.
+    await sleep(50);
+    const agentReceived: string[] = [];
+    const personReceived: string[] = [];
+    near.onmessage = ({ data }) => agentReceived.push(String(data));
+    far.onmessage = ({ data }) => personReceived.push(String(data));
+    const values = Array.from({ length: 17 }, (_, viseme) => JSON.stringify({ view_model: { viseme } }));
+    const reply = JSON.stringify({ view_model: { answer: "B" } });
+    for (const value of values) near.send(value);
+    far.send(reply);
+
+    // A channel can still claim "open" after a second start moves the
+    // association back to COOKIE_WAIT: incoming works, outgoing buffers.
+    expect(near.readyState).toBe("open");
+    await expect.poll(() => agentReceived).toEqual([reply]);
+    await expect.poll(() => personReceived).toHaveLength(values.length);
+    expect(personReceived.slice().sort()).toEqual(values.slice().sort());
+    expect(near.bufferedAmount).toBe(0);
+    expect(agent.sctpTransport!.sctp.state).toBe("connected");
+  } finally {
+    await agent.close();
+    await sfu.close();
+    track.stop();
+  }
 }, 20_000);
