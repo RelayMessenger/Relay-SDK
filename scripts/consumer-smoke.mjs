@@ -170,7 +170,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 63);
+      assert.equal(RELAY_V1_OPERATIONS.length, 57);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -220,14 +220,8 @@ try {
         "GET /v1/webhook-subscriptions/{subscriptionId}",
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
-        "POST /v1/address_book/agent_counts",
-        "GET /v1/agents/suggested",
-        "POST /v1/agent_requests",
         "POST /v1/contacts/lookup",
         "GET /v1/directory",
-        "PUT /v1/contacts/{handle}/rating",
-        "DELETE /v1/contacts/{handle}/rating",
-        "GET /v1/contacts/{handle}/ratings",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",

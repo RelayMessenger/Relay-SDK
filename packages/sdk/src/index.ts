@@ -1,7 +1,5 @@
 export {
   Access,
-  AddressBook,
-  AgentRequests,
   Agents,
   Attachments,
   BlockedHandles,
@@ -13,7 +11,6 @@ export {
   Me,
   Messages,
   PaymentRequests,
-  Ratings,
   Relay,
   WebSocket,
   WebhookEvents,

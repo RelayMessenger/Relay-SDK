@@ -247,21 +247,6 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
-    "path": "/v1/address_book/agent_counts",
-    "operationId": "countAgentsInAddressBook"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/agents/suggested",
-    "operationId": "listSuggestedAgents"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/agent_requests",
-    "operationId": "requestAgent"
-  },
-  {
-    "method": "POST",
     "path": "/v1/contacts/lookup",
     "operationId": "lookupContact"
   },
@@ -269,21 +254,6 @@ export const RELAY_V1_OPERATIONS = [
     "method": "GET",
     "path": "/v1/directory",
     "operationId": "listDirectory"
-  },
-  {
-    "method": "PUT",
-    "path": "/v1/contacts/{handle}/rating",
-    "operationId": "rateAgent"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/contacts/{handle}/rating",
-    "operationId": "deleteAgentRating"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/contacts/{handle}/ratings",
-    "operationId": "listAgentRatings"
   },
   {
     "method": "GET",
