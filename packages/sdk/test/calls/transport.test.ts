@@ -1570,3 +1570,25 @@ it("rejects rive() at once when the room refuses the channel, and the call goes 
   expect(errors).toHaveLength(1);
   transport.close();
 });
+
+it("keeps the open rive channel when Relay repeats its id", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const opening = transport.rive();
+  room.emit("rive", { type: "rive", id: 2 });
+  await flush();
+  const peer = webRTC.peers[0]!;
+  peer.channels[0]!.open();
+  await opening;
+  room.emit("rive", { type: "rive", id: 2 });
+  await flush();
+  expect(peer.channels).toHaveLength(1);
+  expect(peer.channels[0]!.closed).toBe(false);
+  room.emit("rive", { type: "rive", id: 5 });
+  await flush();
+  expect(peer.channels).toHaveLength(2);
+  expect(peer.channels[0]!.closed).toBe(true);
+  transport.close();
+});

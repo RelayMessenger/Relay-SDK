@@ -814,3 +814,39 @@ async def test_rive_is_rejected_at_once_when_the_room_refuses_the_channel() -> N
     assert raised.value.code == "media_unavailable"
     assert not FakePeer.instances[0].closed
     await transport.aclose()
+
+
+async def test_write_audio_returns_the_frames_track_start_once_the_person_receives_it() -> None:
+    import numpy as np
+
+    from relaymessenger.calls.transport import RelayAudioFrame
+
+    transport, room = make()
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    source._pts = 960 * 100  # 2 s of RTP sent
+    frame = RelayAudioFrame(samples=np.zeros(960, dtype=np.int16), sample_rate=48_000, channel_count=1)
+    # Held: the start is known only when the person starts receiving.
+    assert await transport.write_audio(frame) is None
+    room.emit("room_state", receiving_state(["audio"]))
+    assert transport.subscribed
+    # 20 ms already queued ahead of it.
+    assert await transport.write_audio(frame) == pytest.approx(2_020)
+    await transport.aclose()
+
+
+async def test_rive_keeps_the_open_channel_when_relay_repeats_its_id() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    room.emit("rive", {"type": "rive", "id": 2})
+    await settle()
+    peer = FakePeer.instances[0]
+    peer.channels[0].open()
+    await opening
+    room.emit("rive", {"type": "rive", "id": 2})
+    await settle()
+    assert len(peer.channels) == 1 and peer.channels[0].readyState == "open"
+    await transport.aclose()

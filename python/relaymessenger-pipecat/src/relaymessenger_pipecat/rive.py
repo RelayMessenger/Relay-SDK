@@ -44,9 +44,11 @@ class RelayRiveProcessor(FrameProcessor):
 
     A word's ``pts`` is the pipeline clock at the turn's first audio plus the
     word's offset in that audio (Pipecat ``TTSService.start_word_timestamps``).
-    The processor reads the Relay audio clock (``audio_time_ms``) when the
-    turn's first audio passes it, so each word lands at its offset into that
-    audio on the agent's track, which is the ``t`` the phone plays it at.
+    The processor notes the pipeline clock when the turn's first audio passes
+    it, and the transport reports where the next audio write lands on the
+    agent's track (after Pipecat's output queue), so each word lands at its
+    offset into that audio, which is the ``t`` the phone plays it at. Words
+    wait until that write.
     """
 
     def __init__(
@@ -67,6 +69,12 @@ class RelayRiveProcessor(FrameProcessor):
         self._audio_anchor: Optional[float] = None
         # The latest word, sent once the next word (or the turn's end) gives its end.
         self._pending: Optional[tuple[str, float]] = None
+        # Words of this turn seen before its first audio reached Relay, as (text, pts).
+        self._early: list[tuple[str, int]] = []
+        # Bumped each turn, so a write callback for an old turn is ignored.
+        self._turn = 0
+        # Untimed values asked for while the channel opened, sent once it is open.
+        self._wanted: dict[str, object] = {}
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -75,7 +83,7 @@ class RelayRiveProcessor(FrameProcessor):
             self._handle()
         elif isinstance(frame, TTSStartedFrame):
             self._new_turn()
-        elif isinstance(frame, TTSAudioRawFrame) and self._audio_anchor is None:
+        elif isinstance(frame, TTSAudioRawFrame):
             self._anchor()
         elif isinstance(frame, TTSTextFrame) and frame.pts:
             self._word(frame.text, frame.pts)
@@ -86,6 +94,7 @@ class RelayRiveProcessor(FrameProcessor):
             self._set_speaking(False)
         elif isinstance(frame, InterruptionFrame):
             self._pending = None
+            self._early = []
             self._new_turn()
             self._set_untimed({self._viseme: 0} if self._viseme else {})
         elif isinstance(frame, (EndFrame, CancelFrame)) and self._opening is not None:
@@ -95,21 +104,32 @@ class RelayRiveProcessor(FrameProcessor):
 
     def _new_turn(self) -> None:
         self._flush()
+        self._turn += 1
         self._clock_anchor = None
         self._audio_anchor = None
+        self._early = []
 
     def _anchor(self) -> None:
-        call = self._transport.call
-        if call is None:
-            return
-        try:
-            self._audio_anchor = call.audio_time_ms()
-        except Exception:
+        if self._transport.call is None or self._clock_anchor is not None:
             return
         self._clock_anchor = self.get_clock().get_time()
+        turn = self._turn
+
+        def written(start: Optional[float]) -> None:
+            if turn != self._turn or start is None:
+                return
+            self._audio_anchor = start
+            early, self._early = self._early, []
+            for text, pts in early:
+                self._word(text, pts)
+
+        self._transport.on_next_audio_write(written)
 
     def _word(self, text: str, pts: int) -> None:
-        if not self._viseme or self._clock_anchor is None or self._audio_anchor is None:
+        if not self._viseme or self._clock_anchor is None:
+            return
+        if self._audio_anchor is None:
+            self._early.append((text, pts))
             return
         start = self._audio_anchor + (pts - self._clock_anchor) / 1_000_000
         if self._pending is not None:
@@ -136,9 +156,13 @@ class RelayRiveProcessor(FrameProcessor):
             self._set_untimed({self._speaking: speaking})
 
     def _set_untimed(self, values: dict[str, object]) -> None:
+        if not values:
+            return
         rive = self._handle()
-        if rive is not None and values:
-            rive.set(values)  # type: ignore[arg-type]
+        if rive is None:
+            self._wanted.update(values)
+            return
+        rive.set(values)  # type: ignore[arg-type]
 
     def _handle(self) -> Optional[RelayRive]:
         """The open channel's handle; opens it in the background on first use."""
@@ -155,6 +179,9 @@ class RelayRiveProcessor(FrameProcessor):
             return
         try:
             self._rive = await call.rive()
+            wanted, self._wanted = self._wanted, {}
+            if wanted:
+                self._rive.set(wanted)  # type: ignore[arg-type]
         except Exception as error:
             logger.warning(f"Relay Rive channel did not open: {error}")
             self._opening = None

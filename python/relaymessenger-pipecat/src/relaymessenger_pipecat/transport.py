@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 from loguru import logger
@@ -123,6 +123,8 @@ class RelayTransportClient:
         self._callbacks = callbacks
         self._transport_name = transport_name
         self._call: Optional[RelayCallTransport] = None
+        #: One-shot callbacks for the next audio write, with where it starts on the agent's track.
+        self._write_listeners: list[Callable[[Optional[float]], None]] = []
         # The call's connect(), still bringing media up after the join returned.
         self._media: Optional["asyncio.Task[None]"] = None
         self._lock = asyncio.Lock()
@@ -251,7 +253,12 @@ class RelayTransportClient:
         if not self._connected or call is None:
             return False
         samples = np.frombuffer(audio, dtype=np.int16)
-        await call.write_audio(RelayAudioFrame(samples=samples, sample_rate=sample_rate, channel_count=num_channels))
+        estimate = call.audio_time_ms() if self._write_listeners else None
+        start = await call.write_audio(RelayAudioFrame(samples=samples, sample_rate=sample_rate, channel_count=num_channels))
+        if self._write_listeners:
+            listeners, self._write_listeners = self._write_listeners, []
+            for listener in listeners:
+                listener(start if start is not None else estimate)
         # Wait while the queue is over its size, as LiveKit's AudioSource.capture_frame does,
         # so the output's bot-speaking state follows the wire. Only while the wire is live:
         # while media connects or restarts the call holds its queue (PROTOCOL.md section 6b),
@@ -265,6 +272,10 @@ class RelayTransportClient:
     def clear_audio(self) -> None:
         if self._call is not None:
             self._call.clear_audio()
+
+    def on_next_audio_write(self, listener: Callable[[Optional[float]], None]) -> None:
+        """Call ``listener`` once, after the next audio write, with where it starts on the agent's track."""
+        self._write_listeners.append(listener)
 
     def write_video(self, frame: RelayVideoFrame) -> bool:
         if not self._connected or self._video_source is None:
@@ -634,6 +645,10 @@ class RelayTransport(BaseTransport):
     def participant_id(self) -> Optional[str]:
         """The person's contact ID."""
         return self._client.participant_id
+
+    def on_next_audio_write(self, listener: Callable[[Optional[float]], None]) -> None:
+        """Call ``listener`` once, after the output's next audio write, with where it starts on the agent's track."""
+        self._client.on_next_audio_write(listener)
 
     def end(self) -> None:
         """End the Relay Call for both participants."""

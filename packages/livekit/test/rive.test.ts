@@ -20,8 +20,11 @@ class FakeTransport {
   };
   async rive(): Promise<typeof this.channel> { return this.channel; }
   audioTimeMs(): number { return this.clockMs; }
-  async writeAudio(frame: RelayAudioFrame): Promise<void> {
+  /** Resolves with the frame's start on the track, as RelayCallTransport does. */
+  async writeAudio(frame: RelayAudioFrame): Promise<number> {
+    const start = this.clockMs;
     this.clockMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
+    return start;
   }
   queuedAudioMs(): number { return 0; }
   clearAudio(): void { this.#playout?.(); }
@@ -54,7 +57,8 @@ it("sets speaking at the audio time the reply's first sample plays, and clears i
   await settle();
   expect(transport.sent).toEqual([
     [{ speaking: true }, 12_000],
-    [{ speaking: false, viseme: 0 }, undefined],
+    // The reply rests where its 40 ms of audio end on the track.
+    [{ speaking: false, viseme: 0 }, 12_040],
   ]);
   // The next reply starts where the first one's audio ended on the track.
   await call.output.captureFrame(frame(20));
@@ -69,5 +73,5 @@ it("renames or leaves out the properties", async () => {
   call.output.flush();
   transport.drain();
   await settle();
-  expect(transport.sent).toEqual([[{ talking: true }, 12_000], [{ talking: false }, undefined]]);
+  expect(transport.sent).toEqual([[{ talking: true }, 12_000], [{ talking: false }, 12_020]]);
 });

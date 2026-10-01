@@ -71,6 +71,8 @@ def test_parses_phone_messages_and_drops_the_malformed() -> None:
     assert parse_rive_message("[]") is None
     assert parse_rive_message('{"t":5}') is None
     assert parse_rive_message('{"trigger":3}') is None
+    # A 400-digit integer overflows math.isfinite; it is refused, never raised.
+    assert parse_rive_message('{"view_model":{"x":' + "9" * 400 + "}}") is None
 
 
 def test_maps_letters_through_papagayos_table_like_typescript() -> None:
@@ -134,3 +136,41 @@ async def test_negotiated_rive_channel_opens_over_aiortc_when_the_far_side_reneg
     assert json.loads(await asyncio.wait_for(received, 5)) == {"t": 20, "view_model": {"viseme": 3}}
     await agent.close()
     await sfu.close()
+
+
+async def test_the_rive_clock_is_the_wire_rtp_timestamp_over_aiortc() -> None:
+    """aiortc adds a random origin to every RTP timestamp; `rtp_origin` reads it back so `t` matches the wire."""
+    from aiortc import RTCPeerConnection
+    from aiortc.rtp import RtpPacket
+
+    from relaymessenger.calls._audio import RelayAudioSource, rtp_origin
+
+    agent, far = RTCPeerConnection(), RTCPeerConnection()
+    source = RelayAudioSource()
+    track = source.create_track()
+    sender = agent.addTransceiver(track, direction="sendonly").sender
+    wire: list[tuple[int, int]] = []  # (wire timestamp, source pts of the packet the track handed out)
+    send_rtp = sender.transport._send_rtp
+
+    async def record(data: bytes) -> None:
+        wire.append((RtpPacket.parse(data).timestamp, track.last_pts))
+        await send_rtp(data)
+
+    sender.transport._send_rtp = record
+    await agent.setLocalDescription(await agent.createOffer())
+    await far.setRemoteDescription(agent.localDescription)
+    await far.setLocalDescription(await far.createAnswer())
+    await agent.setRemoteDescription(far.localDescription)
+    origin = None
+    for _ in range(400):
+        origin = rtp_origin(sender)
+        if origin is not None and len(wire) >= 3:
+            break
+        await asyncio.sleep(0.01)
+    assert origin is not None and wire
+    # The serialized packets carry origin + the source's timestamp, mod 2^32.
+    assert all(timestamp == (origin + pts) & 0xFFFFFFFF for timestamp, pts in wire)
+    sender.transport._send_rtp = send_rtp
+    source.stop()  # the sender's pull ends, as the transport's teardown does
+    await asyncio.wait_for(far.close(), 10)
+    await asyncio.wait_for(agent.close(), 10)

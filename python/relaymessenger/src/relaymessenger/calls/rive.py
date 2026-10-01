@@ -26,10 +26,16 @@ RiveValue = Union[int, float, bool, str]
 RiveEvent = Literal["view_model", "trigger"]
 
 
+#: JavaScript's largest exact integer: larger ints cannot round-trip to the phone and overflow math.isfinite.
+_MAX_SAFE_INTEGER = 2**53 - 1
+
+
 def _is_value(value: Any) -> bool:
     if isinstance(value, bool) or isinstance(value, str):
         return True
-    return isinstance(value, (int, float)) and math.isfinite(value)
+    if isinstance(value, int):
+        return abs(value) <= _MAX_SAFE_INTEGER
+    return isinstance(value, float) and math.isfinite(value)
 
 
 def _valid_values(values: Any) -> bool:
@@ -150,7 +156,10 @@ class RelayRive(EventEmitter[RiveEvent]):
         return self._send(text)
 
     def _receive(self, data: Union[str, bytes]) -> None:
-        message = parse_rive_message(data)
+        try:
+            message = parse_rive_message(data)
+        except Exception:  # nothing a peer sends may reach aiortc's receive loop as an exception
+            return
         if message is None:
             return
         if "view_model" in message:

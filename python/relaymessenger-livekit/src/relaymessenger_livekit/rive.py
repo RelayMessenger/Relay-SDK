@@ -38,6 +38,8 @@ class RelayRive:
         self._viseme = viseme_property
         self._speaking = speaking_property
         self._call: Optional[RelayLiveKitCall] = None
+        #: Words that arrived before their segment's audio, timed once it starts.
+        self._pending: list[TimedString] = []
         #: The call's Rive channel once `start` returns: ``set``, ``trigger``, ``show``, and events.
         self.rive: Optional[RelayRiveChannel] = None
 
@@ -50,27 +52,39 @@ class RelayRive:
             agent_session.output.transcription = _RiveTranscription(self, agent_session.output.transcription)
 
     def _playback_started(self, _event: PlaybackStartedEvent) -> None:
-        if self.rive is None or not self._speaking or self._call is None:
+        if self.rive is None or self._call is None:
             return
-        self.rive.set({self._speaking: True}, at=self._call.output.segment_start_ms)
+        if self._speaking:
+            self.rive.set({self._speaking: True}, at=self._call.output.segment_start_ms)
+        pending, self._pending = self._pending, []
+        for word in pending:
+            self._word(word)
 
-    def _playback_finished(self, _event: PlaybackFinishedEvent) -> None:
-        if self.rive is None:
+    def _playback_finished(self, event: PlaybackFinishedEvent) -> None:
+        self._pending = []
+        if self.rive is None or self._call is None:
             return
         values: dict[str, Any] = {}
         if self._speaking:
             values[self._speaking] = False
         if self._viseme:
             values[self._viseme] = 0
-        if values:
-            self.rive.set(values)
+        if not values:
+            return
+        start = self._call.output.segment_start_ms
+        # A finished reply rests where its audio ends, after its last timed mouth shape; an interrupted one at once.
+        at = None if event.interrupted or start is None else start + event.playback_position * 1_000
+        self.rive.set(values, at=at)
 
     def _word(self, word: TimedString) -> None:
         call = self._call
         if self.rive is None or call is None or not self._viseme:
             return
+        if not utils.is_given(word.start_time) or not utils.is_given(word.end_time):
+            return
         anchor = call.output.segment_start_ms
-        if anchor is None or not utils.is_given(word.start_time) or not utils.is_given(word.end_time):
+        if anchor is None:
+            self._pending.append(word)
             return
         timing = WordTiming(str(word).strip(), anchor + word.start_time * 1_000, anchor + word.end_time * 1_000)
         for cue in visemes_from_alignment(alignment_from_words([timing]), end_with_rest=False):

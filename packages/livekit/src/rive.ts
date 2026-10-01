@@ -47,11 +47,15 @@ export class RelayRive {
     this.rive.set({ [this.#speaking]: true }, at === undefined ? {} : { at });
   };
 
-  readonly #finished = (): void => {
-    if (!this.rive) return;
+  readonly #finished = (event: { playbackPosition: number; interrupted: boolean }): void => {
+    if (!this.rive || !this.#call) return;
     const values: Record<string, boolean | number> = {};
     if (this.#speaking) values[this.#speaking] = false;
     if (this.#viseme) values[this.#viseme] = 0;
-    if (Object.keys(values).length) this.rive.set(values);
+    if (!Object.keys(values).length) return;
+    const start = this.#call.output.segmentStartMs;
+    // A finished reply rests where its audio ends, after its last timed change; an interrupted one at once.
+    const at = event.interrupted || start === undefined ? undefined : start + event.playbackPosition * 1_000;
+    this.rive.set(values, at === undefined ? {} : { at });
   };
 }

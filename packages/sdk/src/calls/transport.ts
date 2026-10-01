@@ -693,7 +693,7 @@ export class RelayCallTransport {
   #personReceivingAudio = false;
   readonly #subscriptionWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
   /** Application audio written before the person receives this transport's audio, in write order (PROTOCOL.md section 6b). */
-  readonly #heldAudio: { frame: RelayAudioFrame; ms: number; resolve: () => void }[] = [];
+  readonly #heldAudio: { frame: RelayAudioFrame; ms: number; resolve: (startMs: number | undefined) => void }[] = [];
   #heldAudioMs = 0;
   readonly #heldAudioWaiters: (() => void)[] = [];
   #peerAudioArrived = false;
@@ -727,6 +727,7 @@ export class RelayCallTransport {
   #rive: RelayRive | undefined;
   /** The `rive` channel on the current peer. */
   #riveChannel: RelayDataChannelLike | undefined;
+  #riveChannelId: number | undefined;
   readonly #riveWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
 
   constructor(options: RelayCallTransportOptions) {
@@ -970,8 +971,14 @@ export class RelayCallTransport {
    * frame resolves when it is queued, or when it is dropped: by `clearAudio()`,
    * the Call ending, or `close()`. It never rejects, so an unawaited write
    * cannot become an unhandled rejection.
+   *
+   * It resolves with where the frame's first sample sits on this agent's
+   * audio track, in the milliseconds Rive messages use for `at` (the RTP time
+   * sent plus what was queued ahead of it, measured when the frame is queued,
+   * so a held frame gets its real start), or `undefined` when the frame was
+   * dropped or the engine has no RTP clock.
    */
-  writeAudio(frame: RelayAudioFrame): Promise<void> {
+  writeAudio(frame: RelayAudioFrame): Promise<number | undefined> {
     if (this.#closed) return Promise.reject(new Error("Relay Call transport is closed."));
     if (!this.#audioSource) return Promise.reject(new Error("Relay Call transport is not connected."));
     if (!Number.isInteger(frame.sampleRate) || frame.sampleRate <= 0 || frame.sampleRate % 100 !== 0) {
@@ -989,10 +996,9 @@ export class RelayCallTransport {
       channelCount: frame.channelCount,
     };
     if (this.subscribed && this.#heldAudio.length === 0) {
-      this.#writeAudio(captured, this.#audioGeneration);
-      return Promise.resolve();
+      return Promise.resolve(this.#writeAudio(captured, this.#audioGeneration));
     }
-    return new Promise<void>((resolve) => {
+    return new Promise<number | undefined>((resolve) => {
       const ms = (captured.samples.length / captured.channelCount / captured.sampleRate) * 1000;
       this.#heldAudio.push({ frame: captured, ms, resolve });
       this.#heldAudioMs += ms;
@@ -1041,7 +1047,8 @@ export class RelayCallTransport {
    * add offsets inside that audio to time Rive messages (`at`). The track
    * sends silence whenever nothing is queued, so the clock runs from connect
    * and survives restarts. Audio held before the person receives this track
-   * starts later than this estimate, by the time the hold lasts.
+   * starts later than this estimate, by the time the hold lasts; the value
+   * `writeAudio` resolves with is exact either way.
    */
   audioTimeMs(): number {
     const source = this.#audioSource;
@@ -1101,7 +1108,11 @@ export class RelayCallTransport {
     const peer = this.#peer;
     const rive = this.#rive;
     if (!peer?.createDataChannel || !rive || this.#closed || this.#ended) return;
-    this.#riveChannel?.close();
+    // Relay repeats the id for a repeated request: the open channel stays (closing it would free the id late).
+    const current = this.#riveChannel;
+    if (current && this.#riveChannelId === frame.id && current.readyState !== "closed" && current.readyState !== "closing") return;
+    this.#closeRiveChannel();
+    this.#riveChannelId = frame.id;
     const channel = peer.createDataChannel(RIVE_CHANNEL, {
       negotiated: true,
       id: frame.id,
@@ -1125,6 +1136,7 @@ export class RelayCallTransport {
   #closeRiveChannel(): void {
     const channel = this.#riveChannel;
     this.#riveChannel = undefined;
+    this.#riveChannelId = undefined;
     if (!channel) return;
     channel.onopen = null;
     channel.onmessage = null;
@@ -1204,10 +1216,7 @@ export class RelayCallTransport {
   #releaseHeldAudio(): void {
     const held = this.#heldAudio.splice(0);
     this.#heldAudioMs = 0;
-    for (const entry of held) {
-      this.#writeAudio(entry.frame, this.#audioGeneration);
-      entry.resolve();
-    }
+    for (const entry of held) entry.resolve(this.#writeAudio(entry.frame, this.#audioGeneration));
     const waiters = this.#heldAudioWaiters.splice(0);
     for (const waiter of waiters) waiter();
   }
@@ -1216,7 +1225,7 @@ export class RelayCallTransport {
   #dropHeldAudio(): void {
     const held = this.#heldAudio.splice(0);
     this.#heldAudioMs = 0;
-    for (const entry of held) entry.resolve();
+    for (const entry of held) entry.resolve(undefined);
     const waiters = this.#heldAudioWaiters.splice(0);
     for (const waiter of waiters) waiter();
   }
@@ -1757,13 +1766,15 @@ export class RelayCallTransport {
     if (!existing) this.#emit("trackSubscribed", remote);
   }
 
-  #writeAudio(frame: RelayAudioFrame, generation: number): void {
+  /** Queues the frame and returns where it starts on the audio track (`audioTimeMs()` at that moment), or undefined when dropped. */
+  #writeAudio(frame: RelayAudioFrame, generation: number): number | undefined {
     const source = this.#audioSource;
-    if (!source || generation !== this.#audioGeneration) return;
+    if (!source || generation !== this.#audioGeneration) return undefined;
+    const startMs = source.mediaTimeMs ? source.mediaTimeMs() + (source.queuedMs?.() ?? 0) : undefined;
     const samplesPerChannel = (frame.sampleRate * AUDIO_SLICE_MS) / 1000;
     const sliceSamples = samplesPerChannel * frame.channelCount;
     for (let offset = 0; offset < frame.samples.length; offset += sliceSamples) {
-      if (this.#closed || generation !== this.#audioGeneration) return;
+      if (this.#closed || generation !== this.#audioGeneration) return undefined;
       const remaining = Math.min(sliceSamples, frame.samples.length - offset);
       const samples = new Int16Array(sliceSamples);
       samples.set(frame.samples.subarray(offset, offset + remaining));
@@ -1776,6 +1787,7 @@ export class RelayCallTransport {
       });
       this.#outboundFrames += 1;
     }
+    return startMs;
   }
 
   #releasePlayoutWaiters(): void {

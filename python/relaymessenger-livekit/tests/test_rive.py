@@ -37,8 +37,10 @@ class FakeTransport(rtc.EventEmitter[str]):
     def audio_time_ms(self) -> float:
         return self.clock_ms
 
-    async def write_audio(self, frame: RelayAudioFrame) -> None:
+    async def write_audio(self, frame: RelayAudioFrame) -> float:
+        start = self.clock_ms
         self.clock_ms += frame.samples.size / frame.sample_rate * 1000
+        return start
 
     def queued_audio_ms(self) -> float:
         return 0.0
@@ -76,9 +78,9 @@ async def test_start_times_speaking_and_words_against_the_segments_audio() -> No
     await avatar.start(session, call)  # type: ignore[arg-type]
     assert avatar.rive is transport.channel
 
-    await output.capture_frame(frame(20))
-    # Words arrive with times relative to the segment's audio (LiveKit's synchronizer: start_time - pushed_duration).
+    # Words may arrive before their audio (LiveKit forwards text and audio separately): they wait for it.
     await session.output.transcription.capture_text(TimedString("map", start_time=0.0, end_time=0.3))
+    await output.capture_frame(frame(20))
     await session.output.transcription.capture_text("plain text passes through")
     output.flush()
     transport.playout.set_result(None)
@@ -89,7 +91,8 @@ async def test_start_times_speaking_and_words_against_the_segments_audio() -> No
     assert sent[0] == ({"speaking": True}, 12_000.0)
     visemes = [(at, VISEMES[values["viseme"]]) for values, at in sent if set(values) == {"viseme"}]
     assert visemes == [(12_000, "MBP"), (12_100, "AI"), (12_200, "MBP")]
-    assert sent[-1] == ({"speaking": False, "viseme": 0}, None)
+    # The reply rests where its 20 ms of audio end.
+    assert sent[-1] == ({"speaking": False, "viseme": 0}, 12_020.0)
     assert downstream.texts == ["map", "plain text passes through"]
 
 

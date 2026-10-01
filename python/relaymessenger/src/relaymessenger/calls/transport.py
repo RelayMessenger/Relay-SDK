@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
 import numpy as np
 from aiortc import RTCSessionDescription
-from ._audio import RelayAudioSink, RelayAudioSource, monotonic_ms
+from ._audio import RelayAudioSink, RelayAudioSource, monotonic_ms, rtp_origin
 from ._audio_format import INBOUND_SAMPLE_RATES, Int16Array
 from ._engine import (
     PeerConfig,
@@ -398,7 +398,11 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._rive: Optional[RelayRive] = None
         #: The ``rive`` channel on the current peer.
         self._rive_channel: Any = None
+        self._rive_channel_id: Optional[int] = None
         self._rive_waiters: set[asyncio.Future[None]] = set()
+        #: The publish sender whose random RTP timestamp origin is known, and that origin.
+        self._origin_sender: Any = None
+        self._origin = 0
         self._candidates_recorded_for: Any = None
 
     # ---- lifecycle ------------------------------------------------------------------
@@ -493,7 +497,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
 
     # ---- audio ----------------------------------------------------------------------
 
-    async def write_audio(self, frame: RelayAudioFrame) -> None:
+    async def write_audio(self, frame: RelayAudioFrame) -> Optional[float]:
         """Feed interleaved PCM16 into Relay; returns once the 10 ms slices are queued.
 
         The pacer sends them at 50 packets a second, so adapters may push faster
@@ -503,6 +507,11 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         silence goes out; it then plays from its start, nothing dropped
         (PROTOCOL.md section 6b). A restart holds it again until the new session
         is pulled.
+
+        Returns where the frame's first sample sits on this agent's audio
+        track, in the milliseconds Rive messages use for ``at``, or ``None``
+        while the queue is held (its start is known only when the person
+        starts receiving).
         """
         if self._closed:
             raise RelayCallTransportError("Relay Call transport is closed.")
@@ -516,6 +525,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         if samples.size % frame.channel_count:
             raise ValueError("Relay audio samples must contain complete interleaved frames.")
         source = self._source
+        start_ms = self._wire_ms(source.media_time_ms() + source.queued_ms()) if self.subscribed else None
         slice_samples = frame.sample_rate * AUDIO_SLICE_MS // 1000 * frame.channel_count
         for offset in range(0, samples.size, slice_samples):
             chunk = samples[offset : offset + slice_samples]
@@ -525,6 +535,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
                 chunk = padded
             source.on_data(chunk, frame.sample_rate, frame.channel_count)
             self._outbound_frames += 1
+        return start_ms
 
     def queued_audio_ms(self) -> float:
         """Milliseconds of audio accepted by `write_audio` but not yet sent."""
@@ -554,8 +565,9 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
     def audio_time_ms(self) -> float:
         """Where the next sample `write_audio` accepts will sit on this agent's audio track.
 
-        Milliseconds since the track's first RTP packet: the RTP time already
-        sent plus everything queued (held audio included). Read it just before
+        The wire RTP timestamp / 48 (aiortc's random origin included), in
+        milliseconds: the RTP time already sent plus everything queued (held
+        audio included). Read it just before
         `write_audio` and add offsets inside that audio to time Rive messages
         (``at``). Silence flows whenever nothing is queued, so the clock runs
         from connect and survives restarts. Audio held before the person
@@ -563,7 +575,18 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         """
         if self._source is None:
             raise RelayCallTransportError("Relay Call transport is not connected.")
-        return self._source.media_time_ms() + self._source.queued_ms()
+        return self._wire_ms(self._source.media_time_ms() + self._source.queued_ms())
+
+    def _wire_ms(self, source_ms: float) -> float:
+        """A source time as the wire RTP timestamp / 48, the clock the phone reads (aiortc adds a random origin)."""
+        sender = getattr(self._publish_transceiver, "sender", None)
+        if sender is not None and sender is not self._origin_sender:
+            origin = rtp_origin(sender)
+            if origin is not None:
+                self._origin_sender, self._origin = sender, origin
+        if sender is None or sender is not self._origin_sender:
+            return source_ms
+        return ((self._origin + round(source_ms * 48)) & 0xFFFFFFFF) / 48
 
     async def rive(self, *, timeout_ms: float = RIVE_OPEN_TIMEOUT_MS) -> RelayRive:
         """Open this agent's ``rive`` data channel and return its handle.
@@ -614,7 +637,12 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         rive = self._rive
         if peer is None or rive is None or self._closed or self._ended:
             return
+        # Relay repeats the id for a repeated request: the open channel stays (closing it would free the id late).
+        current = self._rive_channel
+        if current is not None and self._rive_channel_id == frame["id"] and current.readyState not in ("closed", "closing"):
+            return
         self._close_rive_channel()
+        self._rive_channel_id = frame["id"]
         channel = peer.createDataChannel(RIVE_CHANNEL, negotiated=True, id=frame["id"], **RIVE_CHANNEL_OPTIONS)
         self._rive_channel = channel
 
@@ -642,6 +670,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
 
     def _close_rive_channel(self) -> None:
         channel, self._rive_channel = self._rive_channel, None
+        self._rive_channel_id = None
         if channel is None:
             return
         channel.remove_all_listeners()
