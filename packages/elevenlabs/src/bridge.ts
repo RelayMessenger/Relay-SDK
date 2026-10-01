@@ -125,6 +125,15 @@ const pcmRate = (format: unknown): number | undefined => {
   return match ? Number(match[1]) : undefined;
 };
 
+/** How far ahead of the audio being sent a Rive change goes out; later ones wait, so an interruption can drop them. */
+export const RIVE_LEAD_MS = 300;
+/** Caller audio kept while the ElevenLabs session starts, at most. */
+const STARTUP_AUDIO_MS = 2_000;
+/** A partial 10 ms slice left at the end of an audio event is padded and sent after this much quiet. */
+const CARRY_FLUSH_MS = 100;
+
+type RiveValues = Record<string, number | boolean>;
+
 /**
  * An ElevenLabs Agent on a Relay Call. It copies ElevenLabs' own LiveKit
  * bridge (docs "LiveKit integration", bridge.mts): join the call (`connect`
@@ -134,13 +143,14 @@ const pcmRate = (format: unknown): number | undefined => {
  * `interruption`, and answer every `ping` with a `pong`. Audio from a reply the
  * caller interrupted is dropped by `event_id`, as ElevenLabs' Python SDK does.
  * Each `audio` event's alignment also becomes `viseme` values on the agent's
- * Rive file, timed against the agent's audio track.
+ * Rive file, timed against where that audio really starts on the agent's
+ * track, and sent shortly before it plays.
  */
 export class ElevenLabsCall {
   readonly transport: RelayCallTransport;
-  /** The ElevenLabs conversation, once `conversation_initiation_metadata` arrives. */
+  /** ElevenLabs' id for the session, once `conversation_initiation_metadata` arrives. */
   conversationId: string | undefined;
-  /** The call's Rive channel, once open (when `rive` is not false). */
+  /** The call's Rive channel, once open; undefined while it opens, when it failed, or with `rive: false`. */
   rive: RelayRive | undefined;
   /** Resolves when the bridge is done: the call ended, ElevenLabs closed, or `close()`. */
   readonly closed: Promise<void>;
@@ -151,9 +161,26 @@ export class ElevenLabsCall {
   #outputRate: number | undefined;
   #lastInterruptId = 0;
   #speaking = false;
+  #ready = false;
   #done = false;
   #resolveClosed!: () => void;
+  /** Bumped on every interruption: audio and changes from before it are dropped. */
+  #generation = 0;
+  /** Samples short of one 10 ms slice, carried into the next audio event so no gap is padded in. */
+  #carry = new Int16Array(0);
+  #carryTimer: NodeJS.Timeout | undefined;
+  /** Where the last written agent audio ends on the track. */
+  #endMs: number | undefined;
+  /** Rive changes waiting until their audio is close to playing, in time order. */
+  readonly #cues: Array<{ at: number; values: RiveValues }> = [];
+  #cueTimer: NodeJS.Timeout | undefined;
+  /** The caller's audio from before the ElevenLabs session was ready. */
+  readonly #startupAudio: RelayAudioFrame[] = [];
+  #startupAudioMs = 0;
+  #failStart: ((error: Error) => void) | undefined;
   readonly #onAudio = (frame: RelayAudioFrame): void => this.#sendAudio(frame);
+  readonly #onEnded = (): void => this.#stop(new Error("The Relay Call ended before the ElevenLabs session started."), false);
+  readonly #onClose = (): void => this.#stop(new Error("The Relay Call room closed before the ElevenLabs session started."), false);
 
   private constructor(transport: RelayCallTransport, socket: ElevenLabsSocket, options: ElevenLabsCallOptions) {
     this.transport = transport;
@@ -168,7 +195,7 @@ export class ElevenLabsCall {
     this.closed = new Promise((resolve) => { this.#resolveClosed = resolve; });
   }
 
-  /** Join the call, then open the ElevenLabs conversation; resolves once both are up. */
+  /** Join the call, then open the ElevenLabs session; resolves once both are up. */
   static async connect(options: ElevenLabsCallOptions): Promise<ElevenLabsCall> {
     const inputSampleRate = options.inputSampleRate ?? 16_000;
     if (!INBOUND_RATES.has(inputSampleRate)) throw new RangeError("inputSampleRate must be 8000, 16000, 24000 or 48000.");
@@ -182,6 +209,13 @@ export class ElevenLabsCall {
       ...(options.iceServers ? { iceServers: options.iceServers } : {}),
       ...(options.onWarning ? { onWarning: options.onWarning } : {}),
     });
+    // Listen from the start: the caller may speak, hang up or be replaced while ElevenLabs starts.
+    const early: RelayAudioFrame[] = [];
+    let ended = false;
+    const keep = (frame: RelayAudioFrame): void => { early.push(frame); };
+    const end = (): void => { ended = true; };
+    transport.on("audio", keep).on("ended", end).on("close", end);
+    let socket: ElevenLabsSocket | undefined;
     try {
       await transport.connect();
       const url = options.elevenlabs.signedUrl
@@ -193,12 +227,17 @@ export class ElevenLabsCall {
             ...(options.fetch ? { fetch: options.fetch } : {}),
           })
           : publicAgentUrl(options.elevenlabs.agentId, options.elevenlabs.baseUrl));
+      if (ended) throw new Error("The Relay Call ended before the ElevenLabs session started.");
       const Socket = options.WebSocket ?? (globalThis.WebSocket as unknown as ElevenLabsSocketConstructor);
-      const socket = new Socket(url);
+      socket = new Socket(url);
       const call = new ElevenLabsCall(transport, socket, options);
+      transport.off("audio", keep).off("ended", end).off("close", end);
+      for (const frame of early) call.#sendAudio(frame);
       await call.#start(inputSampleRate);
       return call;
     } catch (error) {
+      transport.off("audio", keep).off("ended", end).off("close", end);
+      try { socket?.close(); } catch { /* already closed */ }
       transport.close();
       throw error;
     }
@@ -209,56 +248,57 @@ export class ElevenLabsCall {
     this.transport.end();
   }
 
-  /** Close the ElevenLabs conversation and leave the call without ending it. */
+  /** Close the ElevenLabs session and leave the call without ending it. */
   close(): void {
     this.#finish(false);
   }
 
   async #start(inputSampleRate: number): Promise<void> {
     const socket = this.#socket;
+    this.transport.on("audio", this.#onAudio).on("ended", this.#onEnded).on("close", this.#onClose);
     await new Promise<void>((resolve, reject) => {
-      let metadata = false;
+      this.#failStart = reject;
       socket.onopen = () => {
         socket.send(JSON.stringify({ ...this.#options.elevenlabs.initiationData, type: "conversation_initiation_client_data" }));
       };
       socket.onerror = () => {
-        if (!metadata) reject(new Error("The ElevenLabs Agents WebSocket failed to open."));
+        if (!this.#ready) this.#stop(new Error("The ElevenLabs Agents WebSocket failed to open."), false);
       };
       socket.onclose = (event) => {
-        if (!metadata) reject(new Error(`ElevenLabs closed the conversation before it started (${event.code ?? "no code"}).`));
+        if (!this.#ready) this.#stop(new Error(`ElevenLabs closed the session before it started (${event.code ?? "no code"}).`), false);
         else this.#finish(true);
       };
       socket.onmessage = (event) => {
         const message = parse(event.data);
         if (!message) return;
-        if (!metadata && message.type === "conversation_initiation_metadata") {
+        if (!this.#ready && message.type === "conversation_initiation_metadata") {
           const body = message.conversation_initiation_metadata_event as Record<string, unknown> | undefined;
           const input = pcmRate(body?.user_input_audio_format);
           const output = pcmRate(body?.agent_output_audio_format);
           if (input !== inputSampleRate) {
-            reject(new Error(
+            this.#stop(new Error(
               `The ElevenLabs agent takes ${String(body?.user_input_audio_format)}; pass inputSampleRate to match it, or set the agent to pcm_${inputSampleRate}.`,
-            ));
-            socket.close();
+            ), false);
             return;
           }
           // RelayCallTransport takes any rate that is a multiple of 100 Hz (10 ms slices): not 22050, not ulaw.
           if (output === undefined || output % 100 !== 0) {
-            reject(new Error(
+            this.#stop(new Error(
               `The ElevenLabs agent speaks ${String(body?.agent_output_audio_format)}; set its output to pcm_16000, pcm_24000, pcm_44100 or pcm_48000.`,
-            ));
-            socket.close();
+            ), false);
             return;
           }
-          metadata = true;
+          this.#ready = true;
+          this.#failStart = undefined;
           this.#outputRate = output;
           this.conversationId = typeof body?.conversation_id === "string" ? body.conversation_id : undefined;
-          this.transport.on("audio", this.#onAudio);
-          this.transport.on("ended", () => this.#finish(false));
+          // The caller's words from while the session started go first.
+          for (const frame of this.#startupAudio.splice(0)) this.#send({ user_audio_chunk: encodePcm(frame.samples) });
+          this.#startupAudioMs = 0;
           resolve();
           if (this.#riveOptions) void this.#openRive();
         }
-        this.#handle(message);
+        if (this.#ready) this.#handle(message);
       };
     });
   }
@@ -266,7 +306,9 @@ export class ElevenLabsCall {
   async #openRive(): Promise<void> {
     try {
       this.rive = await this.transport.rive();
+      this.#pumpCues();
     } catch (error) {
+      this.#cues.length = 0;
       this.#options.onWarning?.(`The Rive channel did not open, so the call has no mouth shapes: ${(error as Error).message}`);
     }
   }
@@ -279,9 +321,7 @@ export class ElevenLabsCall {
       case "interruption": {
         const id = Number((message.interruption_event as { event_id?: unknown } | undefined)?.event_id);
         if (Number.isFinite(id)) this.#lastInterruptId = Math.max(this.#lastInterruptId, id);
-        // The caller talked over the agent: drop what has not played (bridge.mts `source.clearQueue()`).
-        this.transport.clearAudio();
-        this.#stopSpeaking();
+        this.#interrupt();
         break;
       }
       case "ping": {
@@ -297,54 +337,136 @@ export class ElevenLabsCall {
     } catch { /* the application owns its listener */ }
   }
 
+  /** The caller talked over the agent: drop what has not played (bridge.mts `source.clearQueue()`) and every change not yet sent. */
+  #interrupt(): void {
+    this.#generation += 1;
+    this.#carry = new Int16Array(0);
+    clearTimeout(this.#carryTimer);
+    this.transport.clearAudio();
+    this.#cues.length = 0;
+    this.#endMs = undefined;
+    this.#speaking = false;
+    const values = this.#restValues();
+    if (this.rive && Object.keys(values).length) this.rive.set(values);
+  }
+
+  #restValues(): RiveValues {
+    const names = this.#riveOptions;
+    const values: RiveValues = {};
+    if (names?.viseme) values[names.viseme] = 0;
+    if (names?.speaking) values[names.speaking] = false;
+    return values;
+  }
+
   #playAudio(event: AudioEvent | undefined): void {
-    if (!event || typeof event.audio_base_64 !== "string" || this.#outputRate === undefined) return;
+    if (!event || this.#outputRate === undefined) return;
     // Audio from a reply the caller already interrupted is stale (ElevenLabs Python SDK).
     if (Number(event.event_id) <= this.#lastInterruptId) return;
-    const samples = decodePcm(event.audio_base_64);
-    if (!samples.length) return;
-    let at: number | undefined;
-    try {
-      at = this.transport.audioTimeMs();
-    } catch {
-      at = undefined;
+    const rate = this.#outputRate;
+    const fresh = typeof event.audio_base_64 === "string" ? decodePcm(event.audio_base_64) : new Int16Array(0);
+    const final = event.is_final === true;
+    // Whole 10 ms slices only, so the transport never pads a gap between events; the remainder waits.
+    const slice = rate / 100;
+    const carried = this.#carry.length;
+    const all = new Int16Array(carried + fresh.length);
+    all.set(this.#carry);
+    all.set(fresh, carried);
+    const whole = final ? all.length : all.length - (all.length % slice);
+    this.#carry = all.slice(whole);
+    clearTimeout(this.#carryTimer);
+    if (this.#carry.length) {
+      this.#carryTimer = setTimeout(() => this.#flushCarry(), CARRY_FLUSH_MS);
+      this.#carryTimer.unref?.();
     }
-    void this.transport
-      .writeAudio({ samples, sampleRate: this.#outputRate, channelCount: 1 })
-      .catch((error: unknown) => this.#options.onWarning?.(`Relay refused ElevenLabs audio: ${(error as Error).message}`));
-    const rive = this.rive;
+    const generation = this.#generation;
     const names = this.#riveOptions;
-    if (!rive || !names || at === undefined) return;
-    if (names.speaking && !this.#speaking) rive.set({ [names.speaking]: true }, { at });
-    this.#speaking = true;
-    const durationMs = (samples.length / this.#outputRate) * 1_000;
-    if (names.viseme && event.alignment) {
-      try {
-        for (const cue of visemesFromAlignment(event.alignment, { endWithRest: event.is_final === true })) {
-          if (cue.t <= durationMs) rive.set({ [names.viseme]: cue.viseme }, { at: at + cue.t });
+    const durationMs = (fresh.length / rate) * 1_000;
+    const cue = (startMs: number): void => {
+      if (generation !== this.#generation || !names) return;
+      // Where this event's own audio starts: after the samples carried from the last one.
+      const at = startMs + (carried / rate) * 1_000;
+      if (names.speaking && !this.#speaking) this.#queueCue(at, { [names.speaking]: true });
+      this.#speaking = true;
+      if (names.viseme && event.alignment) {
+        try {
+          for (const shape of visemesFromAlignment(event.alignment, { endWithRest: false })) {
+            if (shape.t <= durationMs) this.#queueCue(at + shape.t, { [names.viseme]: shape.viseme });
+          }
+        } catch (error) {
+          this.#options.onWarning?.(`ElevenLabs alignment was not usable: ${(error as Error).message}`);
         }
-      } catch (error) {
-        this.#options.onWarning?.(`ElevenLabs alignment was not usable: ${(error as Error).message}`);
       }
+      this.#endMs = at + durationMs;
+    };
+    let written: Promise<void> = Promise.resolve();
+    if (whole === 0) {
+      if (this.#endMs !== undefined) cue(this.#endMs - (carried / rate) * 1_000);
+    } else {
+      // writeAudio resolves with where this audio really starts on the track, held audio included.
+      written = this.transport
+        .writeAudio({ samples: all.subarray(0, whole), sampleRate: rate, channelCount: 1 })
+        .then((startMs) => { if (startMs !== undefined) cue(startMs); })
+        .catch((error: unknown) => this.#options.onWarning?.(`Relay refused ElevenLabs audio: ${(error as Error).message}`));
     }
-    if (event.is_final === true) {
-      if (names.speaking) rive.set({ [names.speaking]: false }, { at: at + durationMs });
-      this.#speaking = false;
+    if (final) {
+      // The reply's end rests the mouth where its last audio ends, aligned or not.
+      const settle = (): void => {
+        if (generation !== this.#generation) return;
+        this.#speaking = false;
+        const rest = this.#restValues();
+        if (this.#endMs !== undefined && Object.keys(rest).length) this.#queueCue(this.#endMs, rest);
+      };
+      void written.then(settle);
     }
   }
 
-  #stopSpeaking(): void {
+  #flushCarry(): void {
+    if (!this.#carry.length || this.#outputRate === undefined) return;
+    const samples = this.#carry;
+    this.#carry = new Int16Array(0);
+    void this.transport.writeAudio({ samples, sampleRate: this.#outputRate, channelCount: 1 }).catch(() => undefined);
+  }
+
+  #queueCue(at: number, values: RiveValues): void {
+    let index = this.#cues.length;
+    while (index > 0 && this.#cues[index - 1]!.at > at) index -= 1;
+    this.#cues.splice(index, 0, { at, values });
+    this.#pumpCues();
+  }
+
+  /** Sends every change whose audio is within RIVE_LEAD_MS of being sent; the rest wait so an interruption can drop them. */
+  #pumpCues(): void {
+    clearTimeout(this.#cueTimer);
+    this.#cueTimer = undefined;
     const rive = this.rive;
-    const names = this.#riveOptions;
-    this.#speaking = false;
-    if (!rive || !names) return;
-    const values: Record<string, number | boolean> = {};
-    if (names.viseme) values[names.viseme] = 0;
-    if (names.speaking) values[names.speaking] = false;
-    if (Object.keys(values).length) rive.set(values);
+    if (!rive || this.#done || !this.#cues.length) return;
+    let sentMs: number;
+    try {
+      sentMs = this.transport.audioTimeMs() - this.transport.queuedAudioMs();
+    } catch {
+      return;
+    }
+    while (this.#cues.length && this.#cues[0]!.at <= sentMs + RIVE_LEAD_MS) {
+      const next = this.#cues.shift()!;
+      rive.set(next.values, { at: next.at });
+    }
+    if (this.#cues.length) {
+      this.#cueTimer = setTimeout(() => this.#pumpCues(), Math.max(10, Math.min(100, this.#cues[0]!.at - sentMs - RIVE_LEAD_MS)));
+      this.#cueTimer.unref?.();
+    }
   }
 
   #sendAudio(frame: RelayAudioFrame): void {
+    if (!this.#ready) {
+      // Bounded: the newest STARTUP_AUDIO_MS of the caller's audio waits for the session.
+      this.#startupAudio.push(frame);
+      this.#startupAudioMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
+      while (this.#startupAudioMs > STARTUP_AUDIO_MS && this.#startupAudio.length > 1) {
+        const dropped = this.#startupAudio.shift()!;
+        this.#startupAudioMs -= (dropped.samples.length / dropped.channelCount / dropped.sampleRate) * 1_000;
+      }
+      return;
+    }
     this.#send({ user_audio_chunk: encodePcm(frame.samples) });
   }
 
@@ -355,11 +477,26 @@ export class ElevenLabsCall {
     } catch { /* the close handler finishes the bridge */ }
   }
 
-  /** `endCall`: ElevenLabs ended the conversation, so the Relay Call ends too. */
+  /** Before the session is ready: fail `connect`; after: finish. */
+  #stop(error: Error, endCall: boolean): void {
+    const fail = this.#failStart;
+    if (fail) {
+      this.#failStart = undefined;
+      this.#finish(false);
+      fail(error);
+      return;
+    }
+    if (this.#ready) this.#finish(endCall);
+  }
+
+  /** `endCall`: ElevenLabs ended the session, so the Relay Call ends too. */
   #finish(endCall: boolean): void {
     if (this.#done) return;
     this.#done = true;
-    this.transport.off("audio", this.#onAudio);
+    clearTimeout(this.#carryTimer);
+    clearTimeout(this.#cueTimer);
+    this.#cues.length = 0;
+    this.transport.off("audio", this.#onAudio).off("ended", this.#onEnded).off("close", this.#onClose);
     try { this.#socket.close(); } catch { /* already closed */ }
     if (endCall) {
       try { this.transport.end(); } catch { /* the room is gone */ }

@@ -21,17 +21,24 @@ await runWebSocket(baseURL, token, {
   async onFullSync() {},
   async onEvent(event) {
     if (event.event_type !== "call.created" || answered.has(event.data.call.id)) return;
+    // Reserve the call; a failed connect releases it so Relay's redelivery is answered.
     answered.add(event.data.call.id);
-    const call = await ElevenLabsCall.connect({
-      relay,
-      callId: event.data.call.id,
-      elevenlabs: { apiKey: process.env.ELEVENLABS_API_KEY!, agentId: process.env.ELEVENLABS_AGENT_ID! },
-      onEvent: (message: ElevenLabsEvent) => {
-        if (message.type === "user_transcript") console.log("Caller:", message.user_transcription_event);
-        if (message.type === "agent_response") console.log("Agent:", message.agent_response_event);
-      },
-      onWarning: console.warn,
-    });
+    let call: ElevenLabsCall;
+    try {
+      call = await ElevenLabsCall.connect({
+        relay,
+        callId: event.data.call.id,
+        elevenlabs: { apiKey: process.env.ELEVENLABS_API_KEY!, agentId: process.env.ELEVENLABS_AGENT_ID! },
+        onEvent: (message: ElevenLabsEvent) => {
+          if (message.type === "user_transcript") console.log("Caller:", message.user_transcription_event);
+          if (message.type === "agent_response") console.log("Agent:", message.agent_response_event);
+        },
+        onWarning: console.warn,
+      });
+    } catch (error) {
+      answered.delete(event.data.call.id);
+      throw error;
+    }
     console.log(`Answered ${event.data.call.id} as ElevenLabs conversation ${call.conversationId}`);
     void call.closed.then(() => console.log(`Call ${event.data.call.id} is over`));
   },

@@ -222,8 +222,7 @@ it("plays audio, times alignment visemes against the agent's track, drops interr
     { t: 10_000, view_model: { speaking: true } },
     { t: 10_000, view_model: { viseme: VISEMES.indexOf("MBP") } },
     { t: 10_010, view_model: { viseme: VISEMES.indexOf("AI") } },
-    { t: 10_020, view_model: { viseme: 0 } },
-    { t: 10_020, view_model: { speaking: false } },
+    { t: 10_020, view_model: { viseme: 0, speaking: false } },
   ]);
 
   socket.server({ type: "interruption", interruption_event: { event_id: 5 } });
@@ -278,4 +277,126 @@ it("mints a signed URL with the API key header and never puts the key in the URL
     agentId: "agent_1",
     fetch: (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch,
   })).rejects.toThrow(/HTTP 401/u);
+});
+
+it("fails connect and leaves the ElevenLabs session when the caller hangs up while it starts", async () => {
+  const room = new FakeRoom();
+  const connecting = ElevenLabsCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    elevenlabs: { agentId: "agent_1", signedUrl: "wss://example" },
+    roomClient: room as unknown as CallRoom,
+    webRTC: new FakeWebRTC() as unknown as RelayWebRTCFactory,
+    WebSocket: FakeSocket,
+  });
+  await flush();
+  const socket = FakeSocket.last!;
+  room.emit("ended", { type: "ended", reason: "completed" });
+  await expect(connecting).rejects.toThrow(/ended before the ElevenLabs session started/u);
+  expect(socket.closed).toBe(true);
+});
+
+it("finishes when the call room closes for good", async () => {
+  const { call, room, socket } = await start();
+  // The transport re-emits the room's terminal close (for example 1000 "Replaced") as `close`.
+  room.emit("close", { code: 1000, reason: "Replaced", wasClean: true });
+  await call.closed;
+  expect(socket.closed).toBe(true);
+  expect(room.sent.at(-1)?.type).not.toBe("end");
+});
+
+it("carries partial 10 ms slices between audio events instead of padding gaps", async () => {
+  const { call, socket, webRTC } = await start({ rive: false });
+  // Five 256-sample chunks at 16 kHz: 80 ms; 10 ms slices are 160 samples.
+  for (let index = 0; index < 5; index += 1) {
+    socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(256).fill(1)), event_id: 1, is_final: index === 4 } });
+  }
+  await flush();
+  const written = webRTC.source.written.reduce((sum, frame) => sum + frame.samples.length, 0);
+  // The transport pads only the reply's last slice: 1 280 samples become 8 slices, 1 280, not 1 600.
+  expect(written).toBe(1_280);
+  call.close();
+});
+
+it("sends the caller's words from while the session started once it is ready", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const connecting = ElevenLabsCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    elevenlabs: { agentId: "agent_1", signedUrl: "wss://example" },
+    roomClient: room as unknown as CallRoom,
+    webRTC: webRTC as unknown as RelayWebRTCFactory,
+    WebSocket: FakeSocket,
+  });
+  await flush();
+  webRTC.peer.ontrack?.({ track: { kind: "audio", stop() {} } });
+  webRTC.sinks[0]!.ondata?.({ samples: new Int16Array([5, 6]), sampleRate: 16_000, channelCount: 1, bitsPerSample: 16, numberOfFrames: 2 });
+  const socket = FakeSocket.last!;
+  socket.server(metadata());
+  const call = await connecting;
+  expect(socket.sent).toContainEqual({ user_audio_chunk: Buffer.from(new Int16Array([5, 6]).buffer).toString("base64") });
+  call.close();
+});
+
+it("holds mouth shapes until the Rive channel opens, drops unsent ones on interruption, and rests after an unaligned final chunk", async () => {
+  const { call, socket, room, webRTC } = await start();
+  // Audio and alignment arrive before the channel opens; 1 s of audio so later shapes are not yet due.
+  socket.server({
+    type: "audio",
+    audio_event: {
+      audio_base_64: pcm(new Array(16_000).fill(3)),
+      event_id: 1,
+      alignment: { chars: ["m", "a", "o"], char_start_times_ms: [0, 10, 900], char_durations_ms: [10, 10, 10] },
+    },
+  });
+  await flush();
+  room.emit("rive", { type: "rive", id: 4 });
+  await flush();
+  const channel = webRTC.peer.channels[0]!;
+  channel.readyState = "open";
+  channel.onopen?.();
+  await flush();
+  const sent = () => channel.sent.map((text) => JSON.parse(text) as { t?: number; view_model?: Record<string, unknown> });
+  // Sent now: what plays within 300 ms of the audio being sent (10 000 ms); the "o" at 10 900 waits.
+  expect(sent().map((message) => message.t)).toEqual([10_000, 10_000, 10_010]);
+  socket.server({ type: "interruption", interruption_event: { event_id: 2 } });
+  // The track moves on past where the dropped "o" would have played.
+  webRTC.source.rtpMs = 10_700;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(sent().at(-1)).toEqual({ view_model: { viseme: 0, speaking: false } });
+  expect(sent().some((message) => message.t === 10_900)).toBe(false);
+
+  // A final chunk without alignment still rests the mouth where the reply ends.
+  webRTC.source.rtpMs = 20_000;
+  webRTC.source.queued = 0;
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(160).fill(1)), event_id: 3, alignment: { chars: ["a"], char_start_times_ms: [0], char_durations_ms: [10] } } });
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(160).fill(1)), event_id: 3, is_final: true } });
+  await flush();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(sent().at(-1)).toEqual({ t: 20_020, view_model: { viseme: 0, speaking: false } });
+  call.close();
+});
+
+it("fails connect without opening ElevenLabs when the caller hangs up while the signed URL is minted", async () => {
+  const room = new FakeRoom();
+  let release!: () => void;
+  FakeSocket.last = undefined;
+  const connecting = ElevenLabsCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    elevenlabs: { agentId: "agent_1", apiKey: "xi-test" },
+    roomClient: room as unknown as CallRoom,
+    webRTC: new FakeWebRTC() as unknown as RelayWebRTCFactory,
+    WebSocket: FakeSocket,
+    fetch: (async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return new Response(JSON.stringify({ signed_url: "wss://api.elevenlabs.io/v1/convai/conversation?token=t" }));
+    }) as unknown as typeof fetch,
+  });
+  await flush();
+  room.emit("ended", { type: "ended", reason: "canceled" });
+  release();
+  await expect(connecting).rejects.toThrow(/ended before the ElevenLabs session started/u);
+  expect(FakeSocket.last).toBeUndefined();
 });

@@ -49,8 +49,10 @@ The caller's audio goes to ElevenLabs as `user_audio_chunk` at
 `inputSampleRate` (default 16000, ElevenLabs' `pcm_16000`); it must match the
 agent's `user_input_audio_format`. The agent may speak `pcm_8000`, `pcm_16000`,
 `pcm_24000`, `pcm_44100` or `pcm_48000`; `pcm_22050` and `ulaw_8000` are
-refused at connect. When ElevenLabs ends the conversation, the bridge ends the
-Call; when the Call ends, it closes the conversation.
+refused at connect. The caller's audio from while the session starts is sent
+once it is ready. When ElevenLabs ends the conversation, the bridge ends the
+Call; when the Call ends or its room closes, it closes the conversation, and a
+hang-up during startup makes `connect()` reject.
 
 ## A Rive character's mouth
 
@@ -60,7 +62,9 @@ becomes `viseme` numbers on the file's View Model, Preston Blair's ten mouths
 from 0 rest to 9 WQ, timed against the agent's audio so the mouth moves when
 the words are heard; `speaking` is true while the agent talks. Rename them
 with `rive: { viseme, speaking }`, pass `null` for one, or `rive: false` to
-send nothing. `call.rive` sets any other value, fires triggers and switches
-files.
+send nothing. Each change goes out about 300 ms before its audio is sent, so
+an interruption drops the ones whose audio never plays. `call.rive` is set once
+the channel opens (shapes from earlier audio wait for it); use it to set other
+values, fire triggers and switch files.
 
 `examples/answer-calls.ts` answers every Call with one agent.
