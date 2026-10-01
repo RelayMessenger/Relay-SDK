@@ -53,24 +53,9 @@
         "reactions": null
       },
       {
-        "type": "data",
-        "media_type": "application/a2ui+json",
-        "data": [
-          {
-            "version": "v0.9.1",
-            "action": {
-              "name": "place_bet",
-              "surfaceId": "bet-lakers",
-              "sourceComponentId": "bet",
-              "timestamp": "2026-09-24T20:00:00Z",
-              "context": {
-                "side": "yes",
-                "stake": 50
-              }
-            }
-          }
-        ],
-        "reactions": null
+        "type": "suggestion_response",
+        "id": "bet_yes_50",
+        "label": "Bet $50"
       }
     ],
     "reply_to": {
@@ -85,16 +70,6 @@
     "sent_at": "2026-09-24T20:00:01.000Z",
     "delivered_at": "2026-09-24T20:00:01.000Z",
     "read_at": null,
-    "idempotency_key": null,
-    "metadata": {
-      "a2uiClientCapabilities": {
-        "v0.9": {
-          "supportedCatalogIds": [
-            "https://relayapp.im/a2ui/catalog/v1",
-            "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
-          ]
-        }
-      }
-    }
+    "idempotency_key": null
   }
 }

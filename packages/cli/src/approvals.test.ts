@@ -1,18 +1,16 @@
-import type { A2uiComponent, RelayWebhookEvent } from "@relaymessenger/sdk";
+import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
 import { acpPermission } from "./acp-bridge.js";
+import { createHash } from "node:crypto";
 import {
-  ANSWER_EVENT,
+  APPROVAL_REPLY_PREFIX,
   OwnerApprovals,
-  SEE_MORE_EVENT,
-  approvalComponents,
-  codeSpan,
+  approvalPart,
+  cardDescription,
   inputCard,
   inputDetail,
   noOwnerLine,
   piApprovals,
-  seeMore,
-  settledComponents,
   type ApprovalClient,
   type ApprovalRequest,
 } from "./approvals.js";
@@ -26,17 +24,17 @@ const OWNERS = [
 /** Relay, reduced to what the approvals touch, with every call written down. */
 const fakeRelay = (owners = OWNERS) => {
   const created: { from: string; to: string[]; parts: unknown[] }[] = [];
-  const sent: { chatId: string; parts: unknown[] }[] = [];
+  const sent: { chatId: string; message: { parts: unknown[]; reply_to?: unknown } }[] = [];
   const client = {
     me: { retrieve: async () => ({ ...AGENT, owner_people: owners }) },
     chats: {
       create: async (body: { from: string; to: string[]; message: { parts: unknown[] } }) => {
         created.push({ from: body.from, to: body.to, parts: body.message.parts });
-        return { chat: { id: `chat-with-${body.to[0]}` } };
+        return { chat: { id: `chat-with-${body.to[0]}`, message: { id: `card-for-${body.to[0]}` } } };
       },
       messages: {
-        send: async (chatId: string, body: { message: { parts: unknown[] } }) => {
-          sent.push({ chatId, parts: body.message.parts });
+        send: async (chatId: string, body: { message: { parts: unknown[]; reply_to?: unknown } }) => {
+          sent.push({ chatId, message: body.message });
           return {};
         },
       },
@@ -59,84 +57,118 @@ const REQUEST: ApprovalRequest = {
   ],
 };
 
-/** A tap on a card, as `message.received` carries it (Relay-Docs interactions/cards.mdx, "Receive a tap"). */
-const tap = (surfaceId: string, from: { handle: string; kind: "user" | "agent" }, chatId: string, name = ANSWER_EVENT, choice = "proceed_once"): RelayWebhookEvent => ({
+/**
+ * A tap on a card's reply, as `message.received` carries it: the label as
+ * plain text, then `suggestion_response` with the reply's id, replying to the
+ * card part (Relay-Server contracts/developer/openapi.yaml, `SuggestionResponsePart`).
+ */
+/** The reply id an approval card gives a choice: the documented prefix, then the harness's id. */
+const R = (id: string): string => `${APPROVAL_REPLY_PREFIX}${id}`;
+
+const tap = (card: string, from: { handle: string; kind: "user" | "agent" }, id = "proceed_once", label = "Allow once", replyIdOf = R): RelayWebhookEvent => ({
   event_id: `tap-${Math.random()}`,
   event_type: "message.received",
   data: {
-    id: "tap-message",
-    chat: { id: chatId },
+    id: `tap-${Math.random()}`,
+    chat: { id: `chat-with-${from.handle}` },
     direction: "inbound",
     sender_handle: { handle: from.handle, kind: from.kind },
-    parts: [{ type: "data", media_type: "application/a2ui+json", data: [
-      { version: "v0.9.1", action: { name, surfaceId, sourceComponentId: "choice_0", timestamp: "2026-09-26T00:00:00Z", context: { choice } } },
-    ] }],
+    parts: [{ type: "text", value: label }, { type: "suggestion_response", id: replyIdOf(id), label }],
+    reply_to: { message_id: card, part_index: 0 },
+  },
+} as unknown as RelayWebhookEvent);
+
+/** A pick on a single-choice list, as `message.received` carries it (`SelectionResponsePart`). */
+const pick = (card: string, from: string, id: string): RelayWebhookEvent => ({
+  event_id: `pick-${Math.random()}`,
+  event_type: "message.received",
+  data: {
+    id: `pick-${Math.random()}`,
+    chat: { id: `chat-with-${from}` },
+    direction: "inbound",
+    sender_handle: { handle: from, kind: "user" },
+    parts: [{ type: "text", value: `• ${id}` }, { type: "selection_response", selected_values: [R(id)], selected_ids: [R(id)] }],
+    reply_to: { message_id: card, part_index: 0 },
   },
 } as unknown as RelayWebhookEvent);
 
 const flush = async (): Promise<void> => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => { setImmediate(resolve); }); };
 
-/** The components of the last update each card got, by chat. */
-const updates = (sent: { chatId: string; parts: unknown[] }[]) => sent.flatMap(({ chatId, parts }) => {
-  const data = (parts[0] as { data?: { updateComponents?: { components: A2uiComponent[] } }[] }).data ?? [];
-  return data.flatMap((message) => message.updateComponents ? [{ chatId, components: message.updateComponents.components }] : []);
-});
+/** The outcome reply each card got: its chat, the card it answers, and its words. */
+const replies = (sent: { chatId: string; message: { parts: unknown[]; reply_to?: unknown } }[]) =>
+  sent.map(({ chatId, message }) => ({ chatId, reply_to: message.reply_to, parts: message.parts }));
 
 describe("owner approvals", () => {
-  it("sends the card to each owner's own chat with the agent, and to nobody else", async () => {
+  it("sends each owner's own chat with the agent a rich card whose replies are the harness's choices, and nobody else", async () => {
     const relay = fakeRelay();
-    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-1" });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     const asked = approvals.ask({ ...REQUEST, timeoutMs: 50 });
     await flush();
     expect(relay.created.map(({ from, to }) => ({ from, to }))).toEqual([
       { from: "coder.agent", to: ["ada"] },
       { from: "coder.agent", to: ["grace"] },
     ]);
-    expect(relay.created[0]?.parts).toEqual([{ type: "data", media_type: "application/a2ui+json", data: [
-      { version: "v0.9.1", createSurface: { surfaceId: "approval-1", catalogId: "https://relayapp.im/a2ui/catalog/v1" } },
-      { version: "v0.9.1", updateComponents: { surfaceId: "approval-1", components: approvalComponents(REQUEST) } },
-    ] }]);
+    expect(relay.created[0]?.parts).toEqual([{
+      type: "rich_card",
+      title: "Gemini CLI asks to run a command.",
+      description: "uname -a",
+      suggestions: [
+        { type: "reply", label: "Allow once", id: "relay-approval:proceed_once" },
+        { type: "reply", label: "Allow for this session", id: "relay-approval:proceed_always" },
+        { type: "reply", label: "Reject", id: "relay-approval:cancel" },
+      ],
+    }]);
     await asked;
   });
 
-  it("takes an owner's tap as the answer and changes every owner's card to say so", async () => {
+  it("takes an owner's tap as the answer and replies to every owner's card with what happened", async () => {
     const relay = fakeRelay();
-    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-2" });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     const asked = approvals.ask(REQUEST);
     await flush();
-    expect(await approvals.take(tap("approval-2", { handle: "grace", kind: "user" }, "chat-with-grace", ANSWER_EVENT, "proceed_always"))).toBe(true);
+    expect(await approvals.take(tap("card-for-grace", { handle: "grace", kind: "user" }, "proceed_always", "Allow for this session"))).toBe(true);
     expect(await asked).toEqual({ reason: "answered", by: "grace", choice: REQUEST.choices[1] });
-    const outcome = updates(relay.sent);
-    expect(outcome.map((update) => update.chatId)).toEqual(["chat-with-ada", "chat-with-grace"]);
-    expect(outcome[0]?.components).toEqual([
-      { id: "body", component: "Column", children: ["title", "summary", "outcome"] },
-      { id: "outcome", component: "Text", text: "@grace allowed this for this session.", variant: "caption" },
+    expect(replies(relay.sent)).toEqual([
+      { chatId: "chat-with-ada", reply_to: { message_id: "card-for-ada", part_index: 0 }, parts: [{ type: "text", value: "@grace allowed this for this session." }] },
+      { chatId: "chat-with-grace", reply_to: { message_id: "card-for-grace", part_index: 0 }, parts: [{ type: "text", value: "@grace allowed this for this session." }] },
     ]);
+  });
+
+  it("hands the harness the choice whose id the tap carries, never another", async () => {
+    for (const [index, choice] of REQUEST.choices.entries()) {
+      const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });
+      const asked = approvals.ask(REQUEST);
+      await flush();
+      await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, choice.id, choice.label));
+      expect((await asked).choice).toBe(REQUEST.choices[index]);
+    }
   });
 
   it("does not register a tap from anyone who is not an owner, sends nothing, and leaves the card to an owner", async () => {
     const relay = fakeRelay();
-    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-3" });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     const asked = approvals.ask({ ...REQUEST, timeoutMs: 1_000 });
     await flush();
-    expect(await approvals.take(tap("approval-3", { handle: "mallory", kind: "user" }, "chat-with-ada"))).toBe(true);
-    expect(await approvals.take(tap("approval-3", { handle: "ada", kind: "agent" }, "chat-with-ada"))).toBe(true);
+    expect(await approvals.take(tap("card-for-ada", { handle: "mallory", kind: "user" }))).toBe(true);
+    expect(await approvals.take(tap("card-for-ada", { handle: "ada", kind: "agent" }))).toBe(true);
+    // An id the card never offered answers nothing either.
+    expect(await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, "proceed_forever"))).toBe(true);
     await flush();
-    // No message and no card change: a refusal is never a message sent on someone's behalf.
+    // No message: a refusal is never a message sent on someone's behalf.
     expect(relay.sent).toEqual([]);
     // The card is still open: an owner's tap answers it.
-    expect(await approvals.take(tap("approval-3", { handle: "ada", kind: "user" }, "chat-with-ada", ANSWER_EVENT, "cancel"))).toBe(true);
+    expect(await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, "cancel", "Reject"))).toBe(true);
     expect(await asked).toEqual({ reason: "answered", by: "ada", choice: REQUEST.choices[2] });
-    expect(relay.sent.every((send) => updates([send]).length === 1)).toBe(true);
+    expect(relay.sent).toHaveLength(2);
   });
 
-  it("denies and updates the card when nobody answers in time", async () => {
+  it("denies and replies to the card when nobody answers in time", async () => {
     const relay = fakeRelay();
-    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-4" });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     expect(await approvals.ask({ ...REQUEST, timeoutMs: 20 })).toEqual({ reason: "timeout" });
-    expect(updates(relay.sent)[0]?.components.at(-1)).toEqual({ id: "outcome", component: "Text", text: "Timed out, not approved.", variant: "caption" });
-    // A late tap on the settled card is dropped, never a new turn.
-    expect(await approvals.take(tap("approval-4", { handle: "ada", kind: "user" }, "chat-with-ada"))).toBe(true);
+    expect(replies(relay.sent)[0]).toEqual({ chatId: "chat-with-ada", reply_to: { message_id: "card-for-ada", part_index: 0 }, parts: [{ type: "text", value: "Timed out, not approved." }] });
+    // A late tap on the settled card (its replies stay tappable) is dropped, never a new turn.
+    expect(await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }))).toBe(true);
   });
 
   it("denies, sends nothing, and says how to link a phone when no owner has an app account", async () => {
@@ -149,15 +181,38 @@ describe("owner approvals", () => {
     expect(said[0]).toContain("relay phone link");
   });
 
-  it("leaves other cards' taps and ordinary messages to the bridge, and swallows See more", async () => {
+  it("leaves other cards' taps and ordinary messages to the bridge", async () => {
     const relay = fakeRelay();
-    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-5" });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     const asked = approvals.ask({ ...REQUEST, timeoutMs: 30 });
     await flush();
-    expect(await approvals.take(tap("ride-1042", { handle: "ada", kind: "user" }, "chat-with-ada"))).toBe(false);
-    expect(await approvals.take({ event_type: "message.received", event_id: "m", data: { parts: [{ type: "text", value: "hi" }] } } as unknown as RelayWebhookEvent)).toBe(false);
-    expect(await approvals.take(tap("approval-5", { handle: "ada", kind: "user" }, "chat-with-ada", SEE_MORE_EVENT))).toBe(true);
+    expect(await approvals.take(tap("ride-1042", { handle: "ada", kind: "user" }, "seat_12a", "12A", (id) => id))).toBe(false);
+    expect(await approvals.take({ event_type: "message.received", event_id: "m", data: { parts: [{ type: "text", value: "Allow once" }] } } as unknown as RelayWebhookEvent)).toBe(false);
+    expect(await approvals.take({ event_type: "message.received", event_id: "r", data: { parts: [{ type: "text", value: "hi" }], reply_to: { message_id: "card-for-ada", part_index: 0 } } } as unknown as RelayWebhookEvent)).toBe(false);
     expect(await asked).toEqual({ reason: "timeout" });
+  });
+
+  it("after a restart, drops a tap on an approval card it no longer holds instead of starting a turn", async () => {
+    // A fresh process: nothing pending, nothing settled. The card was sent by the process before it.
+    const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });
+    expect(await approvals.take(tap("card-sent-before-restart", { handle: "ada", kind: "user" }, "proceed_once"))).toBe(true);
+    expect(await approvals.take(pick("card-sent-before-restart", "ada", "green"))).toBe(true);
+    // Another card's reply, with no approval prefix, is still the bridge's to answer.
+    expect(await approvals.take(tap("card-sent-before-restart", { handle: "ada", kind: "user" }, "seat_12a", "12A", (id) => id))).toBe(false);
+  });
+
+  it("refuses loudly, sending nothing, a prompt with more choices than a list holds", async () => {
+    const relay = fakeRelay();
+    const said: string[] = [];
+    const approvals = new OwnerApprovals({ client: relay.client, say: (line) => said.push(line) });
+    const choices = Array.from({ length: 26 }, (_, index) => ({ id: `option_${index}`, label: `Option ${index}`, decision: "choice" as const }));
+    await expect(approvals.ask({ ...REQUEST, harness: "Pi", choices })).rejects.toThrow("Pi offered 26 choices; a Relay approval list holds at most 25, so it was not sent.");
+    expect(relay.created).toEqual([]);
+    expect(said).toEqual(["Pi offered 26 choices; a Relay approval list holds at most 25, so it was not sent."]);
+    // 25 is still asked.
+    const asked = approvals.ask({ ...REQUEST, harness: "Pi", choices: choices.slice(0, 25), timeoutMs: 10 });
+    await expect(asked).resolves.toEqual({ reason: "timeout" });
+    expect(relay.created).toHaveLength(2);
   });
 
   it("stops waiting when the harness cancels the prompt", async () => {
@@ -170,63 +225,97 @@ describe("owner approvals", () => {
     expect(await asked).toEqual({ reason: "aborted" });
   });
 
-  it("draws the command as code, whatever backticks it holds", () => {
-    expect(codeSpan("rm -rf *_old")).toBe("`rm -rf *_old`");
-    expect(codeSpan("echo `date`")).toBe("`` echo `date` ``");
+  it("asks a choice of more than four as a single-choice list, and takes the pick", async () => {
+    const relay = fakeRelay();
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
+    const options = ["red", "orange", "yellow", "green", "blue"];
+    const request: ApprovalRequest = { ...REQUEST, harness: "Pi", title: "Pick a colour", summary: "", detail: "", choices: options.map((id) => ({ id, label: id, decision: "choice" })) };
+    const asked = approvals.ask(request);
+    await flush();
+    expect(relay.created[0]?.parts).toEqual([{ type: "selection", title: "Pick a colour", multiple: false, options: options.map((id) => ({ id: R(id), label: id })) }]);
+    expect(await approvals.take(pick("card-for-ada", "ada", "green"))).toBe(true);
+    expect(await asked).toEqual({ reason: "answered", by: "ada", choice: request.choices[3] });
   });
 });
 
 const CLAUDE = { harness: "Claude Code", choices: REQUEST.choices };
 /** A Claude Code prompt as `claudePermission` asks it. */
 const claude = (tool: string, input: Record<string, unknown>): ApprovalRequest => ({ ...CLAUDE, tool, ...inputCard(input) });
-const ids = (components: A2uiComponent[]): string[] => components.map((component) => component.id);
-const MORE = ["more", "more_button", "more_label", "more_sheet", "more_title", "more_text"];
 
-describe("See more, only when the sheet shows what the card does not", () => {
-  it("leaves a short command alone: no See more before or after the answer", () => {
-    const request = claude("Bash", { command: "npm test -- --watch=false" });
-    expect(seeMore(request)).toBe(false);
-    expect(approvalComponents(request).filter((component) => MORE.includes(component.id))).toEqual([]);
-    expect(approvalComponents(request).find((component) => component.id === "body")).toEqual({ id: "body", component: "Column", children: ["title", "summary", "answers"] });
-    expect(settledComponents(request, { reason: "timeout" })[0]).toEqual({ id: "body", component: "Column", children: ["title", "summary", "outcome"] });
+describe("the card stays inside the contract's limits", () => {
+  it("cuts a long title, description and reply label, and stands a hash of an over-long id in for it", () => {
+    const request: ApprovalRequest = {
+      ...REQUEST,
+      title: "t".repeat(300),
+      summary: "s".repeat(3_000),
+      choices: [{ id: "x".repeat(300), label: "Allow this one time only, please", decision: "allow_once" }],
+    };
+    const part = approvalPart(request) as { title: string; description: string; suggestions: { label: string; id: string }[] };
+    expect(part.title).toHaveLength(200);
+    expect(part.description).toHaveLength(2_000);
+    expect(part.description.endsWith("…")).toBe(true);
+    const hash = createHash("sha256").update("x".repeat(300)).digest("hex");
+    expect(part.suggestions).toEqual([{ type: "reply", label: "Allow this one time only…", id: `relay-approval:sha256:${hash}` }]);
+    expect(part.suggestions[0]!.id.length).toBeLessThanOrEqual(256);
   });
 
-  it("shows Bash's own description as a plain line under the command, with no See more", () => {
-    const request = claude("Bash", { command: "npm test", description: "Run the tests" });
-    expect(seeMore(request)).toBe(false);
-    const components = approvalComponents(request);
-    expect(ids(components)).not.toContain("more");
-    expect(components.find((component) => component.id === "body")?.children).toEqual(["title", "summary", "note", "answers"]);
-    expect(components.find((component) => component.id === "note")).toEqual({ id: "note", component: "Text", text: "Run the tests" });
+  it("gives over-long ids distinct reply ids that no real id shares, and maps each back to its own choice", async () => {
+    const choices = [
+      { id: `${"x".repeat(299)}a`, label: "First", decision: "choice" as const },
+      { id: `${"x".repeat(299)}b`, label: "Second", decision: "choice" as const },
+      { id: "choice_0", label: "Third", decision: "choice" as const },
+      { id: "choice_1", label: "Fourth", decision: "choice" as const },
+    ];
+    const part = approvalPart({ ...REQUEST, choices }) as { suggestions: { id: string }[] };
+    const ids = part.suggestions.map((suggestion) => suggestion.id);
+    expect(new Set(ids).size).toBe(4);
+    for (const [index, choice] of choices.entries()) {
+      const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });
+      const asked = approvals.ask({ ...REQUEST, choices });
+      await flush();
+      await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, ids[index]!, choice.label, (id) => id));
+      expect((await asked).choice).toBe(choice);
+    }
   });
 
-  it("offers See more when the command was cut, before and after the answer", () => {
-    const long = claude("Bash", { command: `echo ${"a".repeat(495)}` });
-    expect(seeMore(long)).toBe(true);
-    expect(ids(approvalComponents(long))).toEqual(expect.arrayContaining(MORE));
-    expect(settledComponents(long, { reason: "timeout" })[0]?.children).toEqual(["title", "summary", "more", "outcome"]);
-    expect(seeMore(claude("Bash", { command: "cd app &&\nnpm test" }))).toBe(true);
+  it("leaves the description out when there is nothing to say", () => {
+    expect(approvalPart({ ...REQUEST, summary: "  ", detail: "" })).not.toHaveProperty("description");
+  });
+});
+
+describe("the card's description: the command and its note, or the whole input when it holds more", () => {
+  it("shows a short command alone", () => {
+    expect(cardDescription(claude("Bash", { command: "npm test -- --watch=false" }))).toBe("npm test -- --watch=false");
   });
 
-  it("offers See more for an Edit and for a Write, whose content the card does not show", () => {
-    expect(seeMore(claude("Edit", { file_path: "src/auth.ts", old_string: "const ttl = 3600;", new_string: "const ttl = 86400;" }))).toBe(true);
-    expect(seeMore(claude("Write", { file_path: "notes.md", content: "line\n".repeat(200) }))).toBe(true);
-    expect(seeMore(claude("Read", { file_path: "notes.md" }))).toBe(false);
+  it("shows Bash's own description as a line under the command", () => {
+    expect(cardDescription(claude("Bash", { command: "npm test", description: "Run the tests" }))).toBe("npm test\n\nRun the tests");
   });
 
-  it("leaves an ACP request with only a title alone, and offers See more once it carries its input", async () => {
+  it("shows a multi-line command whole", () => {
+    expect(cardDescription(claude("Bash", { command: "cd app &&\nnpm test" }))).toBe("cd app &&\nnpm test");
+  });
+
+  it("shows an Edit as its file and diff, and a Write as its file and content", () => {
+    expect(cardDescription(claude("Edit", { file_path: "src/auth.ts", old_string: "const ttl = 3600;", new_string: "const ttl = 86400;" })))
+      .toBe("src/auth.ts\n- const ttl = 3600;\n+ const ttl = 86400;");
+    expect(cardDescription(claude("Write", { file_path: "notes.md", content: "# Notes" }))).toBe("notes.md\n# Notes");
+    expect(cardDescription(claude("Read", { file_path: "notes.md" }))).toBe("notes.md");
+  });
+
+  it("shows an ACP request's title alone, and its whole input once it carries one", async () => {
     const asked: ApprovalRequest[] = [];
     const ask = acpPermission("Cursor", { ask: async (request) => { asked.push(request); return { reason: "timeout" }; } });
     const options = [{ optionId: "allow", name: "Allow once", kind: "allow_once" as const }, { optionId: "reject", name: "Reject", kind: "reject_once" as const }];
     await ask({ sessionId: "s", toolCall: { toolCallId: "call-1", title: "uname -a", kind: "execute" }, options });
     await ask({ sessionId: "s", toolCall: { toolCallId: "call-2", title: "Edit src/auth.ts", kind: "edit", rawInput: { file_path: "src/auth.ts", old_string: "a", new_string: "b" } }, options });
-    expect(asked.map(seeMore)).toEqual([false, true]);
+    expect(asked.map((request) => request.extra)).toEqual([false, true]);
     expect(asked[0]?.detail).toBe("title: uname -a\nkind: execute");
-    expect(asked[1]?.detail).toBe("title: Edit src/auth.ts\nkind: edit\nsrc/auth.ts\n- a\n+ b");
+    expect(cardDescription(asked[1]!)).toBe("title: Edit src/auth.ts\nkind: edit\nsrc/auth.ts\n- a\n+ b");
   });
 });
 
-describe("the See more sheet reads as text, not JSON", () => {
+describe("the card's description reads as text, not JSON", () => {
   it("draws an Edit as its file and a diff, a MultiEdit as a diff per edit", () => {
     expect(inputDetail({ file_path: "src/auth.ts", old_string: "const ttl = 3600;\nlog(id);", new_string: "const ttl = 86400;" }))
       .toBe("src/auth.ts\n- const ttl = 3600;\n- log(id);\n+ const ttl = 86400;");
@@ -241,12 +330,6 @@ describe("the See more sheet reads as text, not JSON", () => {
     expect(inputDetail({ url: "https://relayapp.im", headers: { accept: "text/html" }, tags: ["a", "b"] }))
       .toBe("url: https://relayapp.im\nheaders:\n  accept: text/html\ntags: a, b");
     expect(inputDetail({ command: "x" })).not.toContain("{");
-  });
-
-  it("shows every character of the sheet and the note, not read as Markdown", () => {
-    const components = approvalComponents(claude("Edit", { file_path: "a.ts", old_string: "a * b", new_string: "**x_y** `z` [l] <b> & C:\\d ~s~" }));
-    expect(components.find((component) => component.id === "more_text")?.text).toBe("a.ts\n- a \\* b\n+ \\*\\*x\\_y\\*\\* \\`z\\` \\[l\\] \\<b\\> \\& C:\\\\d \\~s\\~");
-    expect(approvalComponents(claude("Bash", { command: "npm test", description: "Run __tests__" })).find((component) => component.id === "note")?.text).toBe("Run \\_\\_tests\\_\\_");
   });
 });
 

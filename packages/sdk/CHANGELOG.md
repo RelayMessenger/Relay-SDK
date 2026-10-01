@@ -3,7 +3,30 @@
 All notable changes to `@relaymessenger/sdk` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.4.0 (unreleased)
+## 0.5.0 (unreleased)
+
+A minor release, because this is 0.x and the release breaks code written
+against the published 0.4.0 (semver 2.0.0 item 4). The version is
+`0.5.0-staging.N` on staging; the release on main publishes `0.5.0`.
+
+### Removed: breaking
+
+Relay removed the A2UI `data` part (Relay-Server PR 474): a `data` part is
+refused with 400 (code 1005). There is no compatibility stub. Interactive
+messages use Relay's messenger parts: `rich_card`, `carousel`, `buttons`,
+`selection` and `form`.
+
+- A2UI (#430): `sendA2uiSurface`, `updateA2uiSurface`, `deleteA2uiSurface`,
+  `readA2uiAction`, `a2uiPart`, the Browser card helpers
+  (`a2uiBrowserCardMessages`, `a2uiBrowserCardUpdate`, `a2uiBrowserComponent`,
+  `isA2uiBrowserAction`, `A2UI_BROWSER_ACTIONS`), the constants
+  `A2UI_MEDIA_TYPE`, `A2UI_VERSION`, `A2UI_BASIC_CATALOG_ID` and
+  `RELAY_A2UI_CATALOG_ID`, and every `A2ui*` type.
+- `DataPart` and `DataPartResponse`, the `metadata` field on messages
+  (`MessageMetadata`, `MessageReceivedMetadata`), and `a2ui_errors` on send
+  responses.
+
+## 0.4.0 (2026-10-01)
 
 A minor release, because this is 0.x and the release breaks existing code
 (semver 2.0.0 item 4). The version is `0.4.0-staging.N` on staging; the
