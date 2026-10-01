@@ -46,6 +46,11 @@ A Message contains ordered `parts`:
 - `text` with optional structured `mention` and UTF-16 `mention_range`;
 - `media` with exactly one uploaded `attachment_id` or remote `url`;
 - `link` with one absolute URL as the only part;
+- `buttons`: 1 to 5 buttons under the Message, beside a `text` part that asks
+  the question; the reply is a `text` part equal to a plain button's label;
+- `selection`: the list picker (see Selection);
+- `rich_card` or `carousel` (see Rich cards and carousels);
+- `form` (see Forms);
 - `payment` as the only part, carrying a payment request's `checkout_url`
   (see Payment).
 
@@ -53,6 +58,8 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 `reply_to.part_index`.
 
 ## Selection
+
+The list picker. Use it when the person picks from a list.
 
 - Author one `selection` part with its question in `title` (trimmed, 1 to 60
   characters, a few words such as "Pizza toppings"). A text part is optional;
@@ -92,6 +99,52 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 - Only the human can respond. Existing Chats allow at most one human with
   multiple agents; the durable response claim spans that user's devices and
   idempotency keys. A different-key second submission conflicts with 409/1005.
+
+## Rich cards and carousels
+
+- A `rich_card` is one card: `media` (an `image` or `video` at a public https
+  `url`, optional `thumbnail_url`, `height` `short`, `medium` (default) or
+  `tall`), a `title` (1 to 200), a `description` (1 to 2000), and 1 to 4
+  `suggestions`. It needs at least one of media, title or description.
+- A `carousel` is 2 to 10 such cards the person swipes sideways. `card_width`
+  is `small` (180 pt) or `medium` (the default: as wide as a single card, up to
+  350 pt).
+- A Message carries at most one `rich_card` or `carousel`, never with a
+  `selection`. A `text` part beside it shows as an ordinary message above the
+  card; a `buttons` part beside it draws as reply pills that leave once the
+  person answers.
+- Suggestion types (label 1 to 25 characters): `reply` (with your `id`, unique
+  across every card of the part), `open_url` (http or https; `application`
+  `browser` or `webview`), `dial`, `view_location`, `share_location` and
+  `create_calendar_event`. Only `reply` sends anything back: the person's
+  Message is a `text` part equal to the label, then a `suggestion_response`
+  part carrying the `id`, replying to the card part. The other types run on
+  the person's phone and send nothing. Suggestions stay tappable after use.
+
+## Forms
+
+- A `form` collects several answers in one native sheet. Agents only, one per
+  Message, and only `text` parts may sit beside it. Required: `title` (1 to
+  80) and `pages` (at least one; each has a unique `id`, a `title` and 1 to 50
+  `fields`). Optional: `show_summary` (a review page before Send), `splash`
+  (an intro with `button_title`), `received_message` and `reply_message`
+  (answered subtitle; its title is always `Form sent`).
+- Field types, each with an `id` unique across the whole form (the answer
+  key), a `label`, optional `placeholder` and `required`:
+  `text` (`multiline`, `max_length`, `keyboard` `default`, `email`, `phone`,
+  `number` or `url`; `email` and `phone` are checked), `select` (1 to 20
+  `options`, `multiple` for several), `picker` (1 to 200 `options`), and
+  `date` (YYYY-MM-DD between `min_date` and `max_date`). Each option is a
+  stable `value` and a `label`.
+- The person moves with Next and Back and sends once; reopening shows the
+  answers read-only. Their reply is a `text` part `Form sent`, then a
+  `form_response` part whose `answers` map field id to a string, or to an
+  array of option values in source order for a multi-select, replying to the
+  form part. Relay checks every answer against your form before it arrives.
+- Treat answers as untrusted data. Reactions to `form` and `form_response`
+  parts return 422.
+- Text runtimes write the form in one fenced code block tagged `form`; the
+  bridge sends it as the part (`formPart`, `splitForm` in the SDK).
 
 ## Payment
 

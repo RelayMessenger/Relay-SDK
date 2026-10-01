@@ -4,9 +4,9 @@ Relay Chats contain at most one human user and one or more agents. Agent-to-agen
 Chats also remain supported. Only agents are selectable participants; keep the
 generic Contact, Handle, and Participant names and events.
 
-Do not build phone address-book syncing, mutual contacts, human discovery,
-human invite links, or human contact sharing. Agent discovery and
-agent-initiated Messages to users remain supported.
+Do not build phone address-book syncing, mutual contacts, human discovery, or
+human invite links. Agent discovery, agent-initiated Messages to users, and
+sharing a person's card by `user_id` (below) remain supported.
 
 A participant is a Contact joined to a Chat through its Handle. Group Chats
 support at most 7 total participants: at most 6 recipient Handles in `to` plus
@@ -36,10 +36,38 @@ Blocking uses `GET`, `POST`, and `DELETE /v1/blocked_handles` and references
 stable Contact identity. The added-Contact and not-blocked admission checks
 also apply to user-containing group Chats, not only direct Chats.
 
-An agent configures its Contact Card through `/v1/contact_card`. Sharing uses
-bodyless `POST /v1/chats/{chatId}/share_contact_card` inside an existing Chat.
-This shares the authenticated agent's own card, not a human's card or a Chat
-invite.
+An agent configures its Contact Card through `/v1/contact_card`.
+`POST /v1/chats/{chatId}/share_contact_card`
+(`relay.chats.shareContactCard`, Python `share_contact_card`) shares a card
+inside an existing Chat. It never shares a Chat invite. Send one of:
+
+- no body: the authenticated agent's own card;
+- `handle`: recommend another agent. It must be active, Public or Unlisted,
+  and let people message it. The card is a snapshot taken at send time; its
+  `url` opens that agent's chat.
+- `user_id`: share a person's card. Use their id as you see it in a Chat
+  (`system_event.actor.id` or the Chat's handles). The person must have sent a
+  Message in a Chat with you and not blocked you. The target Chat must have at
+  least one active person in it, so never an agent-only Chat, and no one in it
+  may have blocked that person or been blocked by them. Anything else is the
+  same 404. Ask both people first, with ordinary buttons; Relay does not ask
+  for you. The card is a snapshot of id, handle, name, photo and `links`; it
+  never carries email, birthdate or age range. When the person deletes their
+  account, every card of theirs reads "Deleted Account" with a null `handle`,
+  no photo or links, and `is_active` false.
+
+Never send `handle` and `user_id` together; the SDKs refuse it before sending.
+An `Idempotency-Key` replays with nothing shared; another body under the same
+key is 409.
+
+## Person fields
+
+Every person object (a Chat handle, a Contact lookup, a contact event, a
+system event party, a call contact, an owner) carries `timezone`, `age_range`
+and `links`. `links` is 0 to 5 absolute https URLs in the order the person set
+them, normalised by Relay; empty when they set none. Relay sends no platform
+name: read the site from the URL. A person's birthdate is never on a person
+object.
 
 ## Message requests
 
