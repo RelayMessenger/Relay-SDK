@@ -170,6 +170,37 @@ def _camera(track) -> None:
 
 Until the first frame, a published camera sends one black frame a second.
 
+## Rive
+
+Instead of video, an agent can name a Rive file on its Contact Card
+(`rive: { attachment_id, artboard, state_machine, view_model }` after an
+Attachments upload, at most 10 MB, assets embedded; `rive: null` removes it).
+The phone draws it whenever no agent video arrives, and the agent drives it
+through data binding on the call's `rive` data channel:
+
+```typescript
+import { visemesFromAlignment } from "@relaymessenger/sdk/calls";
+
+const rive = await transport.rive(); // after connect(); same handle on every call
+rive.set({ mood: "happy" });          // View Model properties, applied at once
+rive.trigger("wave");                  // a trigger property
+rive.show({ file: card.rive!.file, artboard: "Quiz", view_model: { question: "2+2?" } });
+rive.on("view_model", (values) => {}); // what the person changed in the file
+rive.on("trigger", (name) => {});
+
+// Time a change to speech: audio-track milliseconds, read before writeAudio.
+const at = transport.audioTimeMs();
+await transport.writeAudio(frame);
+for (const cue of visemesFromAlignment(alignment)) rive.set({ viseme: cue.viseme }, { at: at + cue.t });
+```
+
+Python: `await call.rive()`, `rive.set(values, at=...)`, `call.audio_time_ms()`,
+`visemes_from_alignment`. Pipecat: `RelayRiveProcessor(transport)` right after
+TTS. LiveKit: `await RelayRive().start(session, call)`. Messages are JSON of at
+most 1 KB on an unordered, lossy channel; each overwrites what it sets. If Relay
+refuses the channel, `rive()` rejects with `media_unavailable` and the call
+goes on.
+
 ## Voice frameworks
 
 Relay publishes transports for the two common voice-agent frameworks. Each
