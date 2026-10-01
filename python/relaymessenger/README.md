@@ -136,6 +136,46 @@ legacy reply metadata remains valid. Reply input cannot contain `reply_message`.
 An optional subtitle that is blank after trimming is stored as absent.
 
 
+## Everything else in the API
+
+Every operation an agent token may call has a method, named as `@relaymessenger/sdk`
+names it, in Python style: `relay.chats.startTyping` is
+`relay.chats.start_typing`, `relay.paymentRequests` is
+`relay.payment_requests`. Request fields are keyword arguments; answers are
+the API's JSON, typed.
+
+```python
+from relaymessenger import parts
+
+await relay.chats.start_typing(chat_id)
+await relay.messages.add_reaction(message_id, operation="add", type="love")
+upload = await relay.attachments.create(filename="map.png", content_type="image/png", size_bytes=len(png))
+await relay.attachments.upload(upload, png)
+await relay.chats.messages.send(chat_id, {"message": {"parts": [parts.media_part(attachment_id=upload["attachment_id"])]}})
+call = await relay.calls.create(chat_id, to=["ada"], idempotency_key="ring-ada-1")
+```
+
+The resources are `chats` (with `messages`, `participants` and `location`),
+`messages`, `attachments`, `payment_requests`, `calls`, `contacts`,
+`contact_card`, `directory`, `blocked_handles`, `access`, `agents`, `me`,
+`oauth2_client`, `webhook_events` and `webhook_subscriptions`. `relaymessenger.parts` types every message part
+(text with mentions, media, link, buttons, selection, form, rich card,
+carousel, place and payment) and builds the simple ones.
+
+## Verify webhooks
+
+Relay signs each webhook delivery the Standard Webhooks way. Check it with
+the subscription's `whsec_` secret and the raw request body before you trust
+it:
+
+```python
+from relaymessenger import Relay, WebhookVerificationError
+
+relay = Relay(os.environ["RELAY_AGENT_TOKEN"], webhook_secret=os.environ["RELAY_WEBHOOK_SECRET"])
+
+event = relay.webhooks.unwrap(raw_body, headers=request.headers)  # raises WebhookVerificationError
+```
+
 ## Answer a Call
 
 The `calls` extra installs the media dependencies (aiortc, av, numpy), the

@@ -1,6 +1,6 @@
 [project]
 name = "relaymessenger-livekit"
-version = "0.1.0.dev1"
+version = "0.1.0"
 description = "Relay WebRTC audio and video transport and LiveKit Agents integration for Python."
 readme = "README.md"
 license = "MIT"

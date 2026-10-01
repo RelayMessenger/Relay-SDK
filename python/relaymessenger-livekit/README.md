@@ -137,6 +137,14 @@ Frames arrive upright as sent; aiortc does not negotiate the video-orientation
 extension, so `rotation` is always 0. `call.transport.video_stats()` reports
 frames captured, sent, decoded and dropped.
 
+`examples/gemini_live_video_agent.py` is a whole agent: it answers the next
+Call with Gemini Live, which sees the caller's camera, and sends a camera feed
+back.
+
+```sh
+uv run --with 'livekit-agents[google]' examples/gemini_live_video_agent.py
+```
+
 ## ICE servers, TURN, restarts and diagnostics
 
 By default the peer uses the servers the Call room sends after it joins:
