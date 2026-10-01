@@ -131,6 +131,8 @@ export const RIVE_LEAD_MS = 300;
 const STARTUP_AUDIO_MS = 2_000;
 /** A partial 10 ms slice left at the end of an audio event is padded and sent after this much quiet. */
 const CARRY_FLUSH_MS = 100;
+/** Missing end markers: allow this much quiet after the queued audio plays out. */
+const REPLY_QUIET_MS = 250;
 
 type RiveValues = Record<string, number | boolean>;
 
@@ -169,6 +171,11 @@ export class ElevenLabsCall {
   /** Samples short of one 10 ms slice, carried into the next audio event so no gap is padded in. */
   #carry = new Int16Array(0);
   #carryTimer: NodeJS.Timeout | undefined;
+  #replyTimer: NodeJS.Timeout | undefined;
+  /** New audio invalidates an older completion callback, even within the same reply. */
+  #audioRevision = 0;
+  #lastAudioId = 0;
+  #lastWrite: Promise<void> = Promise.resolve();
   /** Where the last written agent audio ends on the track. */
   #endMs: number | undefined;
   /** Rive changes waiting until their audio is close to playing, in time order. */
@@ -318,6 +325,14 @@ export class ElevenLabsCall {
       case "audio":
         this.#playAudio(message.audio_event as AudioEvent | undefined);
         break;
+      case "agent_response_complete": {
+        // Agents WebSocket reference: response/correction events are text, not
+        // audio EOF. agent_response_complete is the generation-end notification.
+        // https://elevenlabs.io/docs/agents-platform/api-reference/agents-platform/websocket
+        const id = Number((message.agent_response_complete_event as { event_id?: unknown } | undefined)?.event_id);
+        if (Number.isFinite(id) && id > this.#lastInterruptId && id >= this.#lastAudioId) void this.#endReply();
+        break;
+      }
       case "interruption": {
         const id = Number((message.interruption_event as { event_id?: unknown } | undefined)?.event_id);
         if (Number.isFinite(id)) this.#lastInterruptId = Math.max(this.#lastInterruptId, id);
@@ -340,8 +355,10 @@ export class ElevenLabsCall {
   /** The caller talked over the agent: drop what has not played (bridge.mts `source.clearQueue()`) and every change not yet sent. */
   #interrupt(): void {
     this.#generation += 1;
+    this.#audioRevision += 1;
     this.#carry = new Int16Array(0);
     clearTimeout(this.#carryTimer);
+    clearTimeout(this.#replyTimer);
     this.transport.clearAudio();
     this.#cues.length = 0;
     this.#endMs = undefined;
@@ -362,6 +379,10 @@ export class ElevenLabsCall {
     if (!event || this.#outputRate === undefined) return;
     // Audio from a reply the caller already interrupted is stale (ElevenLabs Python SDK).
     if (Number(event.event_id) <= this.#lastInterruptId) return;
+    const revision = ++this.#audioRevision;
+    const id = Number(event.event_id);
+    if (Number.isFinite(id)) this.#lastAudioId = id;
+    clearTimeout(this.#replyTimer);
     const rate = this.#outputRate;
     const fresh = typeof event.audio_base_64 === "string" ? decodePcm(event.audio_base_64) : new Int16Array(0);
     const final = event.is_final === true;
@@ -375,19 +396,19 @@ export class ElevenLabsCall {
     this.#carry = all.slice(whole);
     clearTimeout(this.#carryTimer);
     if (this.#carry.length) {
-      this.#carryTimer = setTimeout(() => this.#flushCarry(), CARRY_FLUSH_MS);
+      this.#carryTimer = setTimeout(() => { void this.#flushCarry(); }, CARRY_FLUSH_MS);
       this.#carryTimer.unref?.();
     }
     const generation = this.#generation;
     const names = this.#riveOptions;
     const durationMs = (fresh.length / rate) * 1_000;
     const cue = (startMs: number): void => {
-      if (generation !== this.#generation || !names) return;
+      if (this.#done || generation !== this.#generation) return;
       // Where this event's own audio starts: after the samples carried from the last one.
       const at = startMs + (carried / rate) * 1_000;
-      if (names.speaking && !this.#speaking) this.#queueCue(at, { [names.speaking]: true });
+      if (names?.speaking && !this.#speaking) this.#queueCue(at, { [names.speaking]: true });
       this.#speaking = true;
-      if (names.viseme && event.alignment) {
+      if (names?.viseme && event.alignment) {
         try {
           for (const shape of visemesFromAlignment(event.alignment, { endWithRest: false })) {
             if (shape.t <= durationMs) this.#queueCue(at + shape.t, { [names.viseme]: shape.viseme });
@@ -398,7 +419,7 @@ export class ElevenLabsCall {
       }
       this.#endMs = at + durationMs;
     };
-    let written: Promise<void> = Promise.resolve();
+    let written = this.#lastWrite;
     if (whole === 0) {
       if (this.#endMs !== undefined) cue(this.#endMs - (carried / rate) * 1_000);
     } else {
@@ -408,23 +429,54 @@ export class ElevenLabsCall {
         .then((startMs) => { if (startMs !== undefined) cue(startMs); })
         .catch((error: unknown) => this.#options.onWarning?.(`Relay refused ElevenLabs audio: ${(error as Error).message}`));
     }
-    if (final) {
-      // The reply's end rests the mouth where its last audio ends, aligned or not.
-      const settle = (): void => {
-        if (generation !== this.#generation) return;
-        this.#speaking = false;
-        const rest = this.#restValues();
-        if (this.#endMs !== undefined && Object.keys(rest).length) this.#queueCue(this.#endMs, rest);
-      };
-      void written.then(settle);
-    }
+    this.#lastWrite = written;
+    void written.then(() => {
+      if (this.#done || revision !== this.#audioRevision) return;
+      if (final) void this.#endReply();
+      else {
+        this.#replyTimer = setTimeout(() => { void this.#endReply(); }, this.transport.queuedAudioMs() + REPLY_QUIET_MS);
+        this.#replyTimer.unref?.();
+      }
+    });
   }
 
-  #flushCarry(): void {
-    if (!this.#carry.length || this.#outputRate === undefined) return;
+  #flushCarry(): Promise<void> {
+    if (!this.#carry.length || this.#outputRate === undefined) return this.#lastWrite;
     const samples = this.#carry;
     this.#carry = new Int16Array(0);
-    void this.transport.writeAudio({ samples, sampleRate: this.#outputRate, channelCount: 1 }).catch(() => undefined);
+    const rate = this.#outputRate;
+    const generation = this.#generation;
+    this.#lastWrite = this.transport.writeAudio({ samples, sampleRate: rate, channelCount: 1 }).then((startMs) => {
+      if (this.#done || generation !== this.#generation || startMs === undefined) return;
+      const speaking = this.#riveOptions?.speaking;
+      if (speaking && !this.#speaking) this.#queueCue(startMs, { [speaking]: true });
+      this.#speaking = true;
+      this.#endMs = startMs + samples.length / rate * 1_000;
+    }).catch((error: unknown) => this.#options.onWarning?.(`Relay refused ElevenLabs audio: ${(error as Error).message}`));
+    return this.#lastWrite;
+  }
+
+  async #endReply(): Promise<void> {
+    const revision = this.#audioRevision;
+    clearTimeout(this.#replyTimer);
+    clearTimeout(this.#carryTimer);
+    await this.#lastWrite;
+    if (this.#done || revision !== this.#audioRevision) return;
+    await this.#flushCarry();
+    if (this.#done || revision !== this.#audioRevision) return;
+    clearTimeout(this.#replyTimer);
+    // waitForPlayout calls the engine's waitForDrain, which pads a partial
+    // 20 ms Opus packet with silence. Writing 10 ms slices alone cannot flush it.
+    await this.transport.waitForPlayout();
+    if (this.#done || revision !== this.#audioRevision) return;
+    this.#speaking = false;
+    const rest = this.#restValues();
+    if (this.#endMs !== undefined && Object.keys(rest).length) {
+      // A partial Opus packet may have waited through the quiet timeout. Its
+      // original write time is then in the past; rest only after it was sent.
+      this.#queueCue(Math.max(this.#endMs, this.transport.audioTimeMs()), rest);
+    }
+    this.#endMs = undefined;
   }
 
   #queueCue(at: number, values: RiveValues): void {
@@ -494,6 +546,7 @@ export class ElevenLabsCall {
     if (this.#done) return;
     this.#done = true;
     clearTimeout(this.#carryTimer);
+    clearTimeout(this.#replyTimer);
     clearTimeout(this.#cueTimer);
     this.#cues.length = 0;
     this.transport.off("audio", this.#onAudio).off("ended", this.#onEnded).off("close", this.#onClose);

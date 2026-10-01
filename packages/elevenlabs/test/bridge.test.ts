@@ -1,6 +1,8 @@
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { Decoder } from "@evan/opus";
+import type { MediaStreamTrack, RtpPacket } from "werift";
 import type { CallRoom, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
-import { VISEMES, type RelayAudioSourceLike, type RelayPeerConnectionLike, type RelayWebRTCFactory } from "@relaymessenger/sdk/calls";
+import { VISEMES, createWeriftWebRTCFactory, type RelayAudioSourceLike, type RelayPeerConnectionLike, type RelayWebRTCFactory } from "@relaymessenger/sdk/calls";
 import { ElevenLabsCall, getSignedUrl, type ElevenLabsSocket } from "../src/index.js";
 
 /** Call room stand-in: records frames, answers the publish offer, emits what tests push. */
@@ -82,6 +84,7 @@ class FakeSource implements RelayAudioSourceLike {
   rtpMs = 10_000;
   queued = 0;
   cleared = 0;
+  drains = 0;
   createTrack() { return { kind: "audio", stop() {} }; }
   start(): void {}
   onData(data: { samples: Int16Array; sampleRate: number; channelCount: number }): void {
@@ -91,13 +94,15 @@ class FakeSource implements RelayAudioSourceLike {
   queuedMs(): number { return this.queued; }
   mediaTimeMs(): number { return this.rtpMs; }
   clear(): void { this.cleared += 1; this.queued = 0; }
+  async waitForDrain(): Promise<void> { this.drains += 1; }
 }
 
 class FakeWebRTC implements Partial<RelayWebRTCFactory> {
+  constructor(readonly audioSource?: RelayAudioSourceLike) {}
   readonly peer = new FakePeer();
   readonly source = new FakeSource();
   createPeerConnection(): RelayPeerConnectionLike { return this.peer as unknown as RelayPeerConnectionLike; }
-  createAudioSource(): RelayAudioSourceLike { return this.source; }
+  createAudioSource(): RelayAudioSourceLike { return this.audioSource ?? this.source; }
   readonly sinks: Array<{ ondata: ((data: any) => void) | null; stop(): void }> = [];
   readonly sinkFormats: unknown[] = [];
   createAudioSink(_track: unknown, format: unknown) {
@@ -152,9 +157,9 @@ const personReceives = (room: FakeRoom): void => room.emit("roomState", {
   ],
 });
 
-const start = async (options: { rive?: false } = {}) => {
+const start = async (options: { rive?: false } = {}, source?: RelayAudioSourceLike, subscribed = true) => {
   const room = new FakeRoom();
-  const webRTC = new FakeWebRTC();
+  const webRTC = new FakeWebRTC(source);
   const connecting = ElevenLabsCall.connect({
     relay: {} as Relay,
     callId: "01995bc0-0000-7000-8000-000000000001",
@@ -169,9 +174,195 @@ const start = async (options: { rive?: false } = {}) => {
   expect(socket.sent[0]).toEqual({ type: "conversation_initiation_client_data" });
   socket.server(metadata());
   const call = await connecting;
-  personReceives(room);
+  if (subscribed) personReceives(room);
   return { call, room, webRTC, socket };
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+const openRive = async (room: FakeRoom, webRTC: FakeWebRTC) => {
+  room.emit("rive", { type: "rive", id: 4 });
+  await flush();
+  const channel = webRTC.peer.channels[0]!;
+  channel.readyState = "open";
+  channel.onopen?.();
+  await flush();
+  return () => channel.sent.map((text) => JSON.parse(text) as { t?: number; view_model?: Record<string, unknown> });
+};
+
+it("completes an unmarked reply on agent_response_complete, including its sub-slice tail", async () => {
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(240).fill(7)), event_id: 1 } });
+  socket.server({ type: "agent_response_complete", agent_response_complete_event: { event_id: 1 } });
+  await flush();
+  expect(webRTC.source.written.flatMap((frame) => [...frame.samples])).toEqual([
+    ...new Array(240).fill(7), ...new Array(80).fill(0),
+  ]);
+  expect(webRTC.source.drains).toBe(1);
+  expect(sent().at(-1)).toEqual({ t: 10_020, view_model: { viseme: 0, speaking: false } });
+  call.close();
+});
+
+it("waits for held audio before handling an empty final marker", async () => {
+  const { call, socket, room, webRTC } = await start({}, undefined, false);
+  const sent = await openRive(room, webRTC);
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id: 1 } });
+  socket.server({ type: "audio", audio_event: { event_id: 1, is_final: true } });
+  await flush();
+  expect(webRTC.source.written).toHaveLength(0);
+  expect(sent()).toHaveLength(0);
+  personReceives(room);
+  await flush();
+  expect(webRTC.source.drains).toBe(1);
+  expect(sent().at(-1)).toEqual({ t: 10_020, view_model: { viseme: 0, speaking: false } });
+  call.close();
+});
+
+it("rests after queued audio and a quiet timeout without is_final or any completion event", async () => {
+  vi.useFakeTimers();
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(16_000).fill(7)), event_id: 1 } });
+  await flush();
+  await vi.advanceTimersByTimeAsync(1_249);
+  expect(sent().some((message) => message.view_model?.speaking === false)).toBe(false);
+  webRTC.source.rtpMs += 1_000;
+  webRTC.source.queued = 0;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(sent().at(-1)).toEqual({ t: 11_000, view_model: { viseme: 0, speaking: false } });
+  call.close();
+});
+
+it("restarts the quiet timeout on audio, not on text responses or corrections", async () => {
+  vi.useFakeTimers();
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  const audio = { type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id: 1 } };
+  socket.server({ type: "agent_response", agent_response_event: { agent_response: "Hello", event_id: 1 } });
+  socket.server(audio);
+  await flush();
+  await vi.advanceTimersByTimeAsync(200);
+  webRTC.source.rtpMs += 20;
+  webRTC.source.queued = 0;
+  socket.server(audio);
+  socket.server({ type: "agent_response_correction", agent_response_correction_event: { corrected_agent_response: "Hi", event_id: 1 } });
+  await flush();
+  await vi.advanceTimersByTimeAsync(269);
+  expect(sent().some((message) => message.view_model?.speaking === false)).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(sent().at(-1)).toEqual({ t: 10_040, view_model: { viseme: 0, speaking: false } });
+  call.close();
+});
+
+it("cancels an old reply's timeout on interruption and close", async () => {
+  vi.useFakeTimers();
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id: 1 } });
+  await flush();
+  socket.server({ type: "interruption", interruption_event: { event_id: 1 } });
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(16_000).fill(7)), event_id: 2 } });
+  socket.server({ type: "agent_response_complete", agent_response_complete_event: { event_id: 1 } });
+  await flush();
+  const count = sent().length;
+  await vi.advanceTimersByTimeAsync(500);
+  expect(sent()).toHaveLength(count);
+  expect(webRTC.source.drains).toBe(0);
+  call.close();
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(sent()).toHaveLength(count);
+  expect(webRTC.source.drains).toBe(0);
+});
+
+it.each(["interruption", "close"] as const)("cancels completion waiting for playout on %s", async (ending) => {
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  let release!: () => void;
+  vi.spyOn(webRTC.source, "waitForDrain").mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id: 1, is_final: true } });
+  await flush();
+  expect(sent().some((message) => message.view_model?.speaking === false)).toBe(false);
+  if (ending === "close") call.close();
+  else {
+    socket.server({ type: "interruption", interruption_event: { event_id: 1 } });
+    socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id: 2 } });
+    await flush();
+  }
+  const count = sent().length;
+  release();
+  await flush();
+  expect(sent()).toHaveLength(count);
+  call.close();
+});
+
+it("starts and rests consecutive completed replies independently", async () => {
+  const { call, socket, room, webRTC } = await start();
+  const sent = await openRive(room, webRTC);
+  for (const event_id of [1, 2]) {
+    socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(320).fill(7)), event_id } });
+    socket.server({ type: "agent_response_complete", agent_response_complete_event: { event_id } });
+    await flush();
+    webRTC.source.rtpMs += 20;
+    webRTC.source.queued = 0;
+  }
+  expect(sent().map((message) => message.view_model?.speaking)).toEqual([true, false, true, false]);
+  call.close();
+});
+
+it.each(["agent_response_complete", "is_final", "quiet"] as const)(
+  "flushes the final 10 ms into a padded Opus packet at %s without waiting for the next reply",
+  async (ending) => {
+    vi.useFakeTimers();
+    const source = createWeriftWebRTCFactory().createAudioSource();
+    const track = source.createTrack() as unknown as MediaStreamTrack;
+    const packets: Buffer[] = [];
+    track.onReceiveRtp.subscribe((rtp: RtpPacket) => packets.push(Buffer.from(rtp.payload)));
+    const { call, socket } = await start({ rive: false }, source);
+    await vi.advanceTimersByTimeAsync(40);
+    socket.server({
+      type: "audio",
+      audio_event: { audio_base_64: pcm(new Array(160).fill(8_000)), event_id: 1, ...(ending === "is_final" ? { is_final: true } : {}) },
+    });
+    if (ending === "agent_response_complete") socket.server({ type: ending, agent_response_complete_event: { event_id: 1 } });
+    await flush();
+    await vi.advanceTimersByTimeAsync(ending === "quiet" ? 300 : 40);
+    expect(source.stats!().opusPackets).toBe(1);
+    expect(source.stats!().rtpPackets).toBe(1);
+    expect(source.queuedMs!()).toBe(0);
+    const decoder = new Decoder({ channels: 2, sample_rate: 48_000 });
+    const decoded = packets.map((packet) => decoder.decode(packet));
+    expect(decoded.every((frame) => frame.byteLength === 960 * 2 * 2)).toBe(true);
+    expect(decoded.some((frame) => frame.some((byte) => byte !== 0))).toBe(true);
+    call.close();
+  },
+);
+
+it("rests a quiet reply only after its delayed partial packet reaches RTP", async () => {
+  vi.useFakeTimers();
+  const source = createWeriftWebRTCFactory().createAudioSource();
+  const { call, socket, room, webRTC } = await start({}, source);
+  const sent = await openRive(room, webRTC);
+  await vi.advanceTimersByTimeAsync(40);
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(160).fill(8_000)), event_id: 1 } });
+  await flush();
+  await vi.advanceTimersByTimeAsync(259);
+  expect(source.stats!().rtpPackets).toBe(0);
+  expect(sent().some((message) => message.view_model?.speaking === false)).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  if (source.stats!().rtpPackets === 0) {
+    expect(sent().some((message) => message.view_model?.speaking === false)).toBe(false);
+  }
+  await vi.advanceTimersByTimeAsync(40);
+  expect(source.stats!().rtpPackets).toBe(1);
+  const rest = sent().find((message) => message.view_model?.speaking === false);
+  expect(rest?.t).toBeGreaterThanOrEqual(300);
+  expect(source.queuedMs!()).toBe(0);
+  call.close();
+});
 
 it("joins the call first, then opens the conversation with the signed URL and the initiation data", async () => {
   const { call, socket, room } = await start();
