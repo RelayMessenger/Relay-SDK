@@ -187,6 +187,29 @@ test("an unlocked cookbook's staging range keeps its operator and loses only the
   assert.equal(manifest.devDependencies.typescript, "7.0.2");
 });
 
+test("an unlocked cookbook's range moves to a release it does not admit", () => {
+  // Release run 36796792561 (2026-10-01) published sdk 0.4.0 while three
+  // unlocked cookbooks still said ^0.3.0, which installs 0.3.6, not latest.
+  const root = mkdtempSync(join(tmpdir(), "release-cookbook-minor-"));
+  const directory = join(root, "cookbook", "send-a-message");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "package.json"), JSON.stringify({
+    dependencies: { "@relaymessenger/sdk": "^0.3.0" },
+    devDependencies: { "@relaymessenger/chat-sdk-adapter": "~0.3.7-staging.2" },
+  }));
+  const minorPlan = [
+    { name: "@relaymessenger/sdk", current: "0.4.0-staging.3", version: "0.4.0" },
+    { name: "@relaymessenger/chat-sdk-adapter", current: "0.3.8-staging.1", version: "0.3.8" },
+  ];
+  const written = rewriteCookbooks(root, minorPlan);
+  assert.deepEqual(written, [join(directory, "package.json")]);
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  assert.equal(manifest.dependencies["@relaymessenger/sdk"], "^0.4.0");
+  assert.equal(manifest.devDependencies["@relaymessenger/chat-sdk-adapter"], "~0.3.7");
+  // A range that already admits the release is left alone.
+  assert.deepEqual(rewriteCookbooks(root, minorPlan), []);
+});
+
 test("the cookbook rewrite fails closed", () => {
   const root = mkdtempSync(join(tmpdir(), "release-cookbook-closed-"));
   // No integrity for a locked package: the lockfile would name bytes nobody checked.
