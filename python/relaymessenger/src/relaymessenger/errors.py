@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, cast
-
-from .a2ui import A2uiFailure
+from typing import Any, Optional
 
 
 class RelayAPIError(Exception):
@@ -28,9 +26,6 @@ class RelayAPIError(Exception):
         self.doc_url = doc_url
         self.retry_after = retry_after
         self.body = body
-        raw = body.get("a2ui_errors") if isinstance(body, dict) else None
-        #: When A2UI messages were refused and nothing in the send was applied, each one.
-        self.a2ui_errors: List[A2uiFailure] = cast(List[A2uiFailure], raw) if isinstance(raw, list) else []
 
     @property
     def retryable(self) -> bool:
