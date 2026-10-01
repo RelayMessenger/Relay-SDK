@@ -22,6 +22,7 @@ including the sender (`to` accepts at most 6 recipient Handles).
 packages/
   sdk/                    @relaymessenger/sdk
   livekit/                @relaymessenger/livekit
+  elevenlabs/             @relaymessenger/elevenlabs
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
   cli/                    relaymessenger
   openclaw/               @relaymessenger/openclaw-plugin
