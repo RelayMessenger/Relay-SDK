@@ -424,7 +424,7 @@ export const createConsoleAgent = async (
         image_url: imageURL,
         ...(input.imageRecipe ? { image_recipe: input.imageRecipe } : {}),
       }, { maxRetries: 0 });
-      return { ...created, agent };
+      return { ...created, agent: { ...agent, handle: agent.handle ?? created.agent.handle } };
     }
     const outcome = await uploadAgentImage(
       { handle: created.agent.handle, ...(localImage ? { image: localImage } : {}) },
@@ -437,7 +437,7 @@ export const createConsoleAgent = async (
     );
     const image = safeMetadata(outcome, [created.token]);
     return image.status === "updated"
-      ? { ...created, agent: image.agent, image }
+      ? { ...created, agent: { ...image.agent, handle: image.agent.handle ?? created.agent.handle }, image }
       : { ...created, image };
   } catch {
     return {

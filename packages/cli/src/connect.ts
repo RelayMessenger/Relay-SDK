@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
-import { validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
+import { cardHandle, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { savedAgentShareURL } from "./agent-session.js";
 import {
   CODING_AGENTS,
@@ -931,7 +931,7 @@ const saveExistingAgent = async (
     const cards = await deps.agents.client(token, apiURL).contactCard.retrieve();
     const own = cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active);
     if (own.length !== 1) throw new Error("This token must belong to exactly one active agent.");
-    handle = own[0]!.handle;
+    handle = cardHandle(own[0]!);
     displayName = own[0]!.first_name;
   } catch {
     throw new ConnectFailure(

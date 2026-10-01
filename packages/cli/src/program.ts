@@ -19,7 +19,7 @@ import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQRForOutput, TerminalQRSizeError } from "./qr-terminal.js";
-import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
+import { agentDependencies, cardHandle, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -1800,7 +1800,7 @@ again with --number and --code.
     const cards = await client.contactCard.retrieve({});
     const agents = cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active);
     if (agents.length !== 1) throw new Error("This token must belong to exactly one active agent.");
-    return agents[0]!.handle;
+    return cardHandle(agents[0]!);
   };
   contactCard
     .command("setup")

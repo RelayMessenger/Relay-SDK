@@ -83,6 +83,10 @@ class ChatHandle(TypedDict, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
     is_contact: bool
     activity_version: str
     activity: Optional[Dict[str, Any]]
@@ -101,6 +105,10 @@ class ContactEventContact(TypedDict):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
 
 
 class _PartyRequired(TypedDict):
@@ -121,6 +129,10 @@ class CallContact(_PartyRequired, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
 
 
 class SystemEventParty(_PartyRequired, total=False):
@@ -135,6 +147,10 @@ class SystemEventParty(_PartyRequired, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
 
 
 class _UserOwnerRequired(TypedDict):
@@ -156,6 +172,11 @@ class UserOwner(_UserOwnerRequired, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    #: None when the person has no Relay account.
+    links: Optional[List[str]]
 
 
 class _OwnerPersonRequired(TypedDict):
@@ -176,6 +197,10 @@ class OwnerPerson(_OwnerPersonRequired, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
 
 
 class _ChatRequired(TypedDict):
@@ -312,6 +337,10 @@ class ContactCard(TypedDict, total=False):
     #: a birth year given once; None until it reports one. A person whose
     #: range is not "18_plus" never reaches an agent rated 18_plus.
     age_range: Optional[AgeRange]
+    #: The person's profile links: at most 5 absolute https URLs, in the order
+    #: they chose, as Relay normalised them; empty when they set none. Relay
+    #: sends no platform name; read the site from the URL.
+    links: List[str]
 
 
 class _Transport:
@@ -477,16 +506,30 @@ class Chats:
         return cast(ChatListResponse, await self._transport.request("GET", path))
 
     async def share_contact_card(
-        self, chat_id: str, *, handle: Optional[str] = None, idempotency_key: Optional[str] = None
+        self,
+        chat_id: str,
+        *,
+        handle: Optional[str] = None,
+        user_id: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> None:
         """Share a contact card into a chat.
 
-        Omitting ``handle`` shares the caller's own card. With ``handle``, it
-        recommends an agent that is Public or Unlisted and that people can
-        message; the card is a snapshot of that agent at send time. The same
-        ``idempotency_key`` and body replay with nothing shared.
+        Omitting ``handle`` and ``user_id`` shares the caller's own card. With
+        ``handle``, it recommends an agent that is Public or Unlisted and that
+        people can message; the card is a snapshot of that agent at send time.
+        With ``user_id``, it shares a person who has sent a message in a chat
+        with you and has not blocked you, into a chat with an active person
+        none of whom has blocked or been blocked by them; anything else is the
+        same 404. Ask both people first. The card is a snapshot of their id,
+        handle, name, photo and links. Send ``handle`` or ``user_id``, not
+        both. The same ``idempotency_key`` and body replay with nothing shared.
         """
-        body = None if handle is None else {"handle": handle}
+        if handle is not None and user_id is not None:
+            raise ValueError("share_contact_card takes handle or user_id, not both")
+        body: Optional[Dict[str, str]] = (
+            {"handle": handle} if handle is not None else {"user_id": user_id} if user_id is not None else None
+        )
         await self._transport.request(
             "POST",
             f"/v1/chats/{quote(chat_id, safe='')}/share_contact_card",

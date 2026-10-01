@@ -528,14 +528,18 @@ export class Chats {
     bodyOrOptions: ChatShareContactCardParams & ChatShareContactCardOptions = {},
     options?: ChatShareContactCardOptions,
   ): Promise<void> {
-    const { handle } = bodyOrOptions;
+    const { handle, user_id } = bodyOrOptions;
+    if (handle !== undefined && user_id !== undefined) {
+      return Promise.reject(new TypeError("shareContactCard takes handle or user_id, not both"));
+    }
+    const body = handle !== undefined ? { handle } : user_id !== undefined ? { user_id } : undefined;
     // The legacy form's object is passed through untouched: its options may be getters.
-    const requestOptions = options ?? (handle === undefined ? bodyOrOptions : undefined);
+    const requestOptions = options ?? (body === undefined ? bodyOrOptions : undefined);
     const idempotencyKey = requestOptions?.idempotencyKey;
     return this.transport.request({
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
-      ...(handle === undefined ? {} : { body: { handle } }),
+      ...(body === undefined ? {} : { body }),
       options: requestOptions,
       ...(idempotencyKey ? { idempotencyKey } : {}),
     });
