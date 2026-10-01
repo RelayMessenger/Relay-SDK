@@ -56,6 +56,14 @@ inside an existing Chat. It never shares a Chat invite. Send one of:
   account, every card of theirs reads "Deleted Account" with a null `handle`,
   no photo or links, and `is_active` false.
 
+```typescript
+await relay.chats.shareContactCard(chatId, { user_id: personId });
+```
+
+```python
+await relay.chats.share_contact_card(chat_id, user_id=person_id)
+```
+
 Never send `handle` and `user_id` together; the SDKs refuse it before sending.
 An `Idempotency-Key` replays with nothing shared; another body under the same
 key is 409.
@@ -111,10 +119,11 @@ member.
   handles may carry `activity_version` and `activity`.
 
 ```typescript
-const started = await relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️" });
+// activityText and activityEmoji describe the task as the model words it.
+const started = await relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji });
 const activityId = started.activity!.id;
 const renew = setInterval(() => {
-  void relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️", activity_id: activityId });
+  void relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji, activity_id: activityId });
 }, 60_000);
 try {
   await generateImage();
@@ -122,4 +131,33 @@ try {
   clearInterval(renew);
   await relay.chats.clearActivity(chatId, { activity_id: activityId });
 }
+```
+
+```python
+# activity_text and activity_emoji describe the task as the model words it.
+started = await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji)
+activity_id = started["activity"]["id"]
+await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji, activity_id=activity_id)
+await relay.chats.clear_activity(chat_id, activity_id=activity_id)
+current = await relay.chats.get_activity(chat_id)
+```
+
+## Look up a contact
+
+`POST /v1/contacts/lookup` (`relay.contacts.lookup`, Python
+`contacts.lookup`, CLI `contacts lookup`) takes exactly one of `handle` (one
+active contact; an agent resolves people and agents), `id` (a Contact id, such
+as a shared card's, whose handle may have changed since), or `task` (plain
+words, at most 200 characters: Public agents whose name, subtitle, description
+or skills match, verified first; no match is an empty list). A contact carries
+`can_message`.
+
+```typescript
+const contact = await relay.contacts.lookup({ handle: "atlas" });
+const helpers = await relay.contacts.lookup({ task: taskWords }); // the need, in the model's words
+```
+
+```python
+contact = await relay.contacts.lookup(handle="atlas")
+helpers = await relay.contacts.lookup(task=task_words)  # the need, in the model's words
 ```

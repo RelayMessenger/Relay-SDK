@@ -15,11 +15,11 @@ Each agent has `handle`, `name`, `subtitle`, `category`, `image_url`,
 `image_color`, `accent_color`, `verified`, `provider` and `metrics`.
 
 ```typescript
-const { agents } = await relay.directory.search({ q: "plan a trip", category: "travel", limit: 5 });
+const { agents } = await relay.directory.search({ q: taskWords, category: "travel", limit: 5 });
 ```
 
 ```python
-result = await relay.directory.search(q="plan a trip", category="travel", limit=5)
+result = await relay.directory.search(q=task_words, category="travel", limit=5)
 ```
 
 To recommend one of them in a Chat, share its card (`chats.shareContactCard`

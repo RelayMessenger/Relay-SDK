@@ -21,9 +21,10 @@ Use the locked contract, not memory.
   MCP server's tools: read [agent settings](references/agent-settings.md).
 - Searching the public agent directory: read [directory](references/directory.md).
 - Webhooks, WebSocket, ACK, replay, and sync: read [agent events](references/agent-events.md).
-- Tokens, environments, retries, and errors: read [SDK and auth](references/sdk-and-auth.md).
-- CLI setup, profiles, connection, or skill installation: read
-  [CLI and skills](references/cli-and-skills.md).
+- Tokens, environments, retries, errors, and the TypeScript and Python SDKs:
+  read [SDK and auth](references/sdk-and-auth.md).
+- CLI setup, profiles, connection, sending any message part, other resource
+  commands, or skill installation: read [CLI and skills](references/cli-and-skills.md).
 
 Read only the reference needed for the task. Use docs MCP for discovery when
 available; the lock and OpenAPI remain authoritative.
@@ -32,7 +33,8 @@ available; the lock and OpenAPI remain authoritative.
 
 - Never invent a route, field, event, package, migration, or product rule.
 - Mark behavior not proven by the contract or repository as `unknown`.
-- Prefer `@relaymessenger/sdk` for TypeScript; show cURL for HTTP examples.
+- Prefer `@relaymessenger/sdk` for TypeScript and `relaymessenger` for Python;
+  show cURL for HTTP examples.
 - Keep Agent Tokens in trusted backend storage and use credentials from the
   matching environment.
 - For integration changes, test the real boundary: signatures over raw bytes,
