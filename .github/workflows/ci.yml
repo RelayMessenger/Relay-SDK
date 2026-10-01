@@ -192,6 +192,8 @@ jobs:
   # model, and check the ElevenLabs Agents bridge against a fake socket. They
   # do not place a call; the live call is proven by hand on staging.
   cookbook-python:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
