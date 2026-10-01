@@ -1,4 +1,6 @@
 import type { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
+import type { FormPart, FormPartResponse, FormResponsePart, FormResponsePartResponse } from "./form-types.js";
+export type * from "./form-types.js";
 
 export type UUID = string;
 
@@ -28,6 +30,17 @@ export interface CallContact {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type CallTerminalStatus =
@@ -451,6 +464,17 @@ export interface UserChatHandle extends ChatHandleBase {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -483,6 +507,18 @@ export type HandleOwner =
      * ask anyone their age.
      */
     age_range?: AgeRange | null;
+    /**
+     * The person's profile links: at most 5 absolute https URLs, in the order
+     * they chose, as Relay normalised them. Empty when they set none. Relay
+     * sends no platform name; read the site from the URL. People only.
+     * Null when the person has no Relay account.
+     */
+    links?: string[] | null;
+    /**
+     * The person's about, as they wrote it in Relay: plain text, at most 160
+     * characters. Null when they wrote none. People only.
+     */
+    about?: string | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
@@ -826,6 +862,8 @@ export type MessagePart =
   | RichCardPart
   | CarouselPart
   | SuggestionResponsePart
+  | FormPart
+  | FormResponsePart
   | PaymentPart
   | PlacePart;
 
@@ -883,6 +921,17 @@ export interface SystemEventParty {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -945,6 +994,8 @@ export type MessagePartResponse =
   | RichCardPartResponse
   | CarouselPartResponse
   | SuggestionResponsePartResponse
+  | FormPartResponse
+  | FormResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
   | LocationRequestPartResponse
@@ -992,6 +1043,8 @@ export interface SentMessage {
     | RichCardPartResponse
     | CarouselPartResponse
     | SuggestionResponsePartResponse
+    | FormPartResponse
+    | FormResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
       | LocationRequestPartResponse
@@ -1080,7 +1133,10 @@ export interface ChatCreateResponse {
   > & { message: SentMessage };
 }
 
-/** Omit handle to share the authenticated agent's own card. */
+/**
+ * Send handle to recommend an agent, user_id to share a person, or neither to
+ * share the authenticated agent's own card. Never both.
+ */
 export interface ChatShareContactCardParams {
   /**
    * The agent to recommend, trimmed and lowercased by the Server. It must be
@@ -1088,6 +1144,15 @@ export interface ChatShareContactCardParams {
    * the same 404 as an unknown handle.
    */
   handle?: string;
+  /**
+   * The person to share: their id as you see it in a chat
+   * (`system_event.actor.id` or the chat's handles). They must have sent a
+   * message in a chat with you and not blocked you, and the target chat needs
+   * an active person none of whom has blocked or been blocked by them;
+   * anything else is the same 404. Ask both people first. Their card is a
+   * snapshot: id, handle, name, photo, links and about.
+   */
+  user_id?: UUID;
 }
 
 export interface ChatShareContactCardOptions extends RequestOptions {
@@ -1474,6 +1539,17 @@ export interface ContactLookup {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
   /** Who the agent is for: everyone, or only people whose age range is 18_plus. Agents only. */
   age_rating?: AgentAgeRating;
 }
@@ -1509,8 +1585,8 @@ export type ContactLookupResponse =
 
 export interface ContactCardItem {
   /**
-   * The shared agent's Contact id, only on a card shared by handle. Open the
-   * agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
+   * The shared Contact's id, only on a card shared by handle or user_id. Open
+   * an agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
    */
   id?: UUID;
   /** The shared agent's subtitle when it was shared, only on a card shared by handle. */
@@ -1522,13 +1598,43 @@ export interface ContactCardItem {
   url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
-  handle: string;
+  /** Null only on a shared person's card after they deleted their account. */
+  handle: string | null;
   first_name: string;
   last_name: string | null;
   image_url: string | null;
   is_active: boolean;
   /** Whether Relay has verified this agent. Always false for a user. */
   is_verified?: boolean;
+  /**
+   * A shared person's profile links when the card was shared, only on a
+   * person's card. A person's card carries id, handle, name, photo, links and
+   * about, and nothing else.
+   */
+  links?: string[];
+  /**
+   * A shared person's about when the card was shared, at most 160
+   * characters, or null when they wrote none. Only on a person's card.
+   */
+  about?: string | null;
+  kind: "user" | "agent";
+}
+
+/**
+ * What `POST` and `PATCH /v1/contact_card` return: the agent's own card, whose
+ * handle is never null. (`GET /v1/contact_card` returns `ContactCardItem`, the
+ * contract's one schema for every card, shared ones included.)
+ */
+export interface SetContactCardResponse {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
+  first_name: string;
+  last_name: string | null;
+  image_url: string | null;
+  /** Dominant colour of the picture, six uppercase hex digits; null when Relay has none. */
+  image_color: string | null;
+  is_active: boolean;
+  handle: string;
   kind: "user" | "agent";
 }
 
@@ -1600,7 +1706,12 @@ export type AgentAccessRule = "allow" | "deny";
  * The agent's owner is always allowed and is on neither list.
  */
 /** "Log in with Relay" scopes: `openid` and `profile` always, `email` and `phone` optional. */
-export type OAuth2Scope = "openid" | "profile" | "email" | "phone";
+/**
+ * An OpenID Connect scope a Log in with Relay client may ask for. `birthdate`
+ * asks for the person's birthday as the OpenID `birthdate` claim (YYYY-MM-DD,
+ * or 0000-MM-DD when they gave no year).
+ */
+export type OAuth2Scope = "openid" | "profile" | "email" | "phone" | "birthdate";
 
 /** The agent's OAuth2 client for Log in with Relay. `client_id` is the agent's ID. */
 export interface OAuth2Client {
@@ -1769,6 +1880,17 @@ export interface ContactEventContact {
    * ask anyone their age.
    */
   age_range: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about: string | null;
 }
 
 export interface ContactAddedEvent {
@@ -1906,6 +2028,17 @@ export interface OwnerPerson {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */

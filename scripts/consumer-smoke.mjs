@@ -107,6 +107,10 @@ try {
     "timezone",
     // Server 468: a person's age range.
     "age_range",
+    // Server 475: a person's profile links.
+    "links",
+    // Server 479: a person's about.
+    "about",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
@@ -127,12 +131,12 @@ try {
   assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
   assert.deepEqual(interfaceFields("DirectorySearchParams"), ["q", "category", "limit", "sort"]);
   assert.deepEqual(interfaceFields("DirectorySearchResponse"), ["agents"]);
-  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle"]);
+  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle", "user_id"]);
   for (const field of ["id", "subtitle", "url"]) assert.ok(interfaceFields("ContactCardItem").includes(field));
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
-    "can_message", "timezone", "age_range", "age_rating",
+    "can_message", "timezone", "age_range", "links", "about", "age_rating",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);

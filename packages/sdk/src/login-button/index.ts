@@ -19,7 +19,7 @@ export interface RelayLoginOptions {
   clientId: string;
   /** One of the redirects in your agent's OAuth2 settings. */
   redirectUri: string;
-  /** Defaults to "openid profile". Add "email" or "phone" when your agent's scopes allow them. */
+  /** Defaults to "openid profile". Add "email", "phone" or "birthdate" when your agent's scopes allow them. */
   scope?: string;
   /** Defaults to {@link RELAY_AUTH_ORIGIN}. */
   authOrigin?: string;

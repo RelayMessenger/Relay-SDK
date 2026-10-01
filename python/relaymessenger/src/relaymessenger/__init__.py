@@ -11,7 +11,7 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 ``relaymessenger`` alone loads no media dependency.
 """
 
-from . import rich_cards, selection, websocket
+from . import form, rich_cards, selection, websocket
 from .client import (
     DEFAULT_BASE_URL,
     AgeRange,
@@ -57,6 +57,7 @@ __all__ = [
     "WebSocketFullSyncContext",
     "WebSocketProtocolError",
     "WebSocketStoppedError",
+    "form",
     "rich_cards",
     "selection",
     "websocket",

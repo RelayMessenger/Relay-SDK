@@ -10,6 +10,7 @@ import {
   releaseDeferredPins,
   standaloneChannel,
   tarballArguments,
+  unlockedReleaseCandidates,
 } from "./validate-cookbook-standalone.mjs";
 
 const sdk = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.3.0-staging.0" };
@@ -82,6 +83,18 @@ test("release: an exact staging pin is left to the release, unless the release h
   assert.deepEqual(releaseDeferredPins({ channel: "release", dependencies: [exact], tarballs: ["/r/sdk.tgz"] }), []);
   // The staging channel installs staging builds; nothing is deferred there.
   assert.deepEqual(releaseDeferredPins({ channel: "staging", dependencies: [exact], tarballs: [] }), []);
+});
+
+test("release: an unlocked folder installs the release's own tarball, which the registry does not have yet", () => {
+  const ranged = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.5.0" };
+  const candidates = new Map([["@relaymessenger/sdk", { version: "0.5.0", path: "/r/relaymessenger-sdk-0.5.0.tgz" }]]);
+  assert.deepEqual(unlockedReleaseCandidates({ channel: "release", locked: false, dependencies: [ranged], candidates }),
+    [{ ...ranged, version: "0.5.0", path: "/r/relaymessenger-sdk-0.5.0.tgz" }]);
+  // A locked folder installs what its lockfile pins, from the seeded cache.
+  assert.deepEqual(unlockedReleaseCandidates({ channel: "release", locked: true, dependencies: [ranged], candidates }), []);
+  // The staging channel and a run without tarballs keep the registry.
+  assert.deepEqual(unlockedReleaseCandidates({ channel: "staging", locked: false, dependencies: [ranged], candidates }), []);
+  assert.deepEqual(unlockedReleaseCandidates({ channel: "release", locked: false, dependencies: [ranged], candidates: new Map() }), []);
 });
 
 test("--tarball is repeatable and takes only .tgz paths", () => {

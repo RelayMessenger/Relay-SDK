@@ -57,6 +57,21 @@ describe("share contact card", () => {
     expect(calls[0]!.init?.body).toBeUndefined();
   });
 
+  it("sends user_id as JSON to share a person's card, with an Idempotency-Key", async () => {
+    const { relay, calls } = fixture();
+    const user_id = "0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b";
+    await relay.chats.shareContactCard("chat-id", { user_id }, { idempotencyKey: "person-1" });
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ user_id });
+    expect(new Headers(calls[0]!.init?.headers).get("idempotency-key")).toBe("person-1");
+  });
+
+  it("refuses handle and user_id together without sending", async () => {
+    const { relay, calls } = fixture();
+    const both = { handle: "atlas", user_id: "0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b" };
+    await expect(relay.chats.shareContactCard("chat-id", both)).rejects.toThrow(TypeError);
+    expect(calls).toHaveLength(0);
+  });
+
   it("passes an empty handle to the server rather than sharing the caller's card", async () => {
     const { relay, calls } = fixture();
     await relay.chats.shareContactCard("chat-id", { handle: "" });

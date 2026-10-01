@@ -1,6 +1,7 @@
 import { splitButtons } from "./buttons.js";
 import { splitPayment } from "./payment.js";
 import { splitSelection } from "./selection.js";
+import { splitForm } from "./form.js";
 import type { ButtonsPart, LinkPart, MessagePart, PaymentRequestCreateParams, TextPart } from "./types.js";
 
 /**
@@ -93,6 +94,15 @@ export interface AnswerMessages {
  * components remain text with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
+  const formed = splitForm(answer);
+  if (formed.error) return { messages: splitLinks(answer).map((segment) => [segment]), error: formed.error };
+  if (formed.form) {
+    const messages: MessagePart[][] = splitLinks(formed.text).map((segment) => [segment]);
+    const prompt = messages.findLast((parts) => parts[0]?.type === "text" && parts[0].value.trim());
+    if (prompt) prompt.push(formed.form);
+    else messages.push([formed.form]);
+    return { messages };
+  }
   const paid = splitPayment(answer);
   if (paid.error) {
     // The block stays in the words, but a link still travels alone; a bad

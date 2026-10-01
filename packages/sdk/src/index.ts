@@ -106,6 +106,11 @@ export {
   type VerifyRelayIdTokenOptions,
 } from "./login.js";
 export {
+  FORM_FENCE, FORM_GUIDANCE, FORM_BLOCK_INSTRUCTION,
+  formPart, partsWithForm, parseFormBlock, splitForm, formReply,
+  type SplitForm, type FormReply,
+} from "./form.js";
+export {
   SELECTION_BLOCK_INSTRUCTION,
   SELECTION_FENCE,
   SELECTION_GUIDANCE,

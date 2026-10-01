@@ -851,6 +851,18 @@ paths:
         (people cannot message it), an archived agent, a person and an unknown
         handle all return the same 404.
 
+        Send user_id to share a person's card: their id as you see it on them in
+        a chat (system_event.actor.id or the chat's handles). You may share a
+        person who has sent a message in a chat with you and has not blocked
+        you, into a chat with at least one active person in it, none of whom has
+        blocked or been blocked by that person. Anything else returns the same
+        404. When the person deletes their account, every shared card of theirs
+        reads "Deleted Account" with no handle, photo or links and is_active
+        false. Ask both people first, with ordinary
+        buttons; Relay does not ask for you. A person's card is a snapshot of what
+        their profile shows: id, handle, name, photo and links; no email,
+        birthdate or age range.
+
         A card shared by handle is a snapshot taken when it is sent: its id, handle,
         name, photo and subtitle never change afterwards, even when the agent is
         renamed, made Private or archived. Its url opens the agent's chat; a client
@@ -888,8 +900,15 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ShareContactCardRequest"
-            example:
-              handle: atlas
+            examples:
+              agent:
+                summary: Recommend another agent
+                value:
+                  handle: atlas
+              person:
+                summary: Share a person you have a chat with
+                value:
+                  user_id: 0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b
       responses:
         "204":
           description: Contact shared successfully, or an Idempotency-Key replay that shared nothing
@@ -1106,8 +1125,7 @@ paths:
             The send is not permitted. A Chat whose member set has no agent in
             it is rejected with error code `2028`. Who may reach whom was
             decided when the Chat was created; every active member may write
-            to it. Every A2UI message failed and the first changed a surface
-            another agent created (error code `2003`, `a2ui_errors` lists each).
+            to it.
           content:
             application/json:
               schema:
@@ -1123,13 +1141,9 @@ paths:
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
                     success: false
         "404":
-          description: The Chat, a reply target or an attachment was not found, or every A2UI message failed and the first named an unknown or deleted surface (`a2ui_errors` lists each).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          $ref: "#/components/responses/NotFound"
         "409":
-          description: Chat is unavailable, a mention was used in a non-group chat, a mention target is no longer in the chat, or every A2UI message failed and the first was a `createSurface` for a surfaceId already live in the chat
+          description: Chat is unavailable, a mention was used in a non-group chat, or a mention target is no longer in the chat
           content:
             application/json:
               schema:
@@ -1141,7 +1155,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
-          description: The content cannot be accepted (error code `2006`), for example every A2UI message in the send failed (`a2ui_errors` lists each, see `DataPart`).
+          description: The content cannot be accepted (error code `2006`).
           content:
             application/json:
               schema:
@@ -1374,7 +1388,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, `selection_response`, or `suggestion_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
+      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, `selection_response`, `suggestion_response`, `form`, or `form_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
       tags:
         - Messages
       security:
@@ -2358,6 +2372,181 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/agents/suggested:
+    get:
+      operationId: listSuggestedAgents
+      summary: List the public agents suggested for you
+      description: >-
+        Person only. Public agents you have not added and do not chat with,
+        best first. The rank adds four things: how many of your contacts use
+        the agent, how often the people who use your agents also use it, how
+        close its name, subtitle and description are to your agents', and
+        how many people wrote to it in the last 30 days. An 18+ agent is
+        listed only when your age range is 18 or over. The list for the same
+        question can be up to five minutes old.
+      tags:
+        - Contacts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 7
+        - name: contacts
+          in: query
+          required: false
+          description: >-
+            The counts `POST /v1/address_book/agent_counts` answered, as
+            `handle:count` pairs separated by commas (`lupe:3,derek:2`), at most
+            50. A count below 2 is ignored. Nothing here is stored.
+          schema:
+            type: string
+            maxLength: 4000
+      responses:
+        "200":
+          description: Suggested agents, best first
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - agents
+                properties:
+                  agents:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - handle
+                        - name
+                        - subtitle
+                        - image_url
+                        - image_color
+                        - verified
+                        - contacts
+                        - reason
+                      properties:
+                        handle:
+                          type: string
+                        name:
+                          type: string
+                        subtitle:
+                          type: [string, "null"]
+                        image_url:
+                          type: [string, "null"]
+                        image_color:
+                          type: [string, "null"]
+                        verified:
+                          type: boolean
+                        contacts:
+                          type: integer
+                          minimum: 0
+                          description: How many of your contacts use it, from `contacts`; 0 below 2.
+                        reason:
+                          type: string
+                          enum:
+                            - contacts
+                            - similar_to
+                            - popular
+                          description: >-
+                            What ranked it most: your contacts use it, it is like
+                            the agents you use, or many people use it.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is an agent (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/agent_requests:
+    post:
+      operationId: requestAgent
+      summary: Ask for an agent that is not on Relay yet
+      description: >-
+        Person only. When a search finds no agent, send what you searched for
+        and what you want the agent to help with. Relay keeps the request and
+        reads it to decide which agents to bring. Nobody else sees it. Text is
+        trimmed. Each account may send 20 requests in 24 hours.
+      tags:
+        - Contacts
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - query
+                - what
+              properties:
+                query:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: What you searched for.
+                what:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+                  description: What the agent should help you with.
+      responses:
+        "201":
+          description: The request, as Relay stored it
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - id
+                  - query
+                  - what
+                  - created_at
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  query:
+                    type: string
+                  what:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is an agent (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Twenty requests in 24 hours already (error code `2008`); `retry_after` says when to try again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/contacts/lookup:
     post:
       operationId: lookupContact
@@ -3132,6 +3321,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
     Call:
       type: object
       additionalProperties: false
@@ -4269,6 +4481,31 @@ components:
             once (only the range is kept). Null until the app reports one. Null when the person has no Relay account.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type:
+            - array
+            - "null"
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Null when the person has no Relay account. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none or have no Relay account.
     OwnerPerson:
       type: object
       additionalProperties: false
@@ -4317,6 +4554,29 @@ components:
             once (only the range is kept). Null until the app reports one.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none.
     ChatHandle:
       type: object
       required:
@@ -4437,6 +4697,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
         is_contact:
           type: boolean
           description: >-
@@ -4748,6 +5031,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
         age_rating:
           $ref: "#/components/schemas/AgentAgeRating"
     AgentCategory:
@@ -5063,8 +5369,15 @@ components:
           minLength: 1
           maxLength: 255
           description: >-
-            The agent to recommend, trimmed and lowercased. Omit it to share
-            your own configured card.
+            The agent to recommend, trimmed and lowercased. Omit it and user_id
+            to share your own configured card.
+        user_id:
+          type: string
+          format: uuid
+          description: >-
+            The person to share: someone who has sent a message in a chat with
+            you and has not blocked you. Case-insensitive. Send handle or
+            user_id, not both.
     ContactCardItem:
       type: object
       required:
@@ -5081,8 +5394,8 @@ components:
           type: string
           format: uuid
           description: >-
-            The shared agent's Contact id, present only on a card shared by
-            handle. Open the agent by this id; the handle may since have changed.
+            The shared Contact's id, present only on a card shared by handle or
+            user_id. Open an agent by this id; the handle may since have changed.
         subtitle:
           type:
             - string
@@ -5127,9 +5440,32 @@ components:
         is_verified:
           type: boolean
           description: Whether Relay has verified this agent. Always false for a user.
+        links:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            format: uri
+          description: >-
+            A shared person's profile links when the card was shared, present
+            only on a person's card. A person's card carries id, handle, name,
+            photo, links and about, and nothing else.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            A shared person's about when the card was shared, at most 160 characters, or null when they wrote none. Present only on a person's card.
         handle:
-          type: string
-          description: Relay Handle associated with this contact card.
+          type:
+            - string
+            - "null"
+          description: >-
+            Relay Handle associated with this contact card. Null only on a
+            shared person's card after they deleted their account.
         kind:
           type: string
           enum:
@@ -5145,6 +5481,8 @@ components:
         - display_name
         - timezone
         - age_range
+        - links
+        - about
       properties:
         id:
           type: string
@@ -5186,6 +5524,29 @@ components:
             once (only the range is kept). Null until the app reports one.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none.
     ContactRemovedEvent:
       type: object
       additionalProperties: false
@@ -5228,11 +5589,6 @@ components:
       required:
         - chat
       properties:
-        a2ui_errors:
-          type: array
-          description: The A2UI messages of the send that were not applied, each with its place in the request and A2UI's own `error` message for it. The rest of the list was applied.
-          items:
-            $ref: "#/components/schemas/A2uiFailure"
         chat:
           type: object
           required:
@@ -5316,11 +5672,6 @@ components:
         - error
         - success
       properties:
-        a2ui_errors:
-          type: array
-          description: When A2UI messages were refused and nothing in the send was applied, each one with its place in the request and A2UI's own `error` message for it. `error.status` and `error.message` are the first one's.
-          items:
-            $ref: "#/components/schemas/A2uiFailure"
         error:
           $ref: "#/components/schemas/ErrorDetail"
         success:
@@ -5449,6 +5800,398 @@ components:
           description: Reactions on this message part
           items:
             $ref: "#/components/schemas/Reaction"
+    FormOption:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - label
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Stable case-sensitive value, unique within this field.
+        label:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+    FormTextField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - text
+        label:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        max_length:
+          type: integer
+          maximum: 9007199254740991
+          minimum: 1
+          description: Maximum Unicode scalar characters. Defaults to 30 for single-line and 300 for multiline text; a positive explicit value overrides the default.
+        multiline:
+          type: boolean
+          default: false
+          description: Allow line breaks and a native multiline text field.
+        keyboard:
+          type: string
+          enum:
+            - default
+            - email
+            - phone
+            - number
+            - url
+          default: default
+          description: 'The keyboard iOS shows. `email` and `phone` also check the answer: an email address, or an E.164 number such as +13135550123. A wrong one is refused with 422/2006. `number` and `url` only choose the keyboard.'
+
+    FormSelectField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+        - options
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - select
+        label:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        multiple:
+          type: boolean
+          default: false
+          description: Return an array of values in source-option order when true, otherwise one string.
+        options:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/FormOption"
+    FormPickerField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+        - options
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - picker
+        label:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        options:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/FormOption"
+    FormDateField:
+      type: object
+      additionalProperties: false
+      description: Collect a valid Gregorian calendar date as YYYY-MM-DD, independent of time zone.
+      required:
+        - id
+        - type
+        - label
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - date
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+          description: Maximum answer length. A calendar date is ten characters. Defaults to 10.
+        min_date:
+          type: string
+          format: date
+          pattern: ^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          default: "1900-01-01"
+          description: Earliest date the person can choose, YYYY-MM-DD. An earlier answer is refused. Not after max_date (checked by Relay).
+        max_date:
+          type: string
+          format: date
+          pattern: ^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          default: "2100-12-31"
+          description: Latest date the person can choose, YYYY-MM-DD. A later answer is refused.
+
+    FormField:
+      oneOf:
+        - $ref: "#/components/schemas/FormTextField"
+        - $ref: "#/components/schemas/FormSelectField"
+        - $ref: "#/components/schemas/FormPickerField"
+        - $ref: "#/components/schemas/FormDateField"
+      discriminator:
+        propertyName: type
+        mapping:
+          text: "#/components/schemas/FormTextField"
+          select: "#/components/schemas/FormSelectField"
+          picker: "#/components/schemas/FormPickerField"
+          date: "#/components/schemas/FormDateField"
+    FormPage:
+      type: object
+      additionalProperties: false
+      description: One native form page. Pages appear in array order.
+      required:
+        - id
+        - title
+        - fields
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 19
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique page id.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/FormField"
+    FormSplash:
+      type: object
+      additionalProperties: false
+      description: Optional introduction before the first field page.
+      required:
+        - button_title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        text:
+          type: string
+          minLength: 0
+          maxLength: 4096
+        button_title:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+    FormReceivedMessage:
+      type: object
+      additionalProperties: false
+      description: Optional received card text. Each native page uses its own page title.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        subtitle:
+          type: string
+          minLength: 0
+          maxLength: 512
+    FormReplyMessage:
+      type: object
+      additionalProperties: false
+      description: Optional answered card subtitle. The answered title is Form sent.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          enum:
+            - Form sent
+        subtitle:
+          type: string
+          minLength: 0
+          maxLength: 512
+    FormAnswers:
+      type: object
+      propertyNames:
+        type: string
+        minLength: 1
+        maxLength: 100
+        pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: array
+            maxItems: 20
+            uniqueItems: true
+            items:
+              type: string
+              minLength: 1
+              maxLength: 100
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+      description: Answers keyed by source field id. Text, date, picker and single select use a string; multi-select uses unique option values in source order. A one-option multi-select represents opt-in. Optional unanswered fields may be omitted or use an empty value. Source fields enforce required values, max_length and allowed choices.
+    FormPart:
+      type: object
+      additionalProperties: false
+      description: Agent-only form with ordered pages. One form per Message; only text parts may sit beside it (no media, link, place, data, buttons, selection, rich_card or carousel). Optional plain text beside it is an ordinary message. The user advances with Next and Back, reviews a summary when show_summary is true, and sends once. Reopening after Send shows read-only answers. The preview is the text part when present, otherwise received_message.title or title. Page ids and field ids must be unique.
+      required:
+        - type
+        - title
+        - pages
+      properties:
+        type:
+          type: string
+          enum:
+            - form
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        pages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/FormPage"
+        show_summary:
+          type: boolean
+          default: false
+        splash:
+          $ref: "#/components/schemas/FormSplash"
+        received_message:
+          $ref: "#/components/schemas/FormReceivedMessage"
+        reply_message:
+          $ref: "#/components/schemas/FormReplyMessage"
+    FormPartResponse:
+      type: object
+      required:
+        - type
+        - title
+        - pages
+        - has_responded
+        - answers
+        - reactions
+      properties:
+        type:
+          type: string
+          enum:
+            - form
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
+        pages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/FormPage"
+        show_summary:
+          type: boolean
+          default: false
+        splash:
+          $ref: "#/components/schemas/FormSplash"
+        received_message:
+          $ref: "#/components/schemas/FormReceivedMessage"
+        reply_message:
+          $ref: "#/components/schemas/FormReplyMessage"
+        has_responded:
+          type: boolean
+          readOnly: true
+          description: Whether the authenticated user has durably answered. False for agent viewers. Same-key retries return the original response; a different-key second answer returns 409/1005. Source message.upserted refreshes this user’s devices.
+        answers:
+          anyOf:
+            - $ref: "#/components/schemas/FormAnswers"
+            - type: "null"
+          readOnly: true
+          description: This viewer’s answers, null before answering or when the answer Message no longer exists; always null for agent viewers. Agents receive the form_response in the answer Message instead.
+        reactions:
+          type: "null"
+    FormResponsePart:
+      type: object
+      additionalProperties: false
+      description: User-only metadata, exactly the second part after plain text with value Form sent. Requires reply_to.message_id and explicit part_index targeting a visible form in the same Chat. Source validation rejects unknown ids, invalid dates, wrong answer types, too-long or missing required values, and unknown, duplicate or out-of-order choices. Malformed envelopes return 400/1005, invalid source answers 422/2006, repeated answers with another key 409/1005.
+      required:
+        - type
+        - answers
+      properties:
+        type:
+          type: string
+          enum:
+            - form_response
+        answers:
+          $ref: "#/components/schemas/FormAnswers"
+    FormResponsePartResponse:
+      allOf:
+        - $ref: "#/components/schemas/FormResponsePart"
+      description: Persisted field-keyed answers delivered in normal Message events. Contributes no fallback text and cannot receive reactions.
     SelectionOption:
       type: object
       additionalProperties: false
@@ -5948,7 +6691,7 @@ components:
           type: string
           enum: [small, medium]
           default: medium
-          description: small is 180 pt, medium 296 pt.
+          description: small is 180 pt; medium, the default, is as wide as a single card, up to 350 pt and never wider than a text bubble.
         cards:
           type: array
           minItems: 2
@@ -6001,281 +6744,6 @@ components:
         label:
           type: string
           description: The reply suggestion's label, as the card showed it.
-    DataPart:
-      type: object
-      additionalProperties: false
-      description: |
-        A data part (`{ data, media_type }`) holding A2UI v0.9.1 messages
-        (https://a2ui.org). A message may carry any number of data parts
-        beside its other parts. A `media_type` other than
-        `application/a2ui+json` returns 422.
-
-        Relay processes every A2UI message in order, as A2UI says a receiver
-        must: each valid one is applied, and each that fails is
-        returned in the response's `a2ui_errors` (see `A2uiFailure`), in A2UI's
-        own error format. A send that applies nothing is refused with the first
-        failure's status (403, 404, 409 or 422) and `a2ui_errors`. Relay checks each
-        message against A2UI v0.9.1's schemas, and each component and
-        `createSurface` theme against the catalog its surface names: a
-        component the catalog does not define, a property it does not define,
-        a value outside its type or enum, or a missing required property fails
-        with `VALIDATION_FAILED`.
-
-        **createSurface, updateComponents, updateDataModel, deleteSurface**
-        (from an agent; a person sending one gets 403, error code `2003`):
-        - `createSurface` makes a surface in this chat, drawn by this message.
-          `catalogId` must be one Relay draws (see `A2uiClientCapabilities`).
-          A `surfaceId` already live in the chat fails with 409; once deleted
-          it may be created again. The surface's first `updateComponents` must
-          hold the component with `id` `root`; later ones need not repeat it.
-        - Only the agent that created a surface may send the other three for
-          it; another agent gets 403, error code `2003`, as Slack's
-          `chat.update` refuses a message the caller did not post. A surface
-          made by an earlier message changes in place: its
-          message is re-projected to every member, and the send adds no
-          message unless it carries other parts (a `text` part, for example,
-          which becomes an ordinary message). An unknown or deleted
-          `surfaceId` fails with 404.
-        - `deleteSurface` removes the surface. When every surface a message
-          draws is deleted, the message is removed for everyone: it reads back
-          with no parts and a non-null `unsent_at`.
-        - `PaymentRequest` (Relay's catalog only; `checkoutUrl` required) names
-          one of your payment requests by `checkoutUrl`, exactly what
-          `POST /v1/payment_requests` returned,
-          under the `payment` part's rules: a request that is not yours fails
-          with 404, one no longer `requested` with 409, and the digital-goods
-          storefront rule with 422. Relay writes the request's state into the
-          surface's data model at `/relay/payments/<h>` (`<h>` the lowercase
-          hex SHA-256 of `checkoutUrl`) as `{status, amount, currency}`, with
-          an `updateDataModel` when the component is accepted and again when
-          the request settles. The payer's receipt replies to the data part
-          that created the surface holding the request.
-        - `Browser` (Relay's catalog only; see `A2uiBrowserComponent`) shows
-          your agent's live browser: `status` 1 to 80 characters, `state` one
-          of `working`, `needs_you`, `done`, `failed`, an https `watchUrl`,
-          and optionally an https `controlUrl` and `imageUrl`. A URL that is
-          not https, or a `status` outside 1 to 80 characters, fails with 422
-          `VALIDATION_FAILED`. A property bound to the data model names an
-          absolute JSON Pointer, and the bound value is checked by the same
-          rules whenever the component or the data model changes; the error's
-          `path` then points at the component's property in an
-          `updateComponents`, or at `/value` in an `updateDataModel`. Relay
-          delivers the URLs exactly as sent and never loads them.
-        - Image, Video and AudioPlayer `url`s are delivered exactly as sent.
-        - With no `text` part, the chat list and notification show the text of
-          the first `Text` component, or a `Browser`'s `status`, in tree order
-          from `root`.
-
-        **action, error** (from a person or an agent) travel in the message
-        itself, and reach only the sender and the agent that created the
-        surface they name (A2UI's "Targeted Delivery": "sent exclusively to the
-        server that created the surface"); every other reader's copy of the
-        part leaves them out, and a message that holds nothing else is not
-        delivered to other agents at all. Each names a live surface in the
-        chat. An `action`'s `sourceComponentId` must be a Button there and its
-        `name` that Button's `action.event.name`, or a `Browser` there and its
-        `name` one of `A2uiBrowserActionName` (`browser.takeControl` and
-        `browser.returnControl` only when the Browser has a `controlUrl`).
-        The agent receives the `context` Relay builds from the Button it drew,
-        never the app's: each literal as the Button holds it, each value at a
-        path an input on the card writes (a component whose `value` is bound)
-        as the person entered it, and everything else from the surface's data
-        model as the agent last set it, including the rest of an object that
-        holds a typed field; a key the Button does not declare is dropped. A Button drawn once per item of a List template carries one
-        item's values; a `context` that matches no item fails with 422 at
-        `/context`. A Button's `action.event.context` holds literals and data
-        bindings; a function call there fails with 422. A `Browser` tap's
-        `context` is empty. A text part and `reply_to`
-        are optional, and a text part reaches every member. When the surface
-        set `sendDataModel`, the message must carry
-        `metadata.a2uiClientDataModel`.
-      required: [type, media_type, data]
-      properties:
-        type:
-          type: string
-          enum: [data]
-        media_type:
-          type: string
-          enum: [application/a2ui+json]
-        data:
-          type: array
-          minItems: 1
-          description: A2UI v0.9.1 messages, in order.
-          items:
-            type: object
-            additionalProperties: true
-    DataPartResponse:
-      type: object
-      description: |
-        A data part as a reader receives it: the `action` and `error`
-        messages it carried, as sent, when the reader sent them or created the
-        surface they name (empty otherwise); then, for each surface it created,
-        every A2UI message accepted for that surface since, in order, exactly
-        as sent (Relay's own `updateDataModel` for a `PaymentRequest`
-        included). A reader replays the list to draw the surface; a late or
-        second device receives the whole list.
-      required: [type, media_type, data, reactions]
-      properties:
-        type:
-          type: string
-          enum: [data]
-        media_type:
-          type: string
-          enum: [application/a2ui+json]
-        data:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-        reactions:
-          type:
-            - array
-            - "null"
-          description: Reactions on this message part
-          items:
-            $ref: "#/components/schemas/Reaction"
-    A2uiBrowserComponent:
-      type: object
-      additionalProperties: false
-      description: |
-        A component of Relay's A2UI catalog (`https://relayapp.im/a2ui/catalog/v1`)
-        that shows your agent's live browser in the chat. The app draws it as
-        Relay's Browser card: a globe, the title "Browser" (the card has no
-        title property), the `status` line, the still in `imageUrl` when there
-        is one, and an "Open browser" button that opens `watchUrl`, read-only,
-        in a window over the chat. With a `controlUrl` the window also offers
-        "Take control of the browser", which opens `controlUrl` so the person
-        can click and type, and "Finish up", which hands control back; "Stop
-        the task" ends the task. `state` `needs_you` turns the card orange;
-        say why in your own message beside it. `done` and `failed` shrink the
-        card to one row.
-
-        Each tap reaches only the agent that created the surface, as an A2UI
-        `action` whose `sourceComponentId` is this component's `id`, whose
-        `name` is one of `A2uiBrowserActionName`, and whose `context` is
-        empty. Pause your browser work from `browser.takeControl` until
-        `browser.returnControl`, and end the task on `browser.stop`. Change
-        the card with `updateComponents` or `updateDataModel` as the task goes.
-
-        Every URL is https. Relay delivers the URLs exactly as sent and never
-        loads them; only the app's web view opens the page, so the person's
-        sign-ins stay in your browser. `status`, `watchUrl`, `controlUrl` and
-        `imageUrl` are each a literal or a binding `{"path": "/absolute/pointer"}`
-        into the surface's data model; a bound value follows the literal's rule.
-      required: [id, component, status, state, watchUrl]
-      properties:
-        id:
-          type: string
-          description: The component's id; `root` when the Browser is the whole card.
-        component:
-          type: string
-          enum: [Browser]
-        status:
-          description: The card's one status line in your own words, for example "Working · united.com". With `state` `done` or `failed` the card shows it after "Completed ·" or "Failed ·".
-          oneOf:
-            - type: string
-              minLength: 1
-              maxLength: 80
-            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
-        state:
-          type: string
-          enum: [working, needs_you, done, failed]
-        watchUrl:
-          description: >-
-            The read-only live view of your browser, for example Cloudflare
-            Browser Run's Live View URL made with `guardrails` `{"mode": "readonly"}`.
-          oneOf:
-            - type: string
-              format: uri
-              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
-            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
-        controlUrl:
-          description: The interactive live view of the same browser. Without it the card offers no "Take control of the browser".
-          oneOf:
-            - type: string
-              format: uri
-              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
-            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
-        imageUrl:
-          description: A still picture of the page for the card.
-          oneOf:
-            - type: string
-              format: uri
-              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
-            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
-        accessibility:
-          type: object
-          description: A2UI's accessibility attributes (`label`, `description`), as on every component.
-        weight:
-          type: number
-          description: A2UI's flex weight inside a Row or Column, as on every component.
-    A2uiAbsoluteBinding:
-      type: object
-      additionalProperties: false
-      description: An A2UI data binding whose `path` is an absolute JSON Pointer into the surface's data model.
-      required: [path]
-      properties:
-        path:
-          type: string
-          pattern: "^/"
-    A2uiBrowserActionName:
-      type: string
-      description: The `name` of an A2UI `action` a `Browser` card sends. `browser.takeControl` when the person taps "Take control of the browser", `browser.returnControl` when they tap "Finish up", `browser.stop` when they tap "Stop the task".
-      enum: [browser.takeControl, browser.returnControl, browser.stop]
-    A2uiFailure:
-      type: object
-      description: One A2UI message Relay did not apply, where it sits in the request, and A2UI's own `error` message for it.
-      additionalProperties: false
-      required: [part_index, data_index, a2ui_message]
-      properties:
-        part_index:
-          type: [integer, "null"]
-          description: The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`.
-        data_index:
-          type: [integer, "null"]
-          description: The message's index in that part's `data`; null when the part itself, or the metadata, is at fault.
-        a2ui_message:
-          $ref: "#/components/schemas/A2uiErrorMessage"
-    A2uiErrorMessage:
-      type: object
-      additionalProperties: false
-      description: An A2UI `error` message in A2UI's standard validation error format (a2ui_protocol.md), exactly as a renderer would send it.
-      required: [version, error]
-      properties:
-        version:
-          type: string
-          enum: [v0.9.1]
-        error:
-          type: object
-          required: [code, surfaceId, path, message]
-          properties:
-            code:
-              type: string
-              enum: [VALIDATION_FAILED]
-            surfaceId:
-              type: string
-              description: The surface the message named, or empty when it named none.
-            path:
-              type: string
-              description: A JSON Pointer to the failing field inside the failing message's body (the object under its one key), as in A2UI's own example `/components/0/text`. Empty when the message as a whole, or something outside it, is at fault. For a fault in `metadata.a2uiClientDataModel`, a pointer into that object.
-            message:
-              type: string
-    MessageMetadata:
-      type: object
-      description: Message metadata. A tap on a surface that set `sendDataModel` carries `a2uiClientDataModel`; Relay checks it against A2UI's `client_data_model.json`. Each surface's data model reaches only the sender and the agent that created that surface, unchanged; other readers get none of it.
-      additionalProperties: false
-      properties:
-        a2uiClientDataModel:
-          type: object
-          required: [version, surfaces]
-          properties:
-            version:
-              type: string
-              enum: [v0.9, v0.9.1]
-            surfaces:
-              type: object
-              additionalProperties:
-                type: object
     PaymentRecurring:
       type: object
       additionalProperties: false
@@ -6629,11 +7097,16 @@ components:
         - deny
     OAuth2Scope:
       type: string
+      description: >-
+        An OpenID Connect scope a Log in with Relay client may ask for.
+        `birthdate` asks for the person's birthday as the OpenID `birthdate`
+        claim (YYYY-MM-DD, or 0000-MM-DD when they gave no year).
       enum:
         - openid
         - profile
         - email
         - phone
+        - birthdate
     OAuth2Client:
       type: object
       additionalProperties: false
@@ -6813,8 +7286,6 @@ components:
         - updated_at
         - is_system_message
       properties:
-        metadata:
-          $ref: "#/components/schemas/MessageMetadata"
         id:
           type: string
           description: Unique identifier for the message
@@ -6845,13 +7316,14 @@ components:
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
               - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
-              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
@@ -6929,10 +7401,8 @@ components:
             - type: "null"
     MessageContent:
       type: object
-      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target. A message carries at most one rich_card or carousel; a card reply is exactly plain text then suggestion_response, replying to the card part.
+      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target. A message carries at most one rich_card or carousel; a card reply is exactly plain text then suggestion_response, replying to the card part. Form responses contain exactly Form sent plain text then form_response metadata with answers keyed by field id, and require an explicit reply target.
       properties:
-        metadata:
-          $ref: "#/components/schemas/MessageMetadata"
         parts:
           x-go-type-skip-optional-pointer: true
           type: array
@@ -6998,8 +7468,6 @@ components:
         - sender_handle
         - parts
       properties:
-        metadata:
-          $ref: "#/components/schemas/MessageMetadata"
         chat:
           type: object
           description: Chat information
@@ -7047,13 +7515,14 @@ components:
               - $ref: "#/components/schemas/schemas-LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
               - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
-              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
@@ -7065,13 +7534,14 @@ components:
                 link: "#/components/schemas/schemas-LinkPartResponse"
                 buttons: "#/components/schemas/ButtonsPartResponse"
                 selection: "#/components/schemas/SelectionPartResponse"
+                form: "#/components/schemas/FormPartResponse"
+                form_response: "#/components/schemas/FormResponsePartResponse"
                 selection_response: "#/components/schemas/SelectionResponsePartResponse"
                 rich_card: "#/components/schemas/RichCardPartResponse"
                 carousel: "#/components/schemas/CarouselPartResponse"
                 suggestion_response: "#/components/schemas/SuggestionResponsePartResponse"
                 payment: "#/components/schemas/PaymentPartResponse"
                 payment_receipt: "#/components/schemas/PaymentReceiptPartResponse"
-                data: "#/components/schemas/DataPartResponse"
                 location_request: "#/components/schemas/LocationRequestPartResponse"
                 location: "#/components/schemas/LocationPartResponse"
                 place: "#/components/schemas/PlacePartResponse"
@@ -7129,26 +7599,28 @@ components:
           link: "#/components/schemas/LinkPart"
           buttons: "#/components/schemas/ButtonsPart"
           selection: "#/components/schemas/SelectionPart"
+          form: "#/components/schemas/FormPart"
+          form_response: "#/components/schemas/FormResponsePart"
           selection_response: "#/components/schemas/SelectionResponsePart"
           rich_card: "#/components/schemas/RichCardPart"
           carousel: "#/components/schemas/CarouselPart"
           suggestion_response: "#/components/schemas/SuggestionResponsePart"
           payment: "#/components/schemas/PaymentPart"
           place: "#/components/schemas/PlacePart"
-          data: "#/components/schemas/DataPart"
       oneOf:
         - $ref: "#/components/schemas/TextPart"
         - $ref: "#/components/schemas/MediaPart"
         - $ref: "#/components/schemas/LinkPart"
         - $ref: "#/components/schemas/ButtonsPart"
         - $ref: "#/components/schemas/SelectionPart"
+        - $ref: "#/components/schemas/FormPart"
+        - $ref: "#/components/schemas/FormResponsePart"
         - $ref: "#/components/schemas/SelectionResponsePart"
         - $ref: "#/components/schemas/RichCardPart"
         - $ref: "#/components/schemas/CarouselPart"
         - $ref: "#/components/schemas/SuggestionResponsePart"
         - $ref: "#/components/schemas/PaymentPart"
         - $ref: "#/components/schemas/PlacePart"
-        - $ref: "#/components/schemas/DataPart"
     MessageReadWebhook:
       description: Complete webhook payload for message.read events (2026-08-30 format)
       allOf:
@@ -7164,51 +7636,7 @@ components:
         - type: object
           properties:
             data:
-              allOf:
-                - $ref: "#/components/schemas/MessageEvent"
-                - type: object
-                  required: [metadata]
-                  properties:
-                    metadata:
-                      $ref: "#/components/schemas/MessageReceivedMetadata"
-    MessageReceivedMetadata:
-      type: object
-      description: Message metadata on every `message.received`. `a2uiClientCapabilities` names the A2UI catalogs the reader's app draws; `a2uiClientDataModel` holds the sender's data model for the surfaces this agent created, when the message carried one.
-      required: [a2uiClientCapabilities]
-      properties:
-        a2uiClientCapabilities:
-          $ref: "#/components/schemas/A2uiClientCapabilities"
-        a2uiClientDataModel:
-          $ref: "#/components/schemas/MessageMetadata/properties/a2uiClientDataModel"
-    A2uiClientCapabilities:
-      type: object
-      description: |
-        A2UI's own handshake (`a2uiClientCapabilities`, shaped by A2UI v0.9.1's
-        `client_capabilities.json`, whose key is the protocol family `v0.9`):
-        the A2UI catalogs Relay's app draws, in order of preference. Pick the
-        first catalog your agent can write for a card's `createSurface.catalogId`.
-        - `https://relayapp.im/a2ui/catalog/v1`, Relay's catalog: every basic
-          catalog component and function, plus `PaymentRequest` (see
-          `DataPart`) and `Browser` (see `A2uiBrowserComponent`).
-        - `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json`,
-          the A2UI v0.9.1 basic catalog.
-
-        Relay's catalog only grows: new components and optional properties are
-        added to v1, nothing is removed from it, and a breaking change would get a
-        new id (`.../catalog/v2`), listed beside v1.
-      required: ["v0.9"]
-      properties:
-        "v0.9":
-          type: object
-          required: [supportedCatalogIds]
-          properties:
-            supportedCatalogIds:
-              type: array
-              items:
-                type: string
-              example:
-                - https://relayapp.im/a2ui/catalog/v1
-                - https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json
+              $ref: "#/components/schemas/MessageEvent"
     MessageSentWebhook:
       description: Complete webhook payload for message.sent events (2026-08-30 format)
       allOf:
@@ -7572,11 +8000,6 @@ components:
         - chat_id
         - message
       properties:
-        a2ui_errors:
-          type: array
-          description: The A2UI messages of the send that were not applied, each with its place in the request and A2UI's own `error` message for it. The rest of the list was applied.
-          items:
-            $ref: "#/components/schemas/A2uiFailure"
         chat_id:
           type: string
           format: uuid
@@ -7594,11 +8017,6 @@ components:
         - handles
         - message
       properties:
-        a2ui_errors:
-          type: array
-          description: The A2UI messages of the send that were not applied, each with its place in the request and A2UI's own `error` message for it. The rest of the list was applied.
-          items:
-            $ref: "#/components/schemas/A2uiFailure"
         chat_id:
           type: string
           format: uuid
@@ -7740,8 +8158,6 @@ components:
         - sent_at
         - delivery_status
       properties:
-        metadata:
-          $ref: "#/components/schemas/MessageMetadata"
         id:
           type: string
           format: uuid
@@ -7756,13 +8172,14 @@ components:
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
               - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
-              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
@@ -8058,6 +8475,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
     SystemEventParty:
       type: object
       additionalProperties: false
@@ -8106,6 +8546,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
     SystemPartResponse:
       type: object
       additionalProperties: false
@@ -8276,6 +8739,29 @@ components:
             once (only the range is kept). Null until the app reports one. Present only when kind is user.
             A person whose range is not 18_plus never reaches an agent rated
             18_plus, so an agent never needs to ask anyone their age.
+        links:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+            pattern: "^https://"
+          examples:
+            - - https://github.com/ana
+              - https://www.instagram.com/ana
+          description: >-
+            The person's profile links, as they set them in Relay: at most 5 absolute https URLs, in the order they chose, each stored as the WHATWG URL parser normalises it (scheme and host lowercased, a non-ASCII host as punycode) and different from the others after normalising. Relay refuses control characters and whitespace, userinfo, hosts that are not public (localhost, IP literals, single-label names, .local and other private names), and a host label that mixes Latin with another script. Empty when they set none. Present only when kind is user. Relay sends no platform name; read the site from the URL.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 160
+          examples:
+            - Builds robots in Ann Arbor.
+          description: >-
+            The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
     UnblockHandleRequest:
       type: object
       required:

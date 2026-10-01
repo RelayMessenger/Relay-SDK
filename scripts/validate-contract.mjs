@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "349431592ca866731a95407ab8836611989371d2", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "fe702db3e3948f27c764bc6ad1f7605d54eb2148", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -53,6 +53,13 @@ const sourceOnlyOperations = [
   // Server #467: a person's address-book counts, person token only; an agent
   // SDK has no caller for it.
   { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
+  // Server #470: a person asks for an agent Relay does not have yet; the
+  // bytes arrive with the form carry (Server #465) and its client method
+  // with its own carry.
+  { method: "POST", path: "/v1/agent_requests", operationId: "requestAgent" },
+  // Server #473: suggestions ranked for a person, person token only; an agent
+  // SDK has no caller for it.
+  { method: "GET", path: "/v1/agents/suggested", operationId: "listSuggestedAgents" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
@@ -124,8 +131,8 @@ const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }))
 assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 57);
 assert.equal(manifest.path_count, 37);
-assert.equal(manifest.source_path_count, 42);
-assert.equal(manifest.source_schema_count, 219);
+assert.equal(manifest.source_path_count, 44);
+assert.equal(manifest.source_schema_count, 224);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
 assert.equal(operationJSON.length, 57);
@@ -347,10 +354,17 @@ const validateOpenAPI = () => {
   const shareBody = schemas.ShareContactCardRequest;
   assert.equal(shareBody.additionalProperties, false);
   assert.equal(shareBody.required, undefined);
-  assert.deepEqual(Object.keys(shareBody.properties), ["handle"]);
+  assert.deepEqual(Object.keys(shareBody.properties), ["handle", "user_id"]);
   assert.equal(shareBody.properties.handle.type, "string");
   assert.equal(shareBody.properties.handle.minLength, 1);
   assert.equal(shareBody.properties.handle.maxLength, 255);
+  assert.equal(shareBody.properties.user_id.type, "string");
+  assert.equal(shareBody.properties.user_id.format, "uuid");
+  assert.match(declaredTypes, /user_id\?: UUID;/u);
+  assert.equal(schemas.ContactCardItem.properties.links.type, "array");
+  assert.equal(schemas.ContactCardItem.properties.links.maxItems, 5);
+  assert.deepEqual(schemas.ContactCardItem.properties.handle.type, ["string", "null"]);
+  assert.match(declaredTypes, /handle: string \| null;/u);
   for (const field of ["id", "subtitle", "url"]) {
     assert.ok(schemas.ContactCardItem.properties[field]);
     assert.equal(schemas.ContactCardItem.required.includes(field), false);
@@ -569,15 +583,20 @@ const validateOpenAPI = () => {
     "can_message",
     // Server 461: a person's IANA time zone.
     "timezone",
-    // Server 468: a person's age range, then an agent's age rating.
+    // Server 468: a person's age range; Server 475: their profile links;
+    // then an agent's age rating.
     "age_range",
+    "links",
+    // Server 479: a person's about.
+    "about",
     "age_rating",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
-  assert.equal("about" in contactLookup.properties, false);
+  // Server 479: `about` is a person's again (an agent's old about became subtitle in Server 56f31c1).
+  assert.match(contactLookup.properties.about.description, /Present only when kind is user/u);
   assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
   assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
   assert.match(declaredTypes, /application_fee_amount: number/u);
@@ -819,8 +838,11 @@ const validateOpenAPI = () => {
       "owner",
       // Server 461: a person's handle names their IANA time zone.
       "timezone",
-      // Server 468: and their age range.
+      // Server 468: and their age range; Server 475: and their profile links.
       "age_range",
+      "links",
+      // Server 479: and their about.
+      "about",
       "is_contact",
       "activity_version",
       "activity",
@@ -859,7 +881,51 @@ const validateOpenAPI = () => {
     /\n {4}age_range: AgeRange \| null;/u,
     "ContactEventContact must require age_range",
   );
-  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}age_range\?: AgeRange \| null;\n\};/u, "HandleOwner user must type age_range");
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}age_range\?: AgeRange \| null;[^}]*\n\};/u, "HandleOwner user must type age_range");
+  // A person's profile links (Server 475) ride beside the age range on every
+  // person object the SDK types: at most 5 https URLs, nullable only on an
+  // owner with no Relay account. Birthdate is /v1/me only, never a person's.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}links\?: string\[\];/u, `${name} must type links`);
+    assert.doesNotMatch(body, /birthdate/u, `${name} must not type birthdate`);
+  }
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}links: string\[\];/u,
+    "ContactEventContact must require links",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}links\?: string\[\] \| null;[^}]*\n\};/u, "HandleOwner user must type links");
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "OwnerPerson", "UserOwner",
+  ]) {
+    const links = document.components.schemas[name].properties.links;
+    assert.deepEqual(links.type, name === "UserOwner" ? ["array", "null"] : "array", `${name}.links`);
+    assert.equal(links.maxItems, 5);
+    assert.equal(links.items.pattern, "^https://");
+    assert.equal(document.components.schemas[name].properties.birthdate, undefined, `${name}.birthdate`);
+    const about = document.components.schemas[name].properties.about;
+    assert.deepEqual(about.type, ["string", "null"], `${name}.about`);
+    assert.equal(about.maxLength, 160);
+  }
+  // A person's about (Server 479) rides beside the links.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}about\?: string \| null;/u, `${name} must type about`);
+  }
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}about: string \| null;/u,
+    "ContactEventContact must require about",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}about\?: string \| null;\n\};/u, "HandleOwner user must type about");
+  assert.deepEqual(document.components.schemas.OAuth2Scope.enum, ["openid", "profile", "email", "phone", "birthdate"]);
+  assert.match(declaredTypes, /export type OAuth2Scope = "openid" \| "profile" \| "email" \| "phone" \| "birthdate";/u);
+  // POST and PATCH /v1/contact_card return the agent's own card, whose handle
+  // is never null; GET returns the shared ContactCardItem schema.
+  assert.equal(document.components.schemas.SetContactCardResponse.properties.handle.type, "string");
+  assert.equal(document.components.schemas.ContactCardItem.properties.about.maxLength, 160);
   assert.match(declaredTypes, /export type AgeRange = "under_13" \| "13_15" \| "16_17" \| "18_plus";/u);
   assert.match(declaredTypes, /export type AgentAgeRating = "everyone" \| "18_plus";/u);
   assert.match(declaredTypes, /\n {4}age_rating\?: AgentAgeRating;/u);
@@ -1008,7 +1074,7 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name", "timezone", "age_range"],
+    ["id", "handle", "display_name", "timezone", "age_range", "links", "about"],
   );
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post

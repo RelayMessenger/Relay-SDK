@@ -163,6 +163,22 @@ async def test_share_contact_card_target_and_bodyless_default(server: _Server) -
     assert "content-type" not in server.seen[1][2]
 
 
+async def test_share_contact_card_shares_a_person_by_user_id(server: _Server) -> None:
+    server.replies += [(204, None)]
+    relay = Relay("tok", base_url=server.base_url)
+    user_id = "0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b"
+    assert await relay.chats.share_contact_card("c", user_id=user_id, idempotency_key="person-1") is None
+    assert _requests(server) == [("POST", "/v1/chats/c/share_contact_card", {"user_id": user_id})]
+    assert server.seen[0][2]["idempotency-key"] == "person-1"
+
+
+async def test_share_contact_card_refuses_handle_and_user_id_together(server: _Server) -> None:
+    relay = Relay("tok", base_url=server.base_url)
+    with pytest.raises(ValueError):
+        await relay.chats.share_contact_card("c", handle="atlas", user_id="0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b")
+    assert server.seen == []
+
+
 @pytest.mark.parametrize("status", [403, 404, 429, 503])
 async def test_share_contact_card_preserves_errors_without_retry(server: _Server, status: int) -> None:
     server.replies += [(status, {"error": {"code": 2001, "message": "refused"}}), (204, None)]

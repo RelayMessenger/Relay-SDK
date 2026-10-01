@@ -38,8 +38,17 @@ export const agentDependencies = (context: ConfigContext = {}, fetch?: typeof gl
  */
 export interface AgentRecord { handle: string; display_name: string; image_url: string | null }
 export const agentRecord = (card: Pick<ContactCardItem, "handle" | "first_name" | "image_url">): AgentRecord => ({
-  handle: card.handle, display_name: card.first_name, image_url: card.image_url,
+  handle: cardHandle(card), display_name: card.first_name, image_url: card.image_url,
 });
+
+/**
+ * An agent's own card always has a Handle; only a shared person's card loses
+ * it, after that person deletes their account.
+ */
+export const cardHandle = (card: Pick<ContactCardItem, "handle">): string => {
+  if (card.handle === null) throw new Error("This contact card has no Handle.");
+  return card.handle;
+};
 
 export interface CreateAgentInput {
   profile?: string;

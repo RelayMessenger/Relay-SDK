@@ -92,6 +92,8 @@ it("adds and removes redirects, sets the optional scopes, and resets the secret"
   expect(missing.code).not.toBe(0);
   await f.run("oauth", "scopes", "weather", "email", "phone");
   expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { scopes: ["openid", "profile", "email", "phone"] } });
+  await f.run("oauth", "scopes", "weather", "birthdate");
+  expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { scopes: ["openid", "profile", "birthdate"] } });
   expect((await f.run("oauth", "scopes", "weather", "address")).code).not.toBe(0);
   expect((await f.run("oauth", "reset-secret", "weather")).out).toMatchObject({ client_secret: "rel_cs_new" });
   expect(f.calls.at(-1)).toMatchObject({ method: "POST", path: "/orgs/org_a/agents/agent-uuid/oauth2/reset-secret" });

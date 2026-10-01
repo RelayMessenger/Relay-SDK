@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { assertSearchOrigin } from "../tooling/skills-distributions/src/distribution/scripts/mcp-client.mjs";
 import { verifyContractLock } from "../tooling/skills-distributions/src/distribution/scripts/verify-contract-lock.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
+
+test("the skill source validator accepts the carried contract and both root locks", () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const read = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
+  const manifest = read("contracts/relay-v1-operations.json");
+  const skill = read("skills/relay/references/relay-v1-lock.json");
+  const portable = read("plugins/relay/skills/relay/references/relay-v1-lock.json");
+  assert.deepEqual(portable, skill);
+  assert.equal(skill.api.commit, manifest.upstream.commit);
+  assert.equal(skill.api.openapi_sha256, manifest.source_openapi_sha256);
+  const result = spawnSync("python3", ["tooling/skills-distributions/scripts/validate.py"], {
+    cwd: root, encoding: "utf8", timeout: 10_000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /validated Relay source:/u);
+});
+
 function fixture() {
   const lock = {
     api: {
