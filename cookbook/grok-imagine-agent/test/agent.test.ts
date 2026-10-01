@@ -1,4 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { request } from "node:https";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,6 +13,7 @@ import {
 } from "../src/agent.js";
 import { ProgressStore } from "../src/store.js";
 import { retryAfter, Xai, type Media, type ResponseItem } from "../src/xai.js";
+import { refused } from "./no-network.js";
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0]);
 const REFERENCE: Media = { bytes: PNG, contentType: "image/png", filename: "reference" };
@@ -135,6 +138,39 @@ it("never reaches the network, even with a real key", async () => {
   const live = new Xai({ apiKey: process.env.XAI_API_KEY ?? "xai-test" });
   const failure = await live.respond("persona", [{ role: "user", content: "hi" }], []).catch((error: unknown) => error);
   expect(String((failure as Error).cause)).toContain("tests never reach the network (https://api.x.ai/v1/responses)");
+});
+
+describe("no socket leaves the machine", () => {
+  it("refuses a raw TCP connection", () => {
+    expect(() => net.connect(443, "api.x.ai")).toThrow("tests never reach the network (api.x.ai:443)");
+  });
+
+  it("refuses node:https", () => {
+    expect(() => request("https://api.x.ai/v1/models")).toThrow("tests never reach the network (api.x.ai:443)");
+  });
+
+  it("refuses a WebSocket", async () => {
+    const socket = new WebSocket("wss://api.x.ai/v1/realtime");
+    const outcome = await new Promise<string>((resolve) => {
+      socket.addEventListener("open", () => resolve("open"));
+      socket.addEventListener("error", () => resolve("error"));
+    });
+    socket.close();
+    expect(outcome).toBe("error");
+    expect(refused).toContain("api.x.ai:443");
+  });
+
+  it("still lets a test talk to loopback", async () => {
+    const server = net.createServer((client) => client.end("ok"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as net.AddressInfo;
+    const reply = await new Promise<string>((resolve, reject) => {
+      const client = net.connect(port, "127.0.0.1");
+      client.on("data", (data) => resolve(String(data))).on("error", reject);
+    });
+    server.close();
+    expect(reply).toBe("ok");
+  });
 });
 
 /** A sleep that returns at once and records each wait. */
