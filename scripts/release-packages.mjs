@@ -173,6 +173,21 @@ export const releasePackages = {
       manifestVersion: ".claude-plugin/plugin.json",
     },
   },
+  // Last: it depends only on the SDK, and nothing pins it.
+  elevenlabs: {
+    directory: "packages/elevenlabs",
+    workspace: "@relaymessenger/elevenlabs",
+    validate: "validate:elevenlabs",
+    tagPrefix: "elevenlabs-v",
+    smoke: {
+      imports: [
+        {
+          specifier: "@relaymessenger/elevenlabs",
+          named: ["ELEVENLABS_API", "ElevenLabsCall", "RIVE_LEAD_MS", "getSignedUrl"],
+        },
+      ],
+    },
+  },
 };
 
 export const releaseKeys = Object.keys(releasePackages);

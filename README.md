@@ -165,6 +165,7 @@ Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-pac
 | 5 | `relaymessenger` | `relaymessenger-v<version>` |
 | 6 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
 | 7 | `relay-claude-channel` | `claude-channel-v<version>` |
+| 8 | `@relaymessenger/elevenlabs` | `elevenlabs-v<version>` |
 
 Dry run first: `workflow_dispatch` on `release.yml` derives every version,
 prints the skip-or-publish decision, packs, and runs `npm publish --dry-run`,
