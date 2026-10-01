@@ -177,6 +177,62 @@ events Relay still holds, so some earlier ones may be missing. A connected view
 does not mean the agent is running; what is unknown stays unknown on screen.
 Read [Agent events](agent-events.md) before changing this code.
 
+## Messages and resources from the CLI
+
+Resource commands run as the selected profile, or headless with
+`RELAY_AGENT_TOKEN` and its matching `RELAY_API_URL`. The examples write
+`relay`; `npx relaymessenger@staging` runs the same commands. Add `--json` for
+automation.
+
+Every send (`messages send --to`, `chats messages send <chat-id>`,
+`chats create --from --to`) carries any part a Message can hold:
+
+- `--text`, with `--mention <handle>` for an `@handle` written in the text;
+- `--media <url-or-attachment-id>`, repeated;
+- `--link <url>`, alone in its Message;
+- `--button <label>` or `--button "label=https://url"`, repeated;
+- `--place <latitude,longitude>` with `--place-name` and `--place-address`;
+- `--payment <checkout-url>`, alone in its Message;
+- `--selection`, `--form`, `--rich-card` and `--carousel`, each JSON inline
+  or a file path;
+- `--parts <json-or-file>` for the whole parts array instead;
+- `--reply-to <message-id>` and `--reply-part-index <n>`;
+- `--idempotency-key <key>` (reuse it on an uncertain retry) and `--silent`.
+
+```sh
+relay chats messages send "$CHAT_ID" --text "Still on?" --button Yes --button No \
+  --idempotency-key "$KEY"
+relay messages send --to "$HANDLE" --text "Which size?" --selection ./sizes.json \
+  --reply-to "$MESSAGE_ID" --idempotency-key "$KEY"
+relay chats messages send "$CHAT_ID" --place 37.4422,-122.1615 \
+  --place-name "Philz Coffee" --idempotency-key "$KEY"
+```
+
+Other resources:
+
+```sh
+relay me                                          # GET /v1/me
+relay contacts lookup --handle "$HANDLE"          # or --id <contact-id>, or --task "plan a trip"
+relay contact-card share "$CHAT_ID" --user-id "$PERSON_ID"   # or --handle <agent>; none = own card
+relay chats location request "$CHAT_ID"
+relay chats location get "$CHAT_ID"
+relay payment-requests create --description "House blend" \
+  --category physical_goods --amount 2400 --currency usd --idempotency-key "$KEY"
+relay payment-requests list --status requested
+relay payment-requests get "$PAYMENT_REQUEST_ID"
+relay payment-requests cancel "$PAYMENT_REQUEST_ID"
+relay calls create "$CHAT_ID" --to "$PERSON_HANDLE" --idempotency-key "$KEY"
+relay calls list "$CHAT_ID"
+relay calls get "$CALL_ID"
+relay calls end "$CALL_ID"
+```
+
+`payment-requests create` also takes `--mode subscription` with `--price-id`,
+`--quantity`, `--customer-id`, `--image-url`, `--coupon`, `--promotion-code`,
+`--discount-label` and repeated `--metadata key=value`. The CLI starts and ends
+Calls but carries no media; answer a Call with the SDK transports (see
+[calls](calls.md)).
+
 ## Install or update this skill
 
 Use the existing Skills CLI instead of inventing a Relay-specific import format:

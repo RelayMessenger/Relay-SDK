@@ -68,6 +68,10 @@ const thread = await relay.messages.listMessagesThread(messageId, { limit: 50 })
 for (const message of thread.data) console.log(message.id);
 ```
 
+```python
+thread = await relay.messages.list_messages_thread(message_id, limit=50, order="asc")
+```
+
 ## Selection
 
 The list picker. Use it when the person picks from a list.
@@ -179,6 +183,29 @@ The list picker. Use it when the person picks from a list.
   `payment.canceled` or `payment.expired` (after 23 hours) carries the full
   request. A paid request also adds a `payment_receipt` message from the payer,
   a reply to the card, that arrives as `message.received`.
+- In code:
+
+```typescript
+const request = await relay.paymentRequests.create(
+  { description: "House blend", category: "physical_goods", amount: 2400, currency: "usd" },
+  { idempotencyKey: savedOperation.idempotencyKey },
+);
+await relay.chats.messages.send(chatId, {
+  message: { parts: [{ type: "payment", checkout_url: request.checkout_url }], idempotency_key: idempotencyKey },
+});
+```
+
+```python
+from relaymessenger import parts
+
+request = await relay.payment_requests.create(
+    description="House blend", category="physical_goods", amount=2400, currency="usd", idempotency_key=saved_key,
+)
+await relay.chats.messages.send(chat_id, {"message": {
+    "parts": [parts.payment_part(request["checkout_url"])], "idempotency_key": send_key,
+}})
+```
+
 - Text runtimes end the answer with one fenced code block tagged `payment`
   holding the request's fields (`description`, `category`, `amount` and
   `currency`, or `mode: "subscription"` with `price_id`); the bridge creates
@@ -203,6 +230,16 @@ The list picker. Use it when the person picks from a list.
 - The person's card is a `location` part with `state` `live` or `ended`; it
   never carries a position.
 
+```typescript
+await relay.chats.location.request(chatId);
+const { data } = await relay.chats.location.retrieve(chatId); // data.features
+```
+
+```python
+await relay.chats.location.request(chat_id)
+location = await relay.chats.location.retrieve(chat_id)
+```
+
 ## Places
 
 A `place` part is a place sent once: a current location, a dropped pin, or a
@@ -226,6 +263,10 @@ await relay.chats.messages.send(chatId, {
   },
 });
 ```
+
+In Python, `parts.place_part(37.44216251868683, -122.16153582049394,
+name="Philz Coffee")` builds the same part; the CLI sends it with
+`--place latitude,longitude`.
 
 A `place` never updates. For a position that moves, use Location.
 
@@ -262,6 +303,15 @@ await relay.attachments.upload(upload, audio);
 const { voice_memo } = await relay.chats.sendVoicememo(chatId, {
   attachment_id: upload.attachment_id,
 });
+```
+
+```python
+audio = open("reply.m4a", "rb").read()
+upload = await relay.attachments.create(
+    filename="reply.m4a", content_type="audio/x-m4a", size_bytes=len(audio), duration_ms=4200,
+)
+await relay.attachments.upload(upload, audio)
+sent = await relay.chats.send_voicememo(chat_id, attachment_id=upload["attachment_id"])
 ```
 
 ```bash

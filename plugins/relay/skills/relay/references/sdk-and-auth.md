@@ -67,13 +67,88 @@ Use only the public resources exported by this version:
 - `webhooks`;
 - `websocket`.
 
-`verifyRelayIdToken` checks a Log in with Relay ID token, and
+`verifyRelayIdToken` checks a Log in with Relay ID token (`RELAY_USER_ID_CLAIM`
+names its Relay id claim), and
 `@relaymessenger/sdk/login-button` exports `RelayLoginButton`. A route in the
 locked OpenAPI with no SDK method uses plain HTTP with the same token.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP
 methods, and operations marked safe by the SDK can also be retried.
+
+## Python SDK
+
+`pip install relaymessenger` (Python 3.10 or newer; the `calls` and `login`
+extras add Calls and ID token checks). Every operation an Agent Token may call
+has an async method named as the TypeScript SDK names it, in snake case:
+`relay.chats.startTyping` is `relay.chats.start_typing`, and
+`relay.paymentRequests` is `relay.payment_requests`. Request fields are keyword
+arguments; answers are the API's JSON as typed dicts.
+
+```python
+import os
+
+from relaymessenger import Relay, parts
+
+relay = Relay(
+    os.environ["RELAY_AGENT_TOKEN"],
+    base_url=os.environ.get("RELAY_API_URL", "https://api.relayapp.im"),
+    webhook_secret=os.environ.get("RELAY_WEBHOOK_SECRET"),
+)
+
+
+async def tour(chat_id: str, message_id: str, png: bytes) -> None:
+    me = await relay.me.retrieve()
+    await relay.messages.create(
+        to=["atlas"], message={"parts": [parts.text_part("Hello from Relay.")]}, idempotency_key="hello-atlas-1",
+    )
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.text_part("Still on?"), parts.buttons_part([{"label": "Yes"}, {"label": "No"}])],
+        "idempotency_key": "still-on-1",
+    }})
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.place_part(37.4422, -122.1615, name="Philz Coffee")], "idempotency_key": "place-1",
+    }})
+    upload = await relay.attachments.create(filename="map.png", content_type="image/png", size_bytes=len(png))
+    await relay.attachments.upload(upload, png)
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.media_part(attachment_id=upload["attachment_id"])], "idempotency_key": "map-1",
+    }})
+    await relay.messages.add_reaction(message_id, operation="add", type="love")
+    await relay.messages.retrieve(message_id)
+    await relay.messages.list_messages_thread(message_id, limit=50)
+    await relay.chats.start_typing(chat_id)
+    await relay.chats.stop_typing(chat_id)
+    await relay.chats.mark_as_read(chat_id)
+    await relay.chats.location.request(chat_id)
+    await relay.chats.location.retrieve(chat_id)
+    await relay.contacts.lookup(handle="atlas")  # or id=..., or task="plan a trip"
+    await relay.contact_card.retrieve(handle=me["handle"])
+    await relay.blocked_handles.list()
+    await relay.payment_requests.list(status="requested")
+    await relay.webhook_events.list()
+    await relay.webhook_subscriptions.list()
+```
+
+The resources are `chats` (with `messages`, `participants` and `location`),
+`messages`, `attachments`, `payment_requests`, `calls`, `contacts`,
+`contact_card`, `directory`, `blocked_handles`, `access`, `agents`, `me`,
+`oauth2_client`, `webhook_events`, `webhook_subscriptions`, `webhooks` and
+`websocket`. `relaymessenger.parts` types every message part and builds the
+simple ones: `text_part` (with `mention`), `media_part`, `link_part`,
+`buttons_part`, `place_part` and `payment_part`; `selection`, `form` and
+`rich_cards` build the structured ones.
+
+Verify a webhook over the raw body with the subscription's `whsec_` secret:
+
+```python
+from relaymessenger import WebhookVerificationError
+
+try:
+    event = relay.webhooks.unwrap(raw_body, headers=request_headers)
+except WebhookVerificationError:
+    ...  # answer 400 and do not process the delivery
+```
 
 ## Organization-owned agent provisioning
 

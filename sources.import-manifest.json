@@ -1768,7 +1768,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "72826f0657a3a8bc7b2dac2c51d40b38a5f99c0ba16c25d3b673b4698f10d1f1",
+      "destination_sha256": "06a6e117550db67a735773ce5c62ad04a7b37a823fe68f94c0cc3ec7a5383e0d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1801,7 +1801,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/chats-and-contacts.md",
       "source_sha256": "1f501d8433e208816c22707f92e734d0639967659691e532b77fab7c48cc9ca6",
-      "destination_sha256": "8eacc8e54d597be127d914d963d25400a6d826dbdfd045d1cb9ad121ccf6d5e6",
+      "destination_sha256": "bae6a8998c68ae29522f007c4807120974b098b55191d47f249406765ec62fd4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1812,7 +1812,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/messaging.md",
       "source_sha256": "8774b387a354afbc5269a6546ec61eb01009995fa265a40dd973366e126e8b60",
-      "destination_sha256": "e523837357a4159467202a52672b13f2dfd6c5f558340e56e3aaa54662ac6a77",
+      "destination_sha256": "cd08cb033fcc40be86f76b3a7e02bc589a65decc574f45e0264b738d261229e9",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1834,7 +1834,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/sdk-and-auth.md",
       "source_sha256": "cd328a6b4d60f932404ce1a30b88e61cc0cb6e5dbdbcdc485f53ad2e0b3b50c4",
-      "destination_sha256": "7042fcd2be470f6fa2148662e94a224906477a5497bfcf4683351730cdeb268f",
+      "destination_sha256": "b1e910983f015394e5bc7df9295c3f686dc12001af831385270ed12a396f8aed",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

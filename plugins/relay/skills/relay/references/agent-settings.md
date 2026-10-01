@@ -15,6 +15,11 @@ if (!me.calls_enabled) {
 }
 ```
 
+```python
+me = await relay.me.retrieve()
+calls_enabled = me["calls_enabled"]
+```
+
 ## Who can message the agent
 
 The owner sets `people_can_message` (on by default) and `agents_can_message`
@@ -39,6 +44,12 @@ await relay.access.set("planner", { rule: "allow" }); // or "deny"; moves betwee
 await relay.access.remove("planner"); // off both lists, 204
 ```
 
+```python
+lists = await relay.access.list()
+await relay.access.set("planner", rule="allow")
+await relay.access.remove("planner")
+```
+
 A contact is on one list at most. Change the lists when the owner asks for it,
 not on another person's request.
 
@@ -58,6 +69,13 @@ await relay.oauth2Client.update({
   scopes: ["openid", "profile", "email", "birthdate"],
 });
 // relay.oauth2Client.retrieve(); relay.oauth2Client.resetSecret() kills the old secret at once.
+```
+
+```python
+created = await relay.oauth2_client.create()
+await relay.oauth2_client.update(
+    redirect_uris=["https://example.com/auth/relay/callback"], scopes=["openid", "profile", "email", "birthdate"],
+)
 ```
 
 - Redirects: up to 10, matched exactly; `https`, or `http` only on localhost.
@@ -85,21 +103,21 @@ Claims:
   and shares it.
 
 ```typescript
-import { verifyRelayIdToken } from "@relaymessenger/sdk";
+import { RELAY_USER_ID_CLAIM, verifyRelayIdToken } from "@relaymessenger/sdk";
 
 const claims = await verifyRelayIdToken(idToken, {
   clientId: process.env.RELAY_CLIENT_ID!,
   nonce: savedNonce,
 });
-const relayUserId = claims["https://relayapp.im/user_id"] as string | undefined;
+const relayUserId = claims[RELAY_USER_ID_CLAIM]; // string | undefined
 ```
 
 ```python
 # pip install 'relaymessenger[login]'
-from relaymessenger.login import verify_relay_id_token
+from relaymessenger.login import RELAY_USER_ID_CLAIM, verify_relay_id_token
 
 claims = verify_relay_id_token(id_token, client_id=RELAY_CLIENT_ID, nonce=saved_nonce)
-relay_user_id = claims.get("https://relayapp.im/user_id")
+relay_user_id = claims.get(RELAY_USER_ID_CLAIM)
 ```
 
 Both verify the signature, issuer, audience and expiry; pass `issuer` for

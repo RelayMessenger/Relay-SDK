@@ -80,7 +80,14 @@ const { call } = await relay.calls.create(
 ```
 
 `relay.calls.retrieve(callId)` reads one Call and `relay.calls.list(chatId)`
-lists a Chat's Calls.
+lists a Chat's Calls. In Python:
+
+```python
+call = await relay.calls.create(chat_id, to=[person_handle], idempotency_key=saved_key)
+await relay.calls.retrieve(call["call"]["id"])
+await relay.calls.list(chat_id, limit=20)
+await relay.calls.end(call["call"]["id"])
+```
 
 Python (`pip install 'relaymessenger[calls]'`) has the same transport:
 
@@ -178,9 +185,34 @@ answers the Call by joining its room with the Agent Token.
   `call.attach(session)` wires audio in, audio out and the caller's camera
   into an `AgentSession`.
 - LiveKit Agents, TypeScript: `npm install @relaymessenger/livekit
-  @livekit/agents @livekit/rtc-node`. `RelayLiveKitCall.connect({ relay,
-  callId })`, then `call.attach(session)`. It carries audio only; send video
-  through `call.transport.publishTrack`.
+  @livekit/agents @livekit/rtc-node` (and `node-webcodecs` for video).
+  `RelayLiveKitCall.connect({ relay, callId })`, then `call.attach(session)`
+  for audio. LiveKit Agents for Node has no `session.input.video`, so the
+  caller's camera arrives as `@livekit/rtc-node` I420 `VideoFrame`s on
+  `call.videoInput`: read `call.videoInput.latestFrame` when a turn completes,
+  or iterate `call.videoInput`. A reader always gets the newest frame.
+
+```typescript
+import { llm, voice } from "@livekit/agents";
+import { VideoBufferType, VideoFrame } from "@livekit/rtc-node";
+import { LocalVideoTrack, RelayLiveKitCall, VideoSource } from "@relaymessenger/livekit";
+
+const call = await RelayLiveKitCall.connect({ relay, callId });
+
+class Assistant extends voice.Agent {
+  override async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {
+    const frame = call.videoInput.latestFrame;
+    if (frame) newMessage.content.push(llm.createImageContent({ image: frame }));
+  }
+}
+
+// The agent's own camera, with LiveKit's names.
+const source = new VideoSource(640, 360);
+await call.transport.publishTrack(LocalVideoTrack.createVideoTrack("camera", source), {
+  videoEncoding: { maxFramerate: 15 },
+});
+source.captureFrame(new VideoFrame(rgba, 640, 360, VideoBufferType.RGBA));
+```
 
 A Pipecat bot with a talking avatar uses Pipecat's own Simli service between
 the TTS and the Relay output (`pip install relaymessenger-pipecat
@@ -214,7 +246,11 @@ def avatar_bot(call_id: str, stt, user_aggregator, llm, tts, assistant_aggregato
     ]))
 ```
 
-Start the pipeline within the 32-second ring. For framework guidance, read
+Start the pipeline within the 32-second ring. Whole, runnable bots ship in the
+packages: `python/relaymessenger-pipecat/examples/simli_avatar_bot.py` (run
+with `uv run --with 'pipecat-ai[simli,deepgram,cartesia,openai,silero]'`) and
+`python/relaymessenger-livekit/examples/gemini_live_video_agent.py` (Gemini
+Live sees the caller's camera; `uv run --with 'livekit-agents[google]'`). For framework guidance, read
 the frameworks' own published skills and docs, not copies:
 
 - Pipecat skills: https://github.com/pipecat-ai/skills
