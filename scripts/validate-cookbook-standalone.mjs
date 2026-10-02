@@ -240,13 +240,23 @@ export async function waitForPublishedLatest({
   }
 }
 
+/**
+ * Parses `npm view <name> dist-tags.latest versions --json`. npm 11 prints
+ * one object; npm 12 prints the same object inside a one-element array.
+ */
+export function parseInstallMetadata(out) {
+  const parsed = JSON.parse(out);
+  const fields = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : parsed;
+  assert.ok(fields !== null && typeof fields === "object" && !Array.isArray(fields),
+    `npm view returned an unexpected install metadata shape: ${out.trim()}`);
+  return { latest: fields["dist-tags.latest"], versions: fields.versions ?? [] };
+}
+
 /** What `npm install` reads: the package's dist-tags and versions, revalidated past npm's own cache. */
 async function readInstallMetadata(name) {
-  const out = execFileSync(npm, [
+  return parseInstallMetadata(execFileSync(npm, [
     "view", name, "dist-tags.latest", "versions", "--json", "--prefer-online", "--registry", "https://registry.npmjs.org/",
-  ], { encoding: "utf8" });
-  const parsed = JSON.parse(out);
-  return { latest: parsed["dist-tags.latest"], versions: parsed.versions ?? [] };
+  ], { encoding: "utf8" }));
 }
 
 /** The package name and version inside each release tarball. */

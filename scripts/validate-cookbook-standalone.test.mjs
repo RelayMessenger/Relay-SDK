@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import {
   CHANNEL_TAGS,
   installedMismatch,
+  parseInstallMetadata,
   publishedArguments,
   releaseDeferredPins,
   standaloneChannel,
@@ -173,4 +174,39 @@ test("--published is repeatable and takes name@version", () => {
     [{ name: "@relaymessenger/sdk", version: "0.5.0" }, { name: "relaymessenger", version: "0.1.16" }]);
   assert.deepEqual(publishedArguments(["node", "x"]), []);
   assert.throws(() => publishedArguments(["node", "x", "--published", "@relaymessenger/sdk"]), /--published takes name@version/u);
+});
+
+// Real `npm view @relaymessenger/sdk dist-tags.latest versions --json` output,
+// versions list shortened, read from the registry on 2026-10-02.
+const NPM_11_INSTALL_METADATA = `{
+  "dist-tags.latest": "0.5.0",
+  "versions": [
+    "0.2.0",
+    "0.4.0",
+    "0.5.0"
+  ]
+}
+`;
+const NPM_12_INSTALL_METADATA = `[
+  {
+    "dist-tags.latest": "0.5.0",
+    "versions": [
+      "0.2.0",
+      "0.4.0",
+      "0.5.0"
+    ]
+  }
+]
+`;
+
+test("install metadata reads the same from npm 11's object and npm 12's one-element array", () => {
+  for (const out of [NPM_11_INSTALL_METADATA, NPM_12_INSTALL_METADATA]) {
+    assert.deepEqual(parseInstallMetadata(out), { latest: "0.5.0", versions: ["0.2.0", "0.4.0", "0.5.0"] });
+  }
+});
+
+test("install metadata in any other shape fails loudly instead of reading latest as undefined", () => {
+  assert.throws(() => parseInstallMetadata("[]"), /unexpected install metadata shape/u);
+  assert.throws(() => parseInstallMetadata("[{}, {}]"), /unexpected install metadata shape/u);
+  assert.throws(() => parseInstallMetadata("null"), /unexpected install metadata shape/u);
 });
