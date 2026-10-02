@@ -591,3 +591,44 @@ it("fails connect without opening ElevenLabs when the caller hangs up while the 
   await expect(connecting).rejects.toThrow(/ended before the ElevenLabs session started/u);
   expect(FakeSocket.last).toBeUndefined();
 });
+
+it("fails connect at once, and cancels the request, when the caller hangs up while a signed URL request hangs", async () => {
+  const room = new FakeRoom();
+  FakeSocket.last = undefined;
+  let aborted = false;
+  const connecting = ElevenLabsCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    elevenlabs: { agentId: "agent_1", apiKey: "xi-test" },
+    roomClient: room as unknown as CallRoom,
+    webRTC: new FakeWebRTC() as unknown as RelayWebRTCFactory,
+    WebSocket: FakeSocket,
+    // ElevenLabs never answers this request.
+    fetch: ((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => { aborted = true; reject(init.signal!.reason); });
+    })) as unknown as typeof fetch,
+  });
+  await flush();
+  room.emit("ended", { type: "ended", reason: "canceled" });
+  await expect(connecting).rejects.toThrow(/ended before the ElevenLabs session started/u);
+  expect(aborted).toBe(true);
+  expect(FakeSocket.last).toBeUndefined();
+});
+
+it("plays the agent's last words out before ending the call when ElevenLabs closes the conversation", async () => {
+  let drained!: () => void;
+  const source = new FakeSource();
+  source.waitForDrain = () => new Promise<void>((resolve) => { source.drains += 1; drained = resolve; });
+  const { call, socket, room } = await start({ rive: false }, source);
+  // The final words, then ElevenLabs hangs up while they are still queued.
+  socket.server({ type: "audio", audio_event: { audio_base_64: pcm(new Array(1_600).fill(5)), event_id: 1 } });
+  await flush();
+  socket.close();
+  await flush();
+  expect(source.cleared).toBe(0);
+  expect(room.sent.some((frame) => frame.type === "end")).toBe(false);
+  drained();
+  await call.closed;
+  expect(source.written.reduce((n, w) => n + w.samples.length, 0)).toBe(1_600);
+  expect(room.sent.at(-1)).toEqual({ type: "end" });
+});

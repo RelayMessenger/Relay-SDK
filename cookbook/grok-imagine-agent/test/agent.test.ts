@@ -363,6 +363,48 @@ describe("answer", () => {
     ]);
   });
 
+  it("on a later FULL sync resumes a missed message whose answer an earlier sync left unfinished", async () => {
+    const store = memory();
+    const history = { chat: [{ id: "m1", is_from_me: false, text: "selfie?", at: "2026-10-01T10:00:00Z" }] };
+    const { client: relayClient, sent } = relay(undefined, history);
+    // Grok is down for longer than one delivery retries: the first sync's answer fails.
+    const { client: xaiClient } = xai([[say("Here I am!")]], {
+      respondFails: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [i + 1, { status: 503 }])),
+    });
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE, sleep: waits().sleep };
+    const describe = (message: { is_from_me: boolean; parts?: unknown }) =>
+      wordsOf((message.parts ?? []) as { type: string; value?: unknown }[], "Sam", false);
+
+    await expect(recoverChats(deps, describe as never)).rejects.toThrow();
+    expect(sent).toHaveLength(0);
+    // Grok is back; the next FULL sync must finish the answer, not skip it.
+    const { client: upAgain } = xai([[say("Here I am!")]]);
+    await recoverChats({ ...deps, xai: upAgain }, describe as never);
+
+    expect(sent.map((s) => s.body)).toEqual([
+      { message: { parts: [{ type: "text", value: "Here I am!" }], idempotency_key: "full-sync:m1:0:text" } },
+    ]);
+    expect(store.event("full-sync:m1")?.done).toBe(true);
+    expect(store.items("chat").filter((item) => "role" in item && item.role === "user"))
+      .toEqual([{ role: "user", content: "selfie?" }]);
+  });
+
+  it("runs one event once at a time: a redelivery that overlaps the first never pays for the picture again", async () => {
+    const store = memory();
+    const { client: relayClient, sent } = relay();
+    const { client: xaiClient, requests } = xai([[call("send_picture", { scene: "A selfie" })], [say("There you go!")]]);
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE };
+    const incoming = { eventId: "event-overlap", chatId: "chat", text: "selfie please" };
+
+    // The socket drops while the picture is being made; Relay redelivers at once.
+    await Promise.all([answer(deps, incoming), answer(deps, incoming)]);
+
+    expect(requests.filter((r) => r.path === "/images/edits")).toHaveLength(1);
+    expect(relayClient.attachments.create).toHaveBeenCalledTimes(1);
+    expect(sent.map((s) => (s.body as { message: { idempotency_key: string } }).message.idempotency_key))
+      .toEqual(["event-overlap:call-1", "event-overlap:1:text"]);
+  });
+
   it("gives up on an event after its third lasting refusal, says so, and lets the next message through", async () => {
     const store = memory();
     const { client: relayClient, sent } = relay();

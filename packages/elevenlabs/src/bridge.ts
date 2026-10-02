@@ -42,6 +42,8 @@ export interface SignedUrlOptions {
   /** Defaults to `https://api.elevenlabs.io`; use a residency origin such as `https://api.eu.residency.elevenlabs.io`. */
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Cancels the request. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -52,7 +54,10 @@ export interface SignedUrlOptions {
 export const getSignedUrl = async (options: SignedUrlOptions): Promise<string> => {
   const url = new URL("/v1/convai/conversation/get-signed-url", options.baseUrl ?? ELEVENLABS_API);
   url.searchParams.set("agent_id", options.agentId);
-  const response = await (options.fetch ?? fetch)(url, { headers: { "xi-api-key": options.apiKey } });
+  const response = await (options.fetch ?? fetch)(url, {
+    headers: { "xi-api-key": options.apiKey },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
   if (!response.ok) {
     throw new Error(`ElevenLabs refused a signed URL for agent ${options.agentId} (HTTP ${response.status}).`);
   }
@@ -133,6 +138,8 @@ const STARTUP_AUDIO_MS = 2_000;
 const CARRY_FLUSH_MS = 100;
 /** Missing end markers: allow this much quiet after the queued audio plays out. */
 const REPLY_QUIET_MS = 250;
+/** When ElevenLabs closes the session, its queued last words get this long past their own length to play out. */
+const CLOSE_PLAYOUT_GRACE_MS = 2_000;
 
 type RiveValues = Record<string, number | boolean>;
 
@@ -219,22 +226,35 @@ export class ElevenLabsCall {
     // Listen from the start: the caller may speak, hang up or be replaced while ElevenLabs starts.
     const early: RelayAudioFrame[] = [];
     let ended = false;
+    const endedError = (): Error => new Error("The Relay Call ended before the ElevenLabs session started.");
+    // A hangup settles connect at once, even while a request hangs, and cancels that request.
+    const abort = new AbortController();
+    let rejectEnded!: (error: Error) => void;
+    const whenEnded = new Promise<never>((_resolve, reject) => { rejectEnded = reject; });
+    whenEnded.catch(() => undefined);
+    const untilEnded = <T>(work: Promise<T>): Promise<T> => Promise.race([work, whenEnded]);
     const keep = (frame: RelayAudioFrame): void => { early.push(frame); };
-    const end = (): void => { ended = true; };
+    const end = (): void => {
+      if (ended) return;
+      ended = true;
+      abort.abort(endedError());
+      rejectEnded(endedError());
+    };
     transport.on("audio", keep).on("ended", end).on("close", end);
     let socket: ElevenLabsSocket | undefined;
     try {
-      await transport.connect();
+      await untilEnded(transport.connect());
       const url = options.elevenlabs.signedUrl
         ?? (options.elevenlabs.apiKey
-          ? await getSignedUrl({
+          ? await untilEnded(getSignedUrl({
             apiKey: options.elevenlabs.apiKey,
             agentId: options.elevenlabs.agentId,
             ...(options.elevenlabs.baseUrl ? { baseUrl: options.elevenlabs.baseUrl } : {}),
             ...(options.fetch ? { fetch: options.fetch } : {}),
-          })
+            signal: abort.signal,
+          }))
           : publicAgentUrl(options.elevenlabs.agentId, options.elevenlabs.baseUrl));
-      if (ended) throw new Error("The Relay Call ended before the ElevenLabs session started.");
+      if (ended) throw endedError();
       const Socket = options.WebSocket ?? (globalThis.WebSocket as unknown as ElevenLabsSocketConstructor);
       socket = new Socket(url);
       const call = new ElevenLabsCall(transport, socket, options);
@@ -273,7 +293,7 @@ export class ElevenLabsCall {
       };
       socket.onclose = (event) => {
         if (!this.#ready) this.#stop(new Error(`ElevenLabs closed the session before it started (${event.code ?? "no code"}).`), false);
-        else this.#finish(true);
+        else void this.#finishAfterPlayout();
       };
       socket.onmessage = (event) => {
         const message = parse(event.data);
@@ -539,6 +559,31 @@ export class ElevenLabsCall {
       return;
     }
     if (this.#ready) this.#finish(endCall);
+  }
+
+  /**
+   * ElevenLabs closed the session: its last words may still be queued on the
+   * track. Play them out, then end the Relay Call. A hangup, an interruption
+   * or `close()` meanwhile finishes at once instead.
+   */
+  async #finishAfterPlayout(): Promise<void> {
+    if (this.#done) return;
+    const revision = this.#audioRevision;
+    try {
+      await this.#lastWrite;
+      await this.#flushCarry();
+      if (!this.#done && revision === this.#audioRevision) {
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          this.transport.waitForPlayout(),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, this.transport.queuedAudioMs() + CLOSE_PLAYOUT_GRACE_MS);
+            timer.unref?.();
+          }),
+        ]).finally(() => clearTimeout(timer));
+      }
+    } catch { /* the call is ending either way */ }
+    this.#finish(true);
   }
 
   /** `endCall`: ElevenLabs ended the session, so the Relay Call ends too. */

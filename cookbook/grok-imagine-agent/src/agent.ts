@@ -235,8 +235,25 @@ function messageOf(error: unknown): string {
  * step it already answered, never pays for a picture or video it already
  * has, and re-sends a Message only with the same idempotency key and body.
  */
-export async function answer(deps: AgentDependencies, incoming: Incoming): Promise<void> {
-  const { store, xai } = deps;
+export function answer(deps: AgentDependencies, incoming: Incoming): Promise<void> {
+  // One event runs once at a time. Relay delivers an event again when the
+  // connection drops, even while its first handler is still making a picture
+  // or video; the redelivery joins that run instead of paying for the same
+  // media again, and fails with it so Relay delivers it once more.
+  let byEvent = running.get(deps.store);
+  if (!byEvent) running.set(deps.store, byEvent = new Map());
+  const current = byEvent.get(incoming.eventId);
+  if (current) return current;
+  const work = answerOnce(deps, incoming).finally(() => byEvent.delete(incoming.eventId));
+  byEvent.set(incoming.eventId, work);
+  return work;
+}
+
+/** The events being answered in this process, by store. */
+const running = new WeakMap<ProgressStore, Map<string, Promise<void>>>();
+
+async function answerOnce(deps: AgentDependencies, incoming: Incoming): Promise<void> {
+  const { store } = deps;
   const { eventId, chatId } = incoming;
   if (!store.begin(eventId, chatId, { role: "user", content: incoming.text }, incoming.messageId)) return;
   if (store.event(eventId)?.done !== false) return;
@@ -410,9 +427,17 @@ export async function recoverChats(deps: AgentDependencies, describe: (message: 
       items.push(message.is_from_me ? { role: "assistant", content: text } : { role: "user", content: text });
     }
     const last = messages.at(-1);
-    const missed = last && !last.is_from_me && describe(last, chat) !== null && !deps.store.hasMessage(last.id)
-      ? last
-      : undefined;
+    const words = last && !last.is_from_me ? describe(last, chat) : null;
+    // An earlier sync or delivery took this Message and did not finish it:
+    // resume that event. This chat keeps its own history, which holds the
+    // event's turn, Grok steps and tool calls; a snapshot from Relay would
+    // drop the calls that the event's tool outputs answer.
+    const unfinished = last && words !== null ? deps.store.unfinished(last.id) : undefined;
+    if (last && words !== null && unfinished) {
+      await answer(deps, { eventId: unfinished, chatId: chat.id, messageId: last.id, text: words });
+      continue;
+    }
+    const missed = last && words !== null && !deps.store.hasMessage(last.id) ? last : undefined;
     // The missed message is added by its own event below, not by the snapshot.
     deps.store.replaceChat(chat.id, missed ? items.slice(0, -1) : items);
     if (missed) {
@@ -420,7 +445,7 @@ export async function recoverChats(deps: AgentDependencies, describe: (message: 
         eventId: `full-sync:${missed.id}`,
         chatId: chat.id,
         messageId: missed.id,
-        text: describe(missed, chat)!,
+        text: words!,
       });
     }
   }
