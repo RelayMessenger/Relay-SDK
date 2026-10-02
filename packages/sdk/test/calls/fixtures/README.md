@@ -24,3 +24,22 @@ done
 The full-range regression tests **sample preservation**, not range conversion.
 The public Relay VideoFrame has no range metadata and its RGB conversion still
 assumes limited range; that pre-existing limitation is outside this fix.
+
+Additional guard/content fixtures (same public testsrc2 source):
+
+```sh
+ffmpeg -v error -f lavfi -i 'testsrc2=size=64x48:rate=1' -frames:v 1 \
+  -c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p10le -f h264 masked-10bit.h264
+ffmpeg -v error -f lavfi -i 'testsrc2=size=64x48:rate=1' -frames:v 1 \
+  -c:v libvpx -b:v 1M -f ivf /tmp/synthetic-vp8.ivf
+ffmpeg -v error -i /tmp/synthetic-vp8.ivf -frames:v 1 \
+  -c:v rawvideo -f rawvideo vp8.yuv
+# The one-frame IVF has a 32-byte file header and 12-byte frame header:
+python3 -c 'from pathlib import Path; Path("vp8.vp8").write_bytes(Path("/tmp/synthetic-vp8.ivf").read_bytes()[44:])'
+```
+
+The 10-bit fixture deliberately decodes to an **unknown native format** while
+node-webcodecs 1.3 reports public I420 and synthesizes a smaller I420 allocation.
+The test asserts the real native allocation and rejection **before copyTo**, even
+with a permissive input proof. VP8 is compared byte-for-byte with independent
+FFmpeg output, just like the two H264 fixtures.

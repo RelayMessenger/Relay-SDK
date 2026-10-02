@@ -5,27 +5,27 @@ import { createWeriftVideoFactory, loadWebCodecs } from "../../src/calls/engine-
 import { createVideoPacketizer } from "../../src/calls/video-rtp.js";
 import type { RelayMediaStreamTrackLike } from "../../src/calls/transport.js";
 
-for (const range of ["full", "limited"]) {
-  it(`factory receiver preserves ${range}-range H264 planes`, async () => {
+for (const [name, codec] of [["full-range", "h264"], ["limited-range", "h264"], ["vp8", "vp8"]] as const) {
+  it(`factory receiver preserves ${name} decoded planes`, async () => {
     await loadWebCodecs();
     const track = new MediaStreamTrack({ kind: "video" });
     const receiver = createWeriftVideoFactory().createVideoReceiver!(track as unknown as RelayMediaStreamTrackLike, {
-      codecs: [{ payloadType: 96, mimeType: "video/H264" }],
+      codecs: [{ payloadType: 96, mimeType: codec === "h264" ? "video/H264" : "video/VP8" }],
     });
     const frames: Uint8Array[] = [];
     receiver.onframe = (event) => { frames.push(event.frame.data); };
     receiver.setActive(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      const bytes = readFileSync(new URL(`./fixtures/${range}-range.h264`, import.meta.url));
-      const packetizer = createVideoPacketizer("h264", { ssrc: 1, payloadType: 96 });
+      const bytes = readFileSync(new URL(`./fixtures/${name}.${codec}`, import.meta.url));
+      const packetizer = createVideoPacketizer(codec, { ssrc: 1, payloadType: 96 });
       for (let i = 0; i < 3; i++) {
         for (const packet of packetizer.packetize(bytes, i * 100_000, true)) {
           track.onReceiveRtp.execute(RtpPacket.deSerialize(packet));
         }
       }
       await expect.poll(() => frames.length).toBeGreaterThan(0);
-      const expected = readFileSync(new URL(`./fixtures/${range}-range.yuv`, import.meta.url));
+      const expected = readFileSync(new URL(`./fixtures/${name}.yuv`, import.meta.url));
       expect(Buffer.from(frames[0]!)).toEqual(expected);
       expect(receiver.stats().decodeErrors).toBe(0);
     } finally {
@@ -65,5 +65,34 @@ it("counts invalid copy layouts as decode errors and closes every output", async
     track.stop();
     copy.mockRestore();
     close.mockRestore();
+  }
+});
+
+it("rejects an actual 10-bit H264 frame masked as public I420", async () => {
+  const wc = await loadWebCodecs();
+  const { copyDecodedI420 } = await import("../../src/calls/video-frame-copy.js");
+  const outputs: InstanceType<typeof wc.VideoFrame>[] = [];
+  const errors: unknown[] = [];
+  const decoder = new wc.VideoDecoder({ output: (frame) => outputs.push(frame), error: (error) => errors.push(error) });
+  decoder.configure({ codec: "avc1.6e001f", hardwareAcceleration: "prefer-software" });
+  try {
+    decoder.decode(new wc.EncodedVideoChunk({ type: "key", timestamp: 0,
+      data: readFileSync(new URL("./fixtures/masked-10bit.h264", import.meta.url)) }));
+    await decoder.flush();
+    expect(errors).toEqual([]);
+    expect(outputs).toHaveLength(1);
+    const frame = outputs[0]!;
+    expect(frame.format).toBe("I420"); // Misleading 1.3.0 public fallback.
+    expect(frame._getNative().format).toBe("");
+    expect(frame.allocationSize()).toBe(64 * 48 * 1.5);
+    expect(frame._getNative().allocationSize()).toBe(64 * 48 * 3);
+    const copy = vi.spyOn(frame, "copyTo");
+    await expect(copyDecodedI420(frame)).rejects.toThrow("Unverified");
+    // Even a stale/permissive input proof cannot bypass the native byte-count check.
+    await expect(copyDecodedI420(frame, true)).rejects.toThrow("Unverified");
+    expect(copy).not.toHaveBeenCalled();
+  } finally {
+    for (const frame of outputs) frame.close();
+    decoder.close();
   }
 });
