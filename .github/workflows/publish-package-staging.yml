@@ -258,3 +258,14 @@ jobs:
       base: ${{ needs.bump.outputs.base }}
     secrets:
       NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  elevenlabs:
+    needs: [bump, sdk, claude-code, land]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.land.result == 'success' && needs.sdk.result != 'failure' && needs.claude-code.result != 'failure' && contains(needs.bump.outputs.changed, ',elevenlabs,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: elevenlabs
+      sha: ${{ needs.bump.outputs.sha }}
+      base: ${{ needs.bump.outputs.base }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}

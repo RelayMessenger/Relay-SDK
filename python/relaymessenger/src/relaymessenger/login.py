@@ -13,10 +13,48 @@ from __future__ import annotations
 
 import json
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Final, Optional, TypedDict, cast
 
 #: Relay's OpenID Connect issuer. Staging is ``https://auth.staging.relayapp.im/api/auth``.
 RELAY_ISSUER = "https://auth.relayapp.im/api/auth"
+
+#: The claim that carries the person's ``id`` as your agent sees it in chats
+#: (``sender_handle.id`` on ``message.received``), with the ``openid`` and
+#: ``profile`` scopes, when the person has a Relay profile. ``sub`` is a
+#: different ID and never appears in chats.
+RELAY_USER_ID_CLAIM: Final = "https://relayapp.im/user_id"
+
+_RelayIdTokenClaimsRequired = TypedDict(
+    "_RelayIdTokenClaimsRequired",
+    {"sub": str, "aud": str, "iss": str, "exp": int, "iat": int},
+)
+
+
+# The functional form, because one claim's name is a URL.
+_RelayIdTokenClaimsOptional = TypedDict(
+    "_RelayIdTokenClaimsOptional",
+    {
+        "nonce": str,
+        "name": str,
+        # The person's Relay @handle, without the @.
+        "preferred_username": str,
+        "picture": str,
+        "email": str,
+        "email_verified": bool,
+        # E.164, only with the phone scope and when the person shared it.
+        "phone_number": str,
+        "phone_number_verified": bool,
+        # RELAY_USER_ID_CLAIM: the person's id as your agent sees it in chats.
+        "https://relayapp.im/user_id": str,
+    },
+    total=False,
+)
+
+
+class RelayIdTokenClaims(_RelayIdTokenClaimsRequired, _RelayIdTokenClaimsOptional):
+    """The claims Relay puts in an ID token. ``email`` and ``phone_number``
+    only when the person shared them; ``claims[RELAY_USER_ID_CLAIM]`` (the
+    person's ``id`` in chats) when the person has a Relay profile."""
 
 _key_clients: Dict[str, Any] = {}
 
@@ -45,10 +83,11 @@ def verify_relay_id_token(
     issuer: str = RELAY_ISSUER,
     nonce: Optional[str] = None,
     leeway: float = 60,
-) -> Dict[str, Any]:
+) -> RelayIdTokenClaims:
     """Verify a Relay ID token and return its claims: ``sub`` (the person),
-    ``name``, ``preferred_username`` (the @handle), ``picture``, and
-    ``email`` or ``phone_number`` when the person shared them. Raises when
+    ``name``, ``preferred_username`` (the @handle), ``picture``,
+    ``email`` or ``phone_number`` when the person shared them, and
+    ``RELAY_USER_ID_CLAIM``, the person's ``id`` as your agent sees it in chats. Raises when
     the signature, issuer, audience, expiry or nonce is wrong."""
     import jwt
 
@@ -65,7 +104,7 @@ def verify_relay_id_token(
     )
     if nonce is not None and claims.get("nonce") != nonce:
         raise ValueError("The ID token's nonce does not match the login request.")
-    return claims
+    return cast(RelayIdTokenClaims, claims)
 
 
-__all__ = ["RELAY_ISSUER", "verify_relay_id_token"]
+__all__ = ["RELAY_ISSUER", "RELAY_USER_ID_CLAIM", "RelayIdTokenClaims", "verify_relay_id_token"]

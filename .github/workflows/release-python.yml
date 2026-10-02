@@ -1,21 +1,27 @@
-name: Release relaymessenger to PyPI
+name: Release the Python packages to PyPI
 
-# Publishes the Python SDK, python/relaymessenger, to PyPI as `relaymessenger`
-# with PyPI Trusted Publishing: GitHub's OIDC token, no stored PyPI token.
-# The shape is the Python Packaging User Guide's, copied as written
-# (packaging.python.org, "Publishing package distribution releases using
-# GitHub Actions CI/CD workflows"): one job builds the dists and uploads them
-# as an artifact, and a separate job in the `pypi` environment, holding only
-# `id-token: write`, downloads them and runs pypa/gh-action-pypi-publish.
-# Building in the publishing job is unsupported by that guide.
-#
-# PyPI accepts the upload only from this file name, in this repository, in
-# the `pypi` environment, as registered on pypi.org (Your account ->
-# Publishing -> pending publisher). Renaming this file breaks publishing.
+# Publishes one of the three Python packages to PyPI under its directory's
+# name: python/relaymessenger (the SDK), python/relaymessenger-pipecat and
+# python/relaymessenger-livekit (which need the SDK on PyPI first, so publish
+# relaymessenger before either), with the account's PyPI API token. The token
+# lives in Infisical (project relay-yscy, env prod, path /ci/pypi, key
+# PYPI_API_TOKEN) and reaches the job over GitHub OIDC through the shared CI
+# identity, the org's CI pattern (Relay-Admin's deploy.yml); no PyPI token is
+# stored in GitHub. PyPI Trusted Publishing is not used: only relaymessenger
+# has a pending publisher, and the other two packages have none.
+# The shape is the Python Packaging User Guide's (packaging.python.org,
+# "Publishing package distribution releases using GitHub Actions CI/CD
+# workflows"): one job builds the dists and uploads them as an artifact, and
+# a separate job in the `pypi` environment downloads them, loads the token,
+# and runs pypa/gh-action-pypi-publish with it. Building in the publishing
+# job is unsupported by that guide. PEP 740 attestations need Trusted
+# Publishing, so they are off.
 #
 # Two ways in, and only one of them can publish:
-#   pull_request touching the SDK or this file -> test, build, twine check, stop
-#   workflow_dispatch on main                  -> test, build, check, publish
+#   pull_request touching python/ or this file -> test, build, twine check
+#                                                  all three, stop
+#   workflow_dispatch on main, package chosen  -> test, build, check, publish
+#                                                  that one package
 # Tags record a release and never start one (scripts/validate-workflows.mjs),
 # so there is no tag trigger.
 
@@ -23,8 +29,17 @@ on:
   pull_request:
     paths:
       - .github/workflows/release-python.yml
-      - python/relaymessenger/**
+      - python/**
   workflow_dispatch:
+    inputs:
+      package:
+        description: The package to publish; relaymessenger first.
+        required: true
+        type: choice
+        options:
+          - relaymessenger
+          - relaymessenger-pipecat
+          - relaymessenger-livekit
 
 permissions:
   contents: read
@@ -35,12 +50,16 @@ concurrency:
 
 jobs:
   build:
-    name: Test and build relaymessenger
+    name: Test and build ${{ matrix.package }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.package) || '["relaymessenger","relaymessenger-pipecat","relaymessenger-livekit"]') }}
     defaults:
       run:
-        working-directory: python/relaymessenger
+        working-directory: python/${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -49,7 +68,7 @@ jobs:
         with:
           version: 0.12.8
           enable-cache: false
-      # The same checks as ci.yml's python-sdk job, on the commit being released.
+      # The same checks as ci.yml's python jobs, on the commit being released.
       - run: uv sync --locked --python 3.12
       - run: uv run --locked mypy
       - run: uv run --locked pytest -q
@@ -60,12 +79,12 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         name: Store the distribution packages
         with:
-          name: python-package-distributions
-          path: python/relaymessenger/dist/
+          name: python-package-distributions-${{ matrix.package }}
+          path: python/${{ matrix.package }}/dist/
           if-no-files-found: error
 
   publish-to-pypi:
-    name: Publish relaymessenger to PyPI
+    name: Publish ${{ inputs.package }} to PyPI
     if: >-
       github.repository == 'RelayMessenger/Relay-SDK' &&
       github.event_name == 'workflow_dispatch' &&
@@ -76,14 +95,28 @@ jobs:
     timeout-minutes: 10
     environment:
       name: pypi
-      url: https://pypi.org/p/relaymessenger
+      url: https://pypi.org/p/${{ inputs.package }}
     permissions:
-      id-token: write # mandatory for Trusted Publishing
+      id-token: write # the OIDC token Infisical exchanges for the PyPI token
     steps:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         name: Download all the dists
         with:
-          name: python-package-distributions
+          name: python-package-distributions-${{ inputs.package }}
           path: dist/
+      - uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+        name: Load the PyPI API token from Infisical
+        with:
+          method: oidc
+          identity-id: 35c5afed-649f-4b2d-8e73-cf70338b3994
+          project-slug: relay-yscy
+          env-slug: prod
+          secret-path: /ci/pypi
+      - name: Refuse to publish without a token
+        run: test -n "$PYPI_API_TOKEN"
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1 (v1.14.2)
         name: Publish the distribution packages to PyPI
+        with:
+          password: ${{ env.PYPI_API_TOKEN }}
+          attestations: false
+          print-hash: true

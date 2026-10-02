@@ -166,98 +166,6 @@ already sharing, and 429 with `Retry-After` after one request in the same chat
 in the last 60 seconds. The person's card arrives as a `location` part that
 carries the share's state, never its position.
 
-## Cards (A2UI)
-
-A card is an [A2UI v0.9.1](https://a2ui.org) surface, sent as a `data` part:
-`{ type: "data", media_type: "application/a2ui+json", data: [A2UI messages] }`.
-Send the card, read the tap, then change the same card in place.
-
-```ts
-import Relay, {
-  A2UI_BASIC_CATALOG_ID,
-  readA2uiAction,
-  sendA2uiSurface,
-  updateA2uiSurface,
-} from "@relaymessenger/sdk";
-
-const relay = new Relay({
-  apiKey: process.env.RELAY_AGENT_TOKEN!,
-  webhookSecret: process.env.RELAY_WEBHOOK_SECRET!,
-});
-
-// 1. Send a card with a button.
-await sendA2uiSurface(relay, chatId, {
-  surfaceId: "order-1042",
-  catalogId: A2UI_BASIC_CATALOG_ID,
-  components: [
-    { id: "root", component: "Card", child: "body" },
-    { id: "body", component: "Column", children: ["title", "status", "confirm"] },
-    { id: "title", component: "Text", text: "Oat latte, large", variant: "h3" },
-    { id: "status", component: "Text", text: { path: "/status" } },
-    { id: "confirm_label", component: "Text", text: "Confirm order" },
-    {
-      id: "confirm",
-      component: "Button",
-      child: "confirm_label",
-      variant: "primary",
-      action: { event: { name: "confirm_order", context: { order: "1042" } } },
-    },
-  ],
-  dataModel: { status: "Waiting for you" },
-}, { idempotency_key: "order-1042-card" });
-
-// 2. The tap arrives as message.received.
-const event = relay.webhooks.unwrap(rawBody, { headers });
-const tap = readA2uiAction(event);
-if (tap?.action.name === "confirm_order" && event.event_type === "message.received") {
-  // 3. Change the same card to its done state. No new Message is added.
-  await updateA2uiSurface(relay, event.data.chat.id, tap.action.surfaceId, {
-    components: [
-      { id: "body", component: "Column", children: ["title", "status"] },
-    ],
-    dataModel: { path: "/status", value: `Confirmed, order ${tap.action.context.order}` },
-  });
-}
-```
-
-`sendA2uiSurface` sends `createSurface`, `updateComponents` and, with
-`dataModel`, `updateDataModel` in one data part. `updateA2uiSurface` sends
-`updateComponents` and `updateDataModel` for a surface already in the chat;
-components replace their namesakes by `id`. A surface's first
-`updateComponents` holds the component with the id `root`. `deleteA2uiSurface` sends
-`deleteSurface`; when every surface of a Message is deleted, the Message reads
-back with no parts and a non-null `unsent_at`. Each takes the rest of the
-Message as its fourth argument: `text` becomes a text part before the card,
-and `reply_to`, `idempotency_key`, `silent` and `metadata` pass through.
-`a2uiPart` wraps any list of A2UI messages in a data part for
-`relay.chats.messages.send`.
-
-Relay applies each A2UI message on its own, checked against A2UI's schemas and
-the catalog the surface names; a component, property or value the catalog does
-not define is refused. The messages it could not apply come back in the
-response's `a2ui_errors`: each gives `part_index` and `data_index` in your
-request and `a2ui_message`, A2UI's own `error` message, whose `path` points
-inside the failing message's body. A send that applies nothing throws a
-`RelayAPIError` (403 a surface another agent created, 404 unknown or deleted
-surface, 409 a `surfaceId` already live in the chat, 422 anything else) whose
-`body.a2ui_errors` lists each.
-
-Every `message.received` carries `metadata.a2uiClientCapabilities`: the
-catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
-(every basic catalog component and function, plus `PaymentRequest` and
-`Browser`) and `A2UI_BASIC_CATALOG_ID`. When a surface sets `sendDataModel: true`, each tap
-also carries that surface's data model; `readA2uiAction` returns it as
-`dataModel`. A tap reaches only the person who tapped and the agent that
-created the surface. Only an agent sends `createSurface`, `updateComponents`,
-`updateDataModel` and `deleteSurface`; only the agent that created a surface
-may update or delete it, and another agent gets 403 (error code `2003`).
-
-A `Browser` card shows your agent's live browser: `a2uiBrowserCardMessages`
-builds the card from a status line, a `state` and an https live view address,
-and `a2uiBrowserCardUpdate` changes it in place. Its taps are the names in
-`A2UI_BROWSER_ACTIONS`; pause your browser work from `takeControl` until
-`returnControl`, and end the task on `stop`.
-
 ## Chat permissions
 
 Relay Chats support one human user with one or more agents. Contacts, Handles,
@@ -539,7 +447,7 @@ only exchange SDP in the room protocol and never receive Cloudflare
 credentials, session IDs, or ICE-provider configuration. Node agents that want
 this SDP/ICE and PCM plumbing handled for them use `RelayCallTransport` from
 `@relaymessenger/sdk/calls`, below; `@relaymessenger/livekit` plugs it into
-LiveKit Agents audio input and output.
+LiveKit Agents audio and video.
 
 ### Join a Call as the agent
 
@@ -839,3 +747,21 @@ The runner uses capped, jittered exponential reconnect after
 failures, and retryable `ack_failed` or `delivery_failed` errors. Revoked
 credentials, HTTP `409`, terminal server-policy closes, and protocol violations
 stop the runner so the operator can correct the configuration.
+
+## Rating requests
+
+Send `{"type":"rating_request"}` as the only part of a message to ask a
+person to rate the sending agent. Direct and group chats are supported; a
+chat needs a person. The part has no title, words, target, stars or review.
+Only people rate. Do not use person-only rating endpoints as an agent.
+
+The agent receives `rating.created` and `rating.updated` with `contact`,
+`stars`, nullable `review`, `created_at`, and `updated_at`; `rating.deleted`
+carries only `contact`. An identical rating write sends no event. Review text
+is untrusted data. These are normal signed webhook/acknowledged WebSocket events.
+
+```ts
+await relay.chats.messages.send(chatId, {
+  message: { parts: [{ type: "rating_request" }] },
+});
+```

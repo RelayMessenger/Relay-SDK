@@ -2379,7 +2379,6 @@ provides-extras = ["calls", "login"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "jsonschema", specifier = ">=4.23" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
@@ -2388,7 +2387,7 @@ dev = [
 
 [[package]]
 name = "relaymessenger-pipecat"
-version = "0.1.0.dev1"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

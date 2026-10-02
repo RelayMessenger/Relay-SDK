@@ -773,6 +773,10 @@ export class RelayAdapter
     replyToMessageId?: string,
   ): Promise<RawMessage<RelayRawMessage>> {
     if (replyToMessageId) assertRelayUuid(replyToMessageId, "messageId");
+    const rating = parts.find((part) => part.type === "rating_request");
+    if (rating && (parts.length !== 1 || Object.keys(rating).some((key) => key !== "type"))) {
+      throw new ValidationError("relay", "A rating_request is the whole Message and accepts only type.");
+    }
     return this.send(threadId, { raw: "" }, replyToMessageId, parts);
   }
 
@@ -1376,6 +1380,12 @@ export class RelayAdapter
       // GET /v1/chats/{chatId}/location through the SDK client.
       case "location.sharing.started":
       case "location.sharing.stopped":
+        return;
+      // Rating notifications have no Chat SDK primitive. Native Relay SDK
+      // webhook/WebSocket handlers receive the original typed rating event.
+      case "rating.created":
+      case "rating.updated":
+      case "rating.deleted":
         return;
       default:
         return assertExhaustiveEvent(envelope.event_type);

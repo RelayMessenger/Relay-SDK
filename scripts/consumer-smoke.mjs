@@ -107,10 +107,16 @@ try {
     "timezone",
     // Server 468: a person's age range.
     "age_range",
+    // Server 475: a person's profile links.
+    "links",
+    // Server 479: a person's about.
+    "about",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
     "owner",
+    // Server 488: the agent's Rive file for calls.
+    "rive",
   ]);
   assert.deepEqual(interfaceFields("ChatActivity"), [
     "id", "text", "emoji", "updated_at", "expires_at",
@@ -127,12 +133,12 @@ try {
   assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
   assert.deepEqual(interfaceFields("DirectorySearchParams"), ["q", "category", "limit", "sort"]);
   assert.deepEqual(interfaceFields("DirectorySearchResponse"), ["agents"]);
-  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle"]);
+  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle", "user_id"]);
   for (const field of ["id", "subtitle", "url"]) assert.ok(interfaceFields("ContactCardItem").includes(field));
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
-    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
-    "can_message", "timezone", "age_range", "age_rating",
+    "name", "subtitle", "description", "category", "skills", "visibility", "rive", "creator",
+    "can_message", "timezone", "age_range", "links", "about", "age_rating",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);
@@ -143,10 +149,13 @@ try {
   assert.doesNotMatch(packedTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
+  assert.deepEqual(interfaceFields("RatingRequestPart"), ["type"]);
+  assert.ok(interfaceFields("RatingRequestPartResponse").includes("rating"));
+  assert.deepEqual(interfaceFields("RatingEvent"), ["contact", "stars", "review", "created_at", "updated_at"]);
+  assert.deepEqual(interfaceFields("RatingDeletedEvent"), ["contact"]);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
     "reply_to",
-    "metadata",
     "idempotency_key",
     "silent",
   ]);
@@ -168,7 +177,7 @@ try {
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
       assert.equal(RELAY_V1_OPERATIONS.length, 57);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 27);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",

@@ -27,7 +27,10 @@ const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 const candidate = candidateTarball({
   name: "@relaymessenger/sdk",
   version: packageJson.dependencies["@relaymessenger/sdk"],
-  variable: "RELAY_SDK_CANDIDATE_TARBALL",
+  // CI scopes its SDK candidate to the plugin checks; the shared name still works by hand.
+  variable: process.env.RELAY_OPENCLAW_SDK_CANDIDATE_TARBALL === undefined
+    ? "RELAY_SDK_CANDIDATE_TARBALL"
+    : "RELAY_OPENCLAW_SDK_CANDIDATE_TARBALL",
 });
 // realpathSync.native expands Windows 8.3 short names (C:\Users\RUNNER~1), as
 // OpenClaw does when it matches the installed package to its install record;

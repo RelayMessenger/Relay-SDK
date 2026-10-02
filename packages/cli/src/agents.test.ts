@@ -237,3 +237,11 @@ it("reports an expired Console sign-in on deletion without changing the saved ag
   expect(saved().profiles).toEqual(config.profiles);
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+describe("a contact card's Handle", () => {
+  it("refuses a card whose Handle is empty, as a deleted person's shared card reads, and passes any other through", async () => {
+    const { cardHandle } = await import("./agents.js");
+    expect(() => cardHandle({ handle: "" })).toThrow("This contact card has no Handle.");
+    expect(cardHandle({ handle: "echo" })).toBe("echo");
+  });
+});

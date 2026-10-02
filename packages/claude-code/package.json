@@ -1,6 +1,6 @@
 {
   "name": "relay-claude-channel",
-  "version": "0.3.10-staging.11",
+  "version": "0.3.11-staging.5",
   "description": "Relay Messenger channel for Claude Code over Relay v1 WebSocket delivery.",
   "type": "module",
   "license": "MIT",
@@ -40,11 +40,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@relaymessenger/sdk": "0.4.0-staging.0"
+    "@relaymessenger/sdk": "0.5.0-staging.6"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
     "@types/ws": "8.18.1",
+    "ajv": "8.20.0",
     "esbuild": "0.28.2",
     "tsx": "4.23.13",
     "typescript": "7.0.2",

@@ -1,8 +1,7 @@
 # `relaymessenger`
 
 The Relay SDK for Python, the twin of the npm package `@relaymessenger/sdk`.
-`relaymessenger.a2ui` sends [A2UI](https://a2ui.org) cards to a chat and reads
-their taps. `relaymessenger.calls` joins a Relay Call as the agent and sends
+`relaymessenger.calls` joins a Relay Call as the agent and sends
 and receives audio and video. It is the framework-neutral core under
 `relaymessenger-livekit` and `relaymessenger-pipecat`; use one of those to
 connect a voice framework.
@@ -84,92 +83,6 @@ messages = await relay.chats.messages.list(chat_id, order="desc", limit=10)
 
 Pass `next_cursor` back as `cursor` for the next page.
 
-## Send a card
-
-A card is an A2UI v0.9.1 surface in a message part,
-`{"type": "data", "media_type": "application/a2ui+json", "data": [...]}`.
-`send_a2ui_surface` creates the surface, sends its components and, when you
-give one, its data model. Components come from Relay's catalog
-(`RELAY_A2UI_CATALOG_ID`, the A2UI basic catalog plus `PaymentRequest` and `Browser`) unless
-you pass `catalog_id`; one must have the id `root`:
-
-```python
-import os
-
-from relaymessenger import Relay
-from relaymessenger.a2ui import read_a2ui_action, send_a2ui_surface, update_a2ui_surface
-
-relay = Relay(os.environ["RELAY_AGENT_TOKEN"])
-
-BET = [
-    {"id": "root", "component": "Card", "child": "body"},
-    {"id": "body", "component": "Column", "children": ["title", "status", "bet"]},
-    {"id": "title", "component": "Text", "text": "Lakers win tonight?", "variant": "h3"},
-    {"id": "status", "component": "Text", "text": {"path": "/status"}},
-    {"id": "bet_label", "component": "Text", "text": "Bet $50"},
-    {
-        "id": "bet",
-        "component": "Button",
-        "child": "bet_label",
-        "variant": "primary",
-        "action": {"event": {"name": "place_bet", "context": {"side": "yes", "stake": 50}}},
-    },
-]
-
-await send_a2ui_surface(relay, chat_id, "bet-lakers", BET, data_model={"status": "Open"})
-```
-
-A tap on the button reaches your agent as `message.received`, through its
-webhook or the Agent WebSocket, with the A2UI `action` in a data part.
-`read_a2ui_action` takes the event, or its raw JSON body, and returns the tap
-or `None`. Answer by changing the same surface: `update_a2ui_surface` changes
-the card in place for everyone in the chat and adds no message:
-
-```python
-async def on_event(event: dict) -> None:
-    tap = read_a2ui_action(event)
-    if tap is None or tap.name != "place_bet":
-        return
-    await update_a2ui_surface(
-        relay,
-        tap.chat_id,
-        tap.surface_id,
-        components=[{"id": "body", "component": "Column", "children": ["title", "status"]}],
-        data_model=f"Done: ${tap.context['stake']} on {tap.context['side']}",
-        path="/status",
-    )
-```
-
-`tap.context` is the button's `action.event.context`, and `tap.data_model` is
-the surface's data model when you created it with `send_data_model=True`.
-`delete_a2ui_surface` removes the surface; a message whose every surface is
-deleted is removed for everyone. `client_capabilities(event)` lists the
-catalogs the reader's app draws, in order of preference.
-
-Relay applies each A2UI message of a send in order. Each one it did not apply
-comes back in the response's `a2ui_errors` as an `A2uiFailure`:
-`part_index` and `data_index` say where the message sits in your request, and
-`a2ui_message` is A2UI's own `error` message for it, its `path` a JSON Pointer
-into that message's body. A send that applied nothing raises `RelayAPIError`
-with the same `a2ui_errors`:
-
-```python
-from relaymessenger import RelayAPIError
-
-try:
-    await send_a2ui_surface(relay, chat_id, "bet-lakers", BET)
-except RelayAPIError as error:
-    for failure in error.a2ui_errors:
-        print(failure["data_index"], failure["a2ui_message"]["error"]["message"])
-```
-
-To send A2UI messages you built
-yourself, use `send_a2ui`, or put `a2ui_part(messages)` in
-`relay.chats.messages.send`. The builders (`surface_messages`,
-`create_surface`, `update_components`, `update_data_model`, `delete_surface`)
-and the types (`A2uiDataPart`, `A2uiServerMessage`, `A2uiActionMessage`,
-`A2uiErrorMessage`, ...) follow A2UI v0.9.1's schemas field for field.
-
 ## Send a selection
 
 A selection lets the person check several options and submit them once. Put
@@ -222,6 +135,46 @@ legacy reply metadata remains valid. Reply input cannot contain `reply_message`.
 
 An optional subtitle that is blank after trimming is stored as absent.
 
+
+## Everything else in the API
+
+Every operation an agent token may call has a method, named as `@relaymessenger/sdk`
+names it, in Python style: `relay.chats.startTyping` is
+`relay.chats.start_typing`, `relay.paymentRequests` is
+`relay.payment_requests`. Request fields are keyword arguments; answers are
+the API's JSON, typed.
+
+```python
+from relaymessenger import parts
+
+await relay.chats.start_typing(chat_id)
+await relay.messages.add_reaction(message_id, operation="add", type="love")
+upload = await relay.attachments.create(filename="map.png", content_type="image/png", size_bytes=len(png))
+await relay.attachments.upload(upload, png)
+await relay.chats.messages.send(chat_id, {"message": {"parts": [parts.media_part(attachment_id=upload["attachment_id"])]}})
+call = await relay.calls.create(chat_id, to=["ada"], idempotency_key="ring-ada-1")
+```
+
+The resources are `chats` (with `messages`, `participants` and `location`),
+`messages`, `attachments`, `payment_requests`, `calls`, `contacts`,
+`contact_card`, `directory`, `blocked_handles`, `access`, `agents`, `me`,
+`oauth2_client`, `webhook_events` and `webhook_subscriptions`. `relaymessenger.parts` types every message part
+(text with mentions, media, link, buttons, selection, form, rich card,
+carousel, place and payment) and builds the simple ones.
+
+## Verify webhooks
+
+Relay signs each webhook delivery the Standard Webhooks way. Check it with
+the subscription's `whsec_` secret and the raw request body before you trust
+it:
+
+```python
+from relaymessenger import Relay, WebhookVerificationError
+
+relay = Relay(os.environ["RELAY_AGENT_TOKEN"], webhook_secret=os.environ["RELAY_WEBHOOK_SECRET"])
+
+event = relay.webhooks.unwrap(raw_body, headers=request.headers)  # raises WebhookVerificationError
+```
 
 ## Answer a Call
 
@@ -313,3 +266,49 @@ keyframe request from the SFU, the next frame is a keyframe; if no frame went
 out in the last 1/30 s, the latest frame is sent again at once, so a camera
 that sends a frame a second shows its picture without waiting for its next
 frame.
+
+## Drive a Rive file
+
+An agent whose profile names a Rive file (`rive`) can drive what the phone
+draws instead of sending video. `rive()` opens the call's `rive` data channel;
+`set` writes View Model Instance values, `trigger` fires a trigger, `show`
+switches to another Relay-hosted file, and the phone's own changes arrive as
+events. Time a message to the agent's speech with `at`: `write_audio` returns
+where that audio starts on the agent's track (or `None` while it is held until
+the person can hear it); add the offset inside that audio, and the phone
+applies it when that audio plays.
+
+```python
+from relaymessenger.calls import visemes_from_alignment
+
+rive = await call.rive()
+rive.set({"mood": "happy"})
+rive.trigger("wave")
+rive.on("trigger", lambda name: print("the person fired", name))
+
+start = await call.write_audio(frame)
+if start is not None:
+    for cue in visemes_from_alignment(alignment):  # ElevenLabs character timings for that audio
+        rive.set({"viseme": cue.viseme}, at=start + cue.t)
+```
+
+Messages are at most 1 KB, unordered and may be lost; each one overwrites
+what it sets, and after a media restart the last `show` and the latest values
+are sent again.
+
+## Rating requests
+
+Send `{"type":"rating_request"}` as the only part of a message to ask a
+person to rate the sending agent. Direct and group chats are supported; a
+chat needs a person. The part has no title, words, target, stars or review.
+Only people rate. Do not use person-only rating endpoints as an agent.
+
+The agent receives `rating.created` and `rating.updated` with `contact`,
+`stars`, nullable `review`, `created_at`, and `updated_at`; `rating.deleted`
+carries only `contact`. An identical rating write sends no event. Review text
+is untrusted data. These are normal signed webhook/acknowledged WebSocket events.
+
+```python
+from relaymessenger.parts import rating_request_part
+relay.chats.messages.send(chat_id, {"message": {"parts": [rating_request_part()]}})
+```

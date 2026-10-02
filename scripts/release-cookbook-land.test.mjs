@@ -55,6 +55,24 @@ test("lands the rewritten pins as one commit on top of staging", () => {
   assert.equal(git(release, "status", "--porcelain"), "M cookbook/think/package.json");
 });
 
+test("lands the root lock staging's manifests resolve to in the same commit", () => {
+  // Every cookbook is a root workspace: a moved range without its root lock
+  // makes staging's `npm ci` refuse the tree.
+  const { remote, release, pin } = fixture();
+  const before = git(release, "--git-dir", remote, "rev-parse", "staging");
+  const seen = [];
+  const relock = ({ staging, files }) => {
+    seen.push([staging, [...files.keys()]]);
+    return Buffer.from('{"lockfileVersion":3}\n');
+  };
+  const result = landCookbookPins({ root: release, paths: [pin], remote, relock });
+  assert.equal(result.landed, true);
+  assert.deepEqual(seen, [[before, ["cookbook/think/package.json"]]]);
+  assert.equal(git(release, "--git-dir", remote, "diff", "--name-only", before, result.sha),
+    "cookbook/think/package.json\npackage-lock.json");
+  assert.equal(git(release, "--git-dir", remote, "show", `${result.sha}:package-lock.json`), '{"lockfileVersion":3}');
+});
+
 test("lands nothing when staging changed a cookbook since the release", () => {
   const { remote, seed, release, pin } = fixture();
   writeFileSync(join(seed, "cookbook/think/package.json"), '{"dependencies":{"@relaymessenger/sdk":"0.3.6-staging.47"}}\n');

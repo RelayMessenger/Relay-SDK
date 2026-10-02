@@ -21,7 +21,7 @@ same way you would with Pipecat's LiveKit transport:
 ```python
 import os
 
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.workers.runner import WorkerRunner
@@ -34,12 +34,15 @@ async def answer(call_id: str) -> None:
         call_id=call_id,
         params=RelayParams(audio_in_enabled=True, audio_out_enabled=True),
     )
-    # stt, llm and tts are your Pipecat services.
-    worker = PipelineWorker(Pipeline([transport.input(), stt, llm, tts, transport.output()]))
+    # stt, llm and tts are your Pipecat services; the aggregators hold the LLM context.
+    worker = PipelineWorker(
+        Pipeline([transport.input(), stt, user_aggregator, llm, tts, transport.output(), assistant_aggregator]),
+        cancel_on_idle_timeout=False,  # a quiet call is still a call
+    )
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant_id):
-        await worker.queue_frame(TTSSpeakFrame("Hello! How can I help?"))
+        await worker.queue_frames([LLMRunFrame()])  # the model speaks first, in its own words
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant_id, reason):
@@ -75,6 +78,40 @@ a moving test pattern:
 ```sh
 RELAY_AGENT_TOKEN=... uv run examples/echo_bot.py
 ```
+
+## A talking avatar
+
+`examples/simli_avatar_bot.py` is Pipecat's own Simli example on a Relay
+Call: Deepgram, OpenAI and Cartesia make the voice, and Pipecat's
+`SimliVideoService` turns it into the frames of a talking face, which
+`RelayTransport` sends as the agent's camera.
+
+```sh
+uv run --with 'pipecat-ai[simli,deepgram,cartesia,openai,silero]' examples/simli_avatar_bot.py
+```
+
+## Drive a Rive file
+
+Instead of sending video, the agent can have the phone draw its own Rive file
+(the `rive` on its profile) and drive it live. Put `RelayRiveProcessor` right
+after the TTS service: TTS word timestamps become a `viseme` number (Preston
+Blair's ten mouths, 0 rest to 9 WQ) and the bot speaking frames a `speaking`
+boolean on the file's View Model, each timed against the agent's audio so
+the mouth moves when the words are heard.
+
+```python
+from relaymessenger_pipecat import RelayRiveProcessor
+
+pipeline = Pipeline([transport.input(), stt, user_aggregator, llm, tts, RelayRiveProcessor(transport), transport.output(), assistant_aggregator])
+```
+
+Rename the properties with `viseme_property=` and `speaking_property=`, or pass
+`None` to leave one alone. For anything else (a score, a mood, another
+file), use the channel directly: `rive = await transport.call.rive()`, then
+`rive.set(...)`, `rive.trigger(...)`, `rive.show(...)`, and
+`rive.on("view_model" | "trigger", ...)` for what the person does in the file.
+`examples/rive_bot.py` is the Simli example with the processor in place of
+the video service.
 
 ## Use your own TURN servers
 

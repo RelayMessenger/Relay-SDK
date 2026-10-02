@@ -1,4 +1,6 @@
 import type { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
+import type { FormPart, FormPartResponse, FormResponsePart, FormResponsePartResponse } from "./form-types.js";
+export type * from "./form-types.js";
 
 export type UUID = string;
 
@@ -13,6 +15,8 @@ export interface CallContact {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /** Agents only: the Rive file it shows in its calls, so the app can load it while the call rings; null when none. */
+  rive?: RiveFile | null;
   /**
    * People only: the person's IANA time zone name ("America/Detroit"), as their
    * Relay app last reported it; null until it reports one. When the person
@@ -28,6 +32,17 @@ export interface CallContact {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type CallTerminalStatus =
@@ -74,8 +89,11 @@ export interface CallResponse {
   call: Call;
 }
 
-/** A participant's published local track, named on the SFU. */
-export type CallRoomTrackName = "audio" | "video";
+/**
+ * A participant's published local track, named on the SFU. `rive` is the
+ * agent's data channel that drives the Rive file the phone draws.
+ */
+export type CallRoomTrackName = "audio" | "video" | "rive";
 
 export interface CallRoomParticipant {
   contact_id: UUID;
@@ -135,8 +153,18 @@ export interface CallRoomHeartbeatFrame {
   type: "heartbeat";
 }
 
+/**
+ * Contract `CallRoomRiveFrame`. An agent publishes its `rive` data channel; a
+ * person receives the agent's. Sent again while the channel is open, Relay
+ * repeats its `id`.
+ */
+export interface CallRoomRiveFrame {
+  type: "rive";
+}
+
 export type CallRoomClientFrame =
   | CallRoomJoinFrame
+  | CallRoomRiveFrame
   | CallRoomPublishOfferFrame
   | CallRoomAnswerFrame
   | CallRoomConnectedFrame
@@ -160,6 +188,18 @@ export interface CallRoomSubscriptionOfferFrame {
   session_description: { type: "offer"; sdp: string };
   /** The other participant's track this renegotiation pulls. */
   track: CallRoomTrackName;
+}
+
+/**
+ * Contract `CallRoomRiveChannelFrame`: the `rive` channel is open on this
+ * participant's Session. Open it with `createDataChannel("rive", {
+ * negotiated: true, id, ordered: false, maxRetransmits: 0 })`. After a restart
+ * onto a new Session, Relay opens it again with a new `id`.
+ */
+export interface CallRoomRiveChannelFrame {
+  type: "rive";
+  /** The negotiated SCTP stream id Cloudflare returned. */
+  id: number;
 }
 
 export interface CallRoomEndedFrame {
@@ -200,6 +240,7 @@ export type CallRoomServerFrame =
   | CallRoomStateFrame
   | CallRoomServerAnswerFrame
   | CallRoomSubscriptionOfferFrame
+  | CallRoomRiveChannelFrame
   | CallRoomEndedFrame
   | CallRoomErrorFrame;
 
@@ -451,6 +492,17 @@ export interface UserChatHandle extends ChatHandleBase {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -483,12 +535,26 @@ export type HandleOwner =
      * ask anyone their age.
      */
     age_range?: AgeRange | null;
+    /**
+     * The person's profile links: at most 5 absolute https URLs, in the order
+     * they chose, as Relay normalised them. Empty when they set none. Relay
+     * sends no platform name; read the site from the URL. People only.
+     * Null when the person has no Relay account.
+     */
+    links?: string[] | null;
+    /**
+     * The person's about, as they wrote it in Relay: plain text, at most 160
+     * characters. Null when they wrote none. People only.
+     */
+    about?: string | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
   /** Who owns this agent. Null for an agent no organization or person owns. */
   owner?: HandleOwner | null;
+  /** The Rive file this agent shows in its calls, so an app can load it early; null when it has none. */
+  rive?: RiveFile | null;
 }
 
 export type ChatHandle = UserChatHandle | AgentChatHandle;
@@ -816,237 +882,17 @@ export interface PlacePartResponse extends PlacePart {
   reactions: Reaction[] | null;
 }
 
-/**
- * A2UI v0.9.1 (https://a2ui.org), the messages a card is made of. The shapes
- * are A2UI's own JSON schemas (`specification/v0_9_1/json/*.json` in
- * google/A2UI): `server_to_client.json` for what an agent sends to draw a
- * card, `client_to_server.json` for a tap (`action`) and an `error`. The
- * version enum is A2UI's (`v0.9` or `v0.9.1`); Relay's contract names v0.9.1.
- */
-export type A2uiVersion = "v0.9" | "v0.9.1";
-
-/**
- * One component of a surface: `id`, the catalog's `component` name, and that
- * component's own properties, for example
- * `{ id: "title", component: "Text", text: "Lakers win tonight?" }`. The
- * catalog named by `createSurface.catalogId` defines them: Relay refuses a
- * component, property or value that catalog does not define.
- */
-export interface A2uiComponent {
-  id: string;
-  component: string;
-  [property: string]: unknown;
+/** Agent-only request to rate the sending agent. Whole Message; the chat needs a person. */
+export interface RatingRequestPart {
+  type: "rating_request";
 }
 
-/** An A2UI data binding whose `path` is an absolute JSON Pointer into the surface's data model. */
-export type A2uiAbsoluteBinding = {
-  path: `/${string}`;
-};
-
-/** A Browser card's state: `needs_you` turns it orange; `done` and `failed` shrink it to one row. */
-export type A2uiBrowserState = "working" | "needs_you" | "done" | "failed";
-
-/**
- * Relay's `Browser` component (`A2uiBrowserComponent` in the contract), in
- * Relay's catalog only: your agent's live browser, drawn as Relay's Browser
- * card with the title "Browser", the `status` line, the still in `imageUrl`,
- * and "Open browser", which opens `watchUrl` read-only. With `controlUrl` the
- * person can take control. Every URL is https; `status` is 1 to 80
- * characters. Each may instead be bound to the data model.
- */
-export type A2uiBrowserComponent = {
-  id: string;
-  component: "Browser";
-  status: string | A2uiAbsoluteBinding;
-  state: A2uiBrowserState;
-  watchUrl: string | A2uiAbsoluteBinding;
-  controlUrl?: string | A2uiAbsoluteBinding;
-  imageUrl?: string | A2uiAbsoluteBinding;
-  accessibility?: { label?: unknown; description?: unknown };
-  weight?: number;
-};
-
-/** The `name` of a tap on a Browser card (`A2uiBrowserActionName` in the contract). */
-export type A2uiBrowserActionName = "browser.takeControl" | "browser.returnControl" | "browser.stop";
-
-/** A2UI `createSurface`: starts a surface drawn by the Message that carries it. */
-export interface A2uiCreateSurfaceMessage {
-  version: A2uiVersion;
-  createSurface: {
-    surfaceId: string;
-    /** A catalog Relay draws; see `A2uiClientCapabilities`. */
-    catalogId: string;
-    /** Theme values the catalog defines, for example `{ primaryColor: "#FF0000" }`. */
-    theme?: Record<string, unknown>;
-    /** When true, every tap on the surface carries the surface's data model in `metadata.a2uiClientDataModel`. */
-    sendDataModel?: boolean;
-  };
-}
-
-/** A2UI `updateComponents`: adds or replaces components by `id`. A surface's first update holds the component with the id `root`. */
-export interface A2uiUpdateComponentsMessage {
-  version: A2uiVersion;
-  updateComponents: {
-    surfaceId: string;
-    components: A2uiComponent[];
-  };
-}
-
-/**
- * A2UI `updateDataModel`: replaces (or creates) the value at `path`, a JSON
- * Pointer; no `path`, or `/`, is the whole data model. No `value` removes the
- * key at `path`.
- */
-export interface A2uiUpdateDataModelMessage {
-  version: A2uiVersion;
-  updateDataModel: {
-    surfaceId: string;
-    path?: string;
-    value?: unknown;
-  };
-}
-
-/** A2UI `deleteSurface`: removes the surface for everyone. */
-export interface A2uiDeleteSurfaceMessage {
-  version: A2uiVersion;
-  deleteSurface: {
-    surfaceId: string;
-  };
-}
-
-/** What an agent sends to draw, change or remove a card (A2UI `server_to_client.json`). */
-export type A2uiServerToClientMessage =
-  | A2uiCreateSurfaceMessage
-  | A2uiUpdateComponentsMessage
-  | A2uiUpdateDataModelMessage
-  | A2uiDeleteSurfaceMessage;
-
-/** The body of an A2UI `action` message: a tap on a Button, or on a Browser card. */
-export interface A2uiAction {
-  /** The Button's `action.event.name`, or one of `A2uiBrowserActionName`. */
-  name: string;
-  surfaceId: string;
-  /** The `id` of the Button or Browser that was tapped. */
-  sourceComponentId: string;
-  /** ISO 8601 time of the tap. */
-  timestamp: string;
-  /** The Button's `action.event.context`, with every data binding resolved. */
-  context: Record<string, unknown>;
-}
-
-/** A2UI `action`: a person (or an agent) tapped a Button on a surface. */
-export interface A2uiActionMessage {
-  version: A2uiVersion;
-  action: A2uiAction;
-}
-
-/** A2UI's validation error: `path` is a JSON Pointer to the field that failed. */
-export interface A2uiValidationError {
-  code: "VALIDATION_FAILED";
-  surfaceId: string;
-  path: string;
-  message: string;
-}
-
-/** A2UI's generic error: any other `code`. */
-export interface A2uiGenericError {
-  code: string;
-  surfaceId: string;
-  message: string;
-  [property: string]: unknown;
-}
-
-/** A2UI `error`: a renderer (or an agent) reports that it could not use a message. */
-export interface A2uiErrorMessage {
-  version: A2uiVersion;
-  error: A2uiValidationError | A2uiGenericError;
-}
-
-/**
- * A2UI's `error` message in its validation format, as Relay writes it for a
- * message it did not apply. `surfaceId` is empty when the message named none;
- * `path` points inside the failing message's body, as in A2UI's own example
- * `/components/0/text`, and is empty when the whole message is at fault.
- */
-export interface A2uiValidationErrorMessage {
-  version: "v0.9.1";
-  error: A2uiValidationError;
-}
-
-/** One A2UI message of a send that Relay did not apply, where it sits in the request, and A2UI's `error` message for it. */
-export interface A2uiFailure {
-  /** The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`. */
-  part_index: number | null;
-  /** The message's index in that part's `data`; null when the part itself, or the metadata, is at fault. */
-  data_index: number | null;
-  a2ui_message: A2uiValidationErrorMessage;
-}
-
-/** What a renderer sends back (A2UI `client_to_server.json`). */
-export type A2uiClientToServerMessage = A2uiActionMessage | A2uiErrorMessage;
-
-/** Any A2UI v0.9.1 message a data part may carry. */
-export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
-
-/**
- * A data part holding A2UI v0.9.1 messages, in order. A Message may carry any number of data parts beside its
- * other parts. Relay applies each A2UI message on its own, checked against
- * A2UI's schemas and the surface's catalog: the ones that fail come back in
- * the response's `a2ui_errors`, and a send that applies nothing is refused
- * (403, 404, 409 or 422) with `a2ui_errors` in the error body. Only an agent
- * sends `createSurface`, and only the agent that created a surface sends its
- * `updateComponents`, `updateDataModel` and `deleteSurface`;
- * a send that only changes an earlier card adds no Message and returns that
- * card. An `action` or `error` reaches only its sender and the agent that
- * created the surface it names.
- */
-export interface DataPart {
-  type: "data";
-  media_type: "application/a2ui+json";
-  data: A2uiMessage[];
-}
-
-/**
- * A data part as a reader receives it: the `action` and `error` messages it
- * carried, as sent, when the reader sent them or created the surface they
- * name; then, for each surface it created, every A2UI message accepted for
- * that surface since, in order. Replay the list to draw the card.
- */
-export interface DataPartResponse extends DataPart {
+export interface RatingRequestPartResponse extends RatingRequestPart {
+  /** "Enjoying <agent display name>?", the words a client that does not draw the card shows in its place. */
+  value: string;
+  /** Only this reader's rating, never another person's. */
+  rating: { stars: 1 | 2 | 3 | 4 | 5; review: string | null } | null;
   reactions: Reaction[] | null;
-}
-
-/** A2UI's `a2uiClientDataModel` (`client_data_model.json`): each surface's data model, by surface id. */
-export interface A2uiClientDataModel {
-  version: A2uiVersion;
-  surfaces: Record<string, Record<string, unknown>>;
-}
-
-/**
- * A2UI's `a2uiClientCapabilities` (`client_capabilities.json`, keyed by the
- * protocol family `v0.9`): the catalogs Relay's app draws, in order of
- * preference. Relay's catalog (`RELAY_A2UI_CATALOG_ID`) is every basic catalog
- * component and function plus `PaymentRequest`.
- */
-export interface A2uiClientCapabilities {
-  "v0.9": {
-    supportedCatalogIds: string[];
-    inlineCatalogs?: Array<Record<string, unknown>>;
-  };
-}
-
-/**
- * Message metadata. A tap on a surface that set `sendDataModel` carries
- * `a2uiClientDataModel`. Each surface's data model reaches only the sender and
- * the agent that created that surface, unchanged.
- */
-export interface MessageMetadata {
-  a2uiClientDataModel?: A2uiClientDataModel;
-}
-
-/** The metadata on every `message.received`: the reader's A2UI catalogs, and the sender's data model for the surfaces this agent created, when it sent one. */
-export interface MessageReceivedMetadata extends MessageMetadata {
-  a2uiClientCapabilities: A2uiClientCapabilities;
 }
 
 export type MessagePart =
@@ -1059,8 +905,10 @@ export type MessagePart =
   | RichCardPart
   | CarouselPart
   | SuggestionResponsePart
+  | FormPart
+  | FormResponsePart
   | PaymentPart
-  | DataPart
+  | RatingRequestPart
   | PlacePart;
 
 export interface TextPartResponse extends TextPart {
@@ -1117,6 +965,17 @@ export interface SystemEventParty {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -1179,9 +1038,11 @@ export type MessagePartResponse =
   | RichCardPartResponse
   | CarouselPartResponse
   | SuggestionResponsePartResponse
+  | FormPartResponse
+  | FormResponsePartResponse
+  | RatingRequestPartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
-  | DataPartResponse
   | LocationRequestPartResponse
   | LocationPartResponse
   | PlacePartResponse
@@ -1198,11 +1059,6 @@ export interface ReplyTo {
 export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
-  /**
-   * Message metadata. A tap (an A2UI `action`) on a surface that set
-   * `sendDataModel` must carry `a2uiClientDataModel`.
-   */
-  metadata?: MessageMetadata;
   idempotency_key?: string;
   /**
    * Send the Message with no banner and no sound on the recipient's device.
@@ -1232,14 +1088,15 @@ export interface SentMessage {
     | RichCardPartResponse
     | CarouselPartResponse
     | SuggestionResponsePartResponse
+    | FormPartResponse
+    | FormResponsePartResponse
+    | RatingRequestPartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
-    | DataPartResponse
-    | LocationRequestPartResponse
+      | LocationRequestPartResponse
     | LocationPartResponse
     | PlacePartResponse
   >;
-  metadata?: MessageMetadata;
   created_at: string;
   sent_at: string | null;
   delivered_at?: string | null;
@@ -1261,7 +1118,6 @@ export interface Message {
   from_handle?: ChatHandle | null;
   parts?: MessagePartResponse[] | null;
   reply_to?: ReplyTo | null;
-  metadata?: MessageMetadata;
   is_system_message: boolean;
   system_event?: SystemEvent | null;
   is_from_me: boolean;
@@ -1271,13 +1127,6 @@ export interface Message {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
-  /** When the Message was last edited, or null if it was never edited. */
-  edited_at?: string | null;
-  /**
-   * When the sender unsent the Message, or null. An unsent Message keeps its
-   * place in the transcript and carries no parts.
-   */
-  unsent_at?: string | null;
   /**
    * Whether the sender sent this Message silently, so the recipient's device
    * showed no banner and played no sound.
@@ -1317,18 +1166,16 @@ export interface ChatCreateParams {
 }
 
 export interface ChatCreateResponse {
-  /**
-   * The A2UI messages of the send that were not applied, each with its place
-   * in the request and A2UI's `error` message for it. The rest was applied.
-   */
-  a2ui_errors?: A2uiFailure[];
   chat: Pick<
     Chat,
     "id" | "display_name" | "is_group" | "handles"
   > & { message: SentMessage };
 }
 
-/** Omit handle to share the authenticated agent's own card. */
+/**
+ * Send handle to recommend an agent, user_id to share a person, or neither to
+ * share the authenticated agent's own card. Never both.
+ */
 export interface ChatShareContactCardParams {
   /**
    * The agent to recommend, trimmed and lowercased by the Server. It must be
@@ -1336,6 +1183,15 @@ export interface ChatShareContactCardParams {
    * the same 404 as an unknown handle.
    */
   handle?: string;
+  /**
+   * The person to share: their id as you see it in a chat
+   * (`system_event.actor.id` or the chat's handles). They must have sent a
+   * message in a chat with you and not blocked you, and the target chat needs
+   * an active person none of whom has blocked or been blocked by them;
+   * anything else is the same 404. Ask both people first. Their card is a
+   * snapshot: id, handle, name, photo, links and about.
+   */
+  user_id?: UUID;
 }
 
 export interface ChatShareContactCardOptions extends RequestOptions {
@@ -1386,11 +1242,6 @@ export interface MessageSendParams {
 }
 
 export interface MessageSendResponse {
-  /**
-   * The A2UI messages of the send that were not applied, each with its place
-   * in the request and A2UI's `error` message for it. The rest was applied.
-   */
-  a2ui_errors?: A2uiFailure[];
   chat_id: UUID;
   message: SentMessage;
 }
@@ -1402,11 +1253,6 @@ export interface MessageCreateParams {
 }
 
 export interface MessageCreateResponse {
-  /**
-   * The A2UI messages of the send that were not applied, each with its place
-   * in the request and A2UI's `error` message for it. The rest was applied.
-   */
-  a2ui_errors?: A2uiFailure[];
   from: string;
   chat_id: UUID;
   created_new_chat: boolean;
@@ -1707,6 +1553,8 @@ export interface ContactLookup {
   skills?: AgentSkill[];
   /** Whether the agent is listed in the directory. Agents only. */
   visibility?: AgentVisibility;
+  /** Agent-only call animation descriptor, when configured. */
+  rive?: RiveFile | null;
   /**
    * Who made the agent: its organization, by the name the organization gave
    * in the Relay Console. Null when the organization has not given a name.
@@ -1732,6 +1580,17 @@ export interface ContactLookup {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
   /** Who the agent is for: everyone, or only people whose age range is 18_plus. Agents only. */
   age_rating?: AgentAgeRating;
 }
@@ -1765,10 +1624,36 @@ export type ContactLookupResponse =
   | { contact: ContactLookup }
   | { contacts: ContactLookup[] };
 
+/**
+ * Contract `RiveFile`: the Rive file an agent shows in its calls (a
+ * character, a quiz, a game, a chart). The app draws `artboard`, runs
+ * `state_machine` and binds `view_model`; the agent drives it live with
+ * `transport.rive()` from `@relaymessenger/sdk/calls`. A null name means the
+ * file's default.
+ */
+export interface RiveFile {
+  /** The `.riv` Relay hosts, at a permanent address whose bytes never change. */
+  file: string;
+  artboard: string | null;
+  state_machine: string | null;
+  view_model: string | null;
+}
+
+/**
+ * Contract `RiveFileInput`: `attachment_id` for a new file (this agent's
+ * completed upload, a Rive file of at most 10 MB with every image and font
+ * embedded), or `file` with the address the card already holds to change only
+ * the names. The names you send replace all three; omitted or null means the
+ * file's default.
+ */
+export type RiveFileInput =
+  & { artboard?: string | null; state_machine?: string | null; view_model?: string | null }
+  & ({ attachment_id: UUID; file?: never } | { file: string; attachment_id?: never });
+
 export interface ContactCardItem {
   /**
-   * The shared agent's Contact id, only on a card shared by handle. Open the
-   * agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
+   * The shared Contact's id, only on a card shared by handle or user_id. Open
+   * an agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
    */
   id?: UUID;
   /** The shared agent's subtitle when it was shared, only on a card shared by handle. */
@@ -1780,6 +1665,7 @@ export interface ContactCardItem {
   url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
+  /** Empty ("") only on a shared person's card after they deleted their account. */
   handle: string;
   first_name: string;
   last_name: string | null;
@@ -1787,6 +1673,39 @@ export interface ContactCardItem {
   is_active: boolean;
   /** Whether Relay has verified this agent. Always false for a user. */
   is_verified?: boolean;
+  /**
+   * A shared person's profile links when the card was shared, only on a
+   * person's card. A person's card carries id, handle, name, photo, links and
+   * about, and nothing else.
+   */
+  links?: string[];
+  /**
+   * A shared person's about when the card was shared, at most 160
+   * characters, or null when they wrote none. Only on a person's card.
+   */
+  about?: string | null;
+  /** An agent's Rive file for calls, or null when it has none. Only on an agent's card. */
+  rive?: RiveFile | null;
+  kind: "user" | "agent";
+}
+
+/**
+ * What `POST` and `PATCH /v1/contact_card` return: the agent's own card, whose
+ * handle is never empty. (`GET /v1/contact_card` returns `ContactCardItem`, the
+ * contract's one schema for every card, shared ones included.)
+ */
+export interface SetContactCardResponse {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
+  first_name: string;
+  last_name: string | null;
+  image_url: string | null;
+  /** Dominant colour of the picture, six uppercase hex digits; null when Relay has none. */
+  image_color: string | null;
+  /** The agent's Rive file for calls, or null when it has none. */
+  rive?: RiveFile | null;
+  is_active: boolean;
+  handle: string;
   kind: "user" | "agent";
 }
 
@@ -1822,6 +1741,8 @@ export interface ContactCardUpdateParams {
   attachment_id?: UUID;
   /** Existing redraw metadata; requires an image URL or completed upload. */
   image_recipe?: AgentImageRecipe;
+  /** Set the Rive file shown in calls, change its names, or clear it with null (which deletes the hosted file). */
+  rive?: RiveFileInput | null;
 }
 
 export interface BlockedHandle {
@@ -1858,7 +1779,12 @@ export type AgentAccessRule = "allow" | "deny";
  * The agent's owner is always allowed and is on neither list.
  */
 /** "Log in with Relay" scopes: `openid` and `profile` always, `email` and `phone` optional. */
-export type OAuth2Scope = "openid" | "profile" | "email" | "phone";
+/**
+ * An OpenID Connect scope a Log in with Relay client may ask for. `birthdate`
+ * asks for the person's birthday as the OpenID `birthdate` claim (YYYY-MM-DD,
+ * or 0000-MM-DD when they gave no year).
+ */
+export type OAuth2Scope = "openid" | "profile" | "email" | "phone" | "birthdate";
 
 /** The agent's OAuth2 client for Log in with Relay. `client_id` is the agent's ID. */
 export interface OAuth2Client {
@@ -1988,13 +1914,6 @@ export interface MessageWebhookData {
    */
   silent?: boolean;
   reply_to?: ReplyTo | null;
-  /**
-   * Message metadata. Every `message.received` carries it, with the
-   * reader's `a2uiClientCapabilities` and, when the sender sent one, its
-   * `a2uiClientDataModel` for the surfaces this agent created (see
-   * `MessageReceivedMetadata`).
-   */
-  metadata?: Partial<MessageReceivedMetadata>;
 }
 
 /**
@@ -2034,6 +1953,17 @@ export interface ContactEventContact {
    * ask anyone their age.
    */
   age_range: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about: string | null;
 }
 
 export interface ContactAddedEvent {
@@ -2044,6 +1974,24 @@ export interface ContactAddedEvent {
 export interface ContactRemovedEvent {
   contact: ContactEventContact;
 }
+
+/** Current stored rating of your agent; only a person creates or changes it. */
+export interface RatingEvent {
+  contact: ContactEventContact;
+  stars: 1 | 2 | 3 | 4 | 5;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RatingDeletedEvent {
+  contact: ContactEventContact;
+}
+
+export type RatingCreatedWebhook = RelayWebhookEnvelope<RatingEvent, "rating.created">;
+export type RatingUpdatedWebhook = RelayWebhookEnvelope<RatingEvent, "rating.updated">;
+export type RatingDeletedWebhook = RelayWebhookEnvelope<RatingDeletedEvent, "rating.deleted">;
+export type RatingWebhookEvent = RatingCreatedWebhook | RatingUpdatedWebhook | RatingDeletedWebhook;
 
 export interface RelayWebhookEnvelope<
   T = Record<string, unknown>,
@@ -2104,6 +2052,9 @@ type OtherWebhookEventType = Exclude<
   | "payment.expired"
   | "location.sharing.started"
   | "location.sharing.stopped"
+  | "rating.created"
+  | "rating.updated"
+  | "rating.deleted"
 >;
 
 export type RelayWebhookEvent =
@@ -2113,6 +2064,7 @@ export type RelayWebhookEvent =
     TypingIndicatorWebhookEventType
   >
   | MessageFailedWebhook
+  | RatingWebhookEvent
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | CallWebhookEvent
@@ -2171,6 +2123,17 @@ export interface OwnerPerson {
    * ask anyone their age.
    */
   age_range?: AgeRange | null;
+  /**
+   * The person's profile links: at most 5 absolute https URLs, in the order
+   * they chose, as Relay normalised them. Empty when they set none. Relay
+   * sends no platform name; read the site from the URL. People only.
+   */
+  links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */

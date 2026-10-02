@@ -1,0 +1,65 @@
+{
+  "name": "@relaymessenger/elevenlabs",
+  "version": "0.1.0-staging.2",
+  "description": "Put an ElevenLabs Agent on a Relay Call: audio both ways over the ElevenLabs Agents WebSocket, and its alignment as Rive mouth shapes.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "validate": "npm run check && npm test && npm run build",
+    "prepack": "npm run validate"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@evan/opus": "1.0.3",
+    "@relaymessenger/sdk": "0.5.0-staging.6",
+    "rtp-packet": "0.4.2",
+    "werift": "0.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "staging",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "packages/elevenlabs"
+  },
+  "homepage": "https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/elevenlabs#readme",
+  "keywords": [
+    "relay",
+    "elevenlabs",
+    "webrtc",
+    "voice",
+    "rive",
+    "agents"
+  ]
+}

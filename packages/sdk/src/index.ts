@@ -101,10 +101,16 @@ export {
 export { Relay as default } from "./client.js";
 export {
   RELAY_ISSUER,
+  RELAY_USER_ID_CLAIM,
   verifyRelayIdToken,
   type RelayIdTokenClaims,
   type VerifyRelayIdTokenOptions,
 } from "./login.js";
+export {
+  FORM_FENCE, FORM_GUIDANCE, FORM_BLOCK_INSTRUCTION,
+  formPart, partsWithForm, parseFormBlock, splitForm, formReply,
+  type SplitForm, type FormReply,
+} from "./form.js";
 export {
   SELECTION_BLOCK_INSTRUCTION,
   SELECTION_FENCE,
@@ -140,24 +146,5 @@ export {
   replyTargetContext,
   replyTargetParts,
 } from "./reply-target.js";
-export {
-  A2UI_BASIC_CATALOG_ID,
-  A2UI_BROWSER_ACTIONS,
-  A2UI_MEDIA_TYPE,
-  A2UI_VERSION,
-  RELAY_A2UI_CATALOG_ID,
-  a2uiBrowserCardMessages,
-  a2uiBrowserCardUpdate,
-  a2uiBrowserComponent,
-  a2uiPart,
-  isA2uiBrowserAction,
-  deleteA2uiSurface,
-  readA2uiAction,
-  sendA2uiSurface,
-  updateA2uiSurface,
-  type A2uiBrowserCard,
-  type A2uiSendOptions,
-  type A2uiSurface,
-  type A2uiSurfaceUpdate,
-  type A2uiTap,
-} from "./a2ui.js";
+
+export { RATING_REQUEST_GUIDANCE, RATING_REQUEST_BLOCK_INSTRUCTION, ratingRequestPart, ratingRequestPartsError } from "./rating.js";

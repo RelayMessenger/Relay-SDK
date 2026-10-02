@@ -257,7 +257,8 @@ for (const row of plan) {
 // main's cookbook-standalone check proves it: copied out, installed on the
 // release channel, type-checked. Before the publish (the dry run) the new
 // versions exist only as the tarballs packed above, which the check installs
-// from a private cache by their integrity; after it, npm has them.
+// from a private cache by their integrity; after it, npm has them, once its
+// install metadata names them latest (the check waits for that).
 say("\n=== cookbooks ===");
 const cookbookPins = rewriteCookbooks(root, plan, { integrityByName });
 say(cookbookPins.length > 0
@@ -270,7 +271,11 @@ for (const directory of cookbookDirectories(root)) {
 run(process.execPath, [
   "scripts/validate-cookbook-standalone.mjs",
   "--channel", "release",
-  ...(dryRun ? tarballs.flatMap((path) => ["--tarball", path]) : []),
+  // The dry run installs the packed tarballs; after the publish, the check
+  // first waits until npm installs each version just published as latest.
+  ...(dryRun
+    ? tarballs.flatMap((path) => ["--tarball", path])
+    : plan.filter((row) => row.action === "publish").flatMap((row) => ["--published", `${row.name}@${row.version}`])),
 ]);
 if (!dryRun) {
   // Carry the pins to staging so the next promotion takes them into main.

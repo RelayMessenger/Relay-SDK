@@ -1,6 +1,10 @@
 import { AudioInput, AudioOutput, Future, type AgentSession } from "@livekit/agents";
-import { AudioFrame } from "@livekit/rtc-node";
-import { TransformStream, type WritableStreamDefaultWriter } from "node:stream/web";
+import { AudioFrame, type VideoFrame as RtcVideoFrame, type VideoFrameEvent } from "@livekit/rtc-node";
+import {
+  TransformStream,
+  type ReadableStreamDefaultReader,
+  type WritableStreamDefaultWriter,
+} from "node:stream/web";
 import type Relay from "@relaymessenger/sdk";
 import type { CallRoom, CallRoomOptions } from "@relaymessenger/sdk";
 import {
@@ -13,7 +17,9 @@ import {
   type RelayInboundAudioFormat,
   type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
+  type RemoteVideoTrack,
 } from "@relaymessenger/sdk/calls";
+import { VideoStream } from "./video.js";
 
 /**
  * The format LiveKit's own room input hands an AgentSession:
@@ -83,6 +89,115 @@ export class RelayAudioInput extends AudioInput {
 }
 
 /**
+ * The remote Relay participant's camera as `@livekit/rtc-node` `VideoFrame`s
+ * (I420).
+ *
+ * Twin of the Python package's `RelayVideoInput` (LiveKit's
+ * `_ParticipantVideoInputStream`). LiveKit Agents for Node has no
+ * `session.input.video`, so the frames are read here: iterate them into a
+ * realtime model's `pushVideo`, or put `latestFrame` into an
+ * `llm.ImageContent` when the user's turn completes, as LiveKit's Node
+ * vision guide does with a room `VideoStream`. The input follows the
+ * transport's one `RemoteVideoTrack`, which survives media restarts. A reader
+ * gets the newest frame, never a backlog: a frame not yet read is replaced by
+ * a newer one, as a live camera does.
+ */
+export class RelayVideoInput implements AsyncIterable<RtcVideoFrame> {
+  readonly #transport: RelayCallTransport;
+  readonly #onTrack: (track: RemoteVideoTrack) => void;
+  #reader: ReadableStreamDefaultReader<VideoFrameEvent> | undefined;
+  #reading: Promise<void> | undefined;
+  #latest: RtcVideoFrame | undefined;
+  #pending: RtcVideoFrame | undefined;
+  readonly #waiters = new Set<() => void>();
+  #attached = true;
+  #started = false;
+  #closed = false;
+
+  /** Nothing is decoded until the first read, so an audio-only agent never decodes the camera. */
+  constructor(transport: RelayCallTransport) {
+    this.#transport = transport;
+    this.#onTrack = (track) => this.#subscribe(track);
+  }
+
+  /**
+   * The most recent frame from the person's camera, or `undefined` before the
+   * first one. The first read starts decoding.
+   */
+  get latestFrame(): RtcVideoFrame | undefined {
+    this.#start();
+    return this.#latest;
+  }
+
+  /** While detached, frames are dropped, as LiveKit's input drops them. */
+  setAttached(attached: boolean): void {
+    this.#attached = attached;
+  }
+
+  /** Frames until the call's video ends or `close()`; starting it starts decoding. */
+  async *[Symbol.asyncIterator](): AsyncIterator<RtcVideoFrame> {
+    this.#start();
+    for (;;) {
+      const frame = this.#pending;
+      if (frame) {
+        this.#pending = undefined;
+        yield frame;
+        continue;
+      }
+      if (this.#closed) return;
+      await new Promise<void>((resolve) => this.#waiters.add(resolve));
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#pending = undefined;
+    this.#transport.off("trackSubscribed", this.#onTrack);
+    this.#wake();
+    await this.#reader?.cancel().catch(() => undefined);
+    await this.#reading;
+  }
+
+  #start(): void {
+    if (this.#started || this.#closed) return;
+    this.#started = true;
+    this.#transport.on("trackSubscribed", this.#onTrack);
+    const existing = this.#transport.remoteVideoTrack;
+    if (existing) this.#subscribe(existing);
+  }
+
+  #subscribe(track: RemoteVideoTrack): void {
+    if (this.#closed || this.#reader) return;
+    const reader = new VideoStream(track).getReader();
+    this.#reader = reader;
+    this.#reading = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || this.#closed) break;
+        if (!this.#attached) continue;
+        this.#latest = value.frame;
+        this.#pending = value.frame;
+        this.#wake();
+      }
+    })().catch(() => undefined).finally(() => {
+      // The track ends only when the call does (restarts keep it), so a
+      // reader that never calls close() still gets its loop back.
+      if (this.#closed) return;
+      this.#closed = true;
+      this.#transport.off("trackSubscribed", this.#onTrack);
+      this.#wake();
+    });
+  }
+
+  #wake(): void {
+    const waiters = [...this.#waiters];
+    this.#waiters.clear();
+    for (const resolve of waiters) resolve();
+  }
+}
+
+/**
  * LiveKit Agents output that publishes TTS PCM to the Relay participant.
  *
  * Shape copied from `@livekit/agents` `ParticipantAudioOutput`
@@ -104,6 +219,11 @@ export class RelayAudioOutput extends AudioOutput {
   /** Bumped by `clearBuffer()`; a frame the transport dropped across it is not counted (agents-js `interruptionGeneration`). */
   #interruptionGeneration = 0;
   #closed = false;
+  /**
+   * Where the open segment's first sample sits on the agent's audio track
+   * (what `writeAudio` resolved with), for timing Rive messages.
+   */
+  segmentStartMs: number | undefined;
 
   constructor(transport: RelayCallTransport, sampleRate = 48_000) {
     super(sampleRate, undefined, { pause: false });
@@ -123,8 +243,8 @@ export class RelayAudioOutput extends AudioOutput {
       await this.#flushTask;
     }
     const interruptionGeneration = this.#interruptionGeneration;
-    // Resolves once the slices are queued; the engine's pump paces the wire.
-    await this.#transport.writeAudio({
+    // Resolves once the slices are queued, with where they start on the track; the engine's pump paces the wire.
+    const startMs = await this.#transport.writeAudio({
       samples: frame.data,
       sampleRate: frame.sampleRate,
       channelCount: frame.channels,
@@ -133,6 +253,7 @@ export class RelayAudioOutput extends AudioOutput {
     await super.captureFrame(frame);
     if (!this.#firstFrameEmitted) {
       this.#firstFrameEmitted = true;
+      this.segmentStartMs = typeof startMs === "number" ? startMs : undefined;
       this.onPlaybackStarted(Date.now());
     }
     this.#pushedDuration += frame.samplesPerChannel / frame.sampleRate;
@@ -241,6 +362,8 @@ export class RelayLiveKitCall {
   readonly transport: RelayCallTransport;
   readonly input: RelayAudioInput;
   readonly output: RelayAudioOutput;
+  /** The person's camera; see {@link RelayVideoInput}. Send the agent's own video with `transport.publishTrack`. */
+  readonly videoInput: RelayVideoInput;
   #session: AgentSessionAudioTarget | undefined;
   #closed = false;
 
@@ -248,6 +371,7 @@ export class RelayLiveKitCall {
     this.transport = transport;
     this.input = audio.input;
     this.output = audio.output;
+    this.videoInput = new RelayVideoInput(transport);
   }
 
   static async connect(options: RelayLiveKitConnectOptions): Promise<RelayLiveKitCall> {
@@ -321,6 +445,7 @@ export class RelayLiveKitCall {
     this.detach();
     this.output.close();
     await this.input.close();
+    await this.videoInput.close();
     this.transport.close();
   }
 }

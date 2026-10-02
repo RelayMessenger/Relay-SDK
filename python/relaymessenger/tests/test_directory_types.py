@@ -58,9 +58,10 @@ def test_directory_response_required_keys_and_nullable_fields() -> None:
 
 def test_share_contact_card_annotations_and_bodyless_default() -> None:
     assert get_type_hints(Chats.share_contact_card) == {
-        "chat_id": str, "handle": Optional[str], "idempotency_key": Optional[str], "return": type(None),
+        "chat_id": str, "handle": Optional[str], "user_id": Optional[str],
+        "idempotency_key": Optional[str], "return": type(None),
     }
-    for name in ("handle", "idempotency_key"):
+    for name in ("handle", "user_id", "idempotency_key"):
         parameter = signature(Chats.share_contact_card).parameters[name]
         assert parameter.kind == Parameter.KEYWORD_ONLY
         assert parameter.default is None

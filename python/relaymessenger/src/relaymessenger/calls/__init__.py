@@ -20,6 +20,14 @@ except ImportError as e:
 
 from ._engine import RelayIceServer
 from ._events import EventEmitter
+from .rive import (
+    RIVE_CHANNEL,
+    RIVE_MESSAGE_MAX_BYTES,
+    RelayRive,
+    RiveValue,
+    encode_rive_message,
+    parse_rive_message,
+)
 from .room import (
     DEFAULT_BASE_URL,
     CallRoom,
@@ -38,6 +46,14 @@ from .transport import (
     RelayIceServersProvider,
     RelayInboundAudioFormat,
     restart_delay_ms,
+)
+from .visemes import (
+    VISEMES,
+    CharacterAlignment,
+    VisemeCue,
+    WordTiming,
+    alignment_from_words,
+    visemes_from_alignment,
 )
 from .video import (
     LocalVideoTrack,
@@ -61,6 +77,18 @@ __all__ = [
     "RelayAudioFrame",
     "RelayCallDiagnostics",
     "RelayCallRestartEvent",
+    "RIVE_CHANNEL",
+    "RIVE_MESSAGE_MAX_BYTES",
+    "RelayRive",
+    "RiveValue",
+    "VISEMES",
+    "CharacterAlignment",
+    "VisemeCue",
+    "WordTiming",
+    "alignment_from_words",
+    "encode_rive_message",
+    "parse_rive_message",
+    "visemes_from_alignment",
     "RelayCallTransport",
     "RelayCallTransportError",
     "RelayCallVideoStats",

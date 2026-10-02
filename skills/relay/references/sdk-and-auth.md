@@ -49,20 +49,125 @@ custom origin but does not enforce HTTPS for you.
 
 Use only the public resources exported by this version:
 
+- `access` for the agent's Always Allow and Never Allow lists;
 - `agents` for authenticated deletion of existing developer-managed agents;
-- `chats`, including `messages` and `participants`;
-- `messages`;
 - `attachments`;
 - `blockedHandles`;
+- `calls`, with the media transport in `@relaymessenger/sdk/calls`;
+- `chats`, including `messages`, `participants` and `location`;
+- `contactCard`;
+- `contacts` for handle lookup;
+- `directory`;
+- `me` for `GET /v1/me`;
+- `messages`;
+- `oauth2Client` for Log in with Relay;
+- `paymentRequests`;
 - `webhookEvents`;
 - `webhookSubscriptions`;
 - `webhooks`;
-- `websocket`;
-- `contactCard`.
+- `websocket`.
+
+`verifyRelayIdToken` checks a Log in with Relay ID token (`RELAY_USER_ID_CLAIM`
+names its Relay id claim), and
+`@relaymessenger/sdk/login-button` exports `RelayLoginButton`. A route in the
+locked OpenAPI with no SDK method uses plain HTTP with the same token.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP
 methods, and operations marked safe by the SDK can also be retried.
+
+## Python SDK
+
+`pip install relaymessenger` (Python 3.10 or newer; the `calls` and `login`
+extras add Calls and ID token checks). Every operation an Agent Token may call
+has an async method named as the TypeScript SDK names it, in snake case:
+`relay.chats.startTyping` is `relay.chats.start_typing`, and
+`relay.paymentRequests` is `relay.payment_requests`. Request fields are keyword
+arguments, except `chats.create(body)` and `chats.messages.send(chat_id, body)`,
+which take the request body as a dict. Answers are the API's JSON as typed
+dicts.
+
+Every person-visible string below (`reply_text`, `question_text`,
+`button_labels`, a place's `name`) is text the model writes for this
+conversation; never send a fixed string. Every send takes its own idempotency
+key, minted once per logical operation and saved before the request, so a
+retry reuses it and a new send never replays an old one.
+
+```python
+import os
+
+from relaymessenger import Relay, parts
+
+relay = Relay(
+    os.environ["RELAY_AGENT_TOKEN"],
+    base_url=os.environ.get("RELAY_API_URL", "https://api.relayapp.im"),
+    webhook_secret=os.environ.get("RELAY_WEBHOOK_SECRET"),
+)
+
+
+async def tour(
+    chat_id: str,
+    message_id: str,
+    recipient_handle: str,
+    reply_text: str,  # the model writes it
+    question_text: str,  # the model writes it
+    button_labels: list[str],  # the model writes them
+    place: dict,  # latitude, longitude and name the model chose
+    png: bytes,
+    keys: dict[str, str],  # one saved idempotency key per operation
+) -> None:
+    me = await relay.me.retrieve()
+    await relay.messages.create(
+        to=[recipient_handle], message={"parts": [parts.text_part(reply_text)]}, idempotency_key=keys["reply"],
+    )
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.text_part(question_text), parts.buttons_part([{"label": label} for label in button_labels])],
+        "idempotency_key": keys["question"],
+    }})
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.place_part(place["latitude"], place["longitude"], name=place["name"])],
+        "idempotency_key": keys["place"],
+    }})
+    upload = await relay.attachments.create(filename="map.png", content_type="image/png", size_bytes=len(png))
+    await relay.attachments.upload(upload, png)
+    await relay.chats.messages.send(chat_id, {"message": {
+        "parts": [parts.media_part(attachment_id=upload["attachment_id"])], "idempotency_key": keys["image"],
+    }})
+    await relay.messages.add_reaction(message_id, operation="add", type="love")
+    await relay.messages.retrieve(message_id)
+    await relay.messages.list_messages_thread(message_id, limit=50)
+    await relay.chats.start_typing(chat_id)
+    await relay.chats.stop_typing(chat_id)
+    await relay.chats.mark_as_read(chat_id)
+    await relay.chats.location.request(chat_id)
+    await relay.chats.location.retrieve(chat_id)
+    await relay.contacts.lookup(handle=recipient_handle)  # or id=..., or task=...
+    await relay.contact_card.retrieve(handle=me["handle"])
+    await relay.blocked_handles.list()
+    await relay.payment_requests.list(status="requested")
+    await relay.webhook_events.list()
+    await relay.webhook_subscriptions.list()
+```
+
+The resources are `chats` (with `messages`, `participants` and `location`),
+`messages`, `attachments`, `payment_requests`, `calls`, `contacts`,
+`contact_card`, `directory`, `blocked_handles`, `access`, `agents`, `me`,
+`oauth2_client`, `webhook_events`, `webhook_subscriptions`, `webhooks` and
+`websocket`. `relaymessenger.parts` types every message part and builds the
+simple ones: `text_part` (with `mention`), `media_part`, `link_part`,
+`buttons_part`, `place_part` and `payment_part`; `selection`, `form` and
+`rich_cards` build the structured ones.
+
+Verify a webhook over the raw body with the subscription's `whsec_` secret:
+
+```python
+from relaymessenger import WebhookVerificationError
+
+try:
+    event = relay.webhooks.unwrap(raw_body, headers=request_headers)
+except WebhookVerificationError:
+    ...  # answer 400 and do not process the delivery
+```
 
 ## Organization-owned agent provisioning
 

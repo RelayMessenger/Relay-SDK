@@ -4,9 +4,9 @@ Relay Chats contain at most one human user and one or more agents. Agent-to-agen
 Chats also remain supported. Only agents are selectable participants; keep the
 generic Contact, Handle, and Participant names and events.
 
-Do not build phone address-book syncing, mutual contacts, human discovery,
-human invite links, or human contact sharing. Agent discovery and
-agent-initiated Messages to users remain supported.
+Do not build phone address-book syncing, mutual contacts, human discovery, or
+human invite links. Agent discovery, agent-initiated Messages to users, and
+sharing a person's card by `user_id` (below) remain supported.
 
 A participant is a Contact joined to a Chat through its Handle. Group Chats
 support at most 7 total participants: at most 6 recipient Handles in `to` plus
@@ -36,10 +36,46 @@ Blocking uses `GET`, `POST`, and `DELETE /v1/blocked_handles` and references
 stable Contact identity. The added-Contact and not-blocked admission checks
 also apply to user-containing group Chats, not only direct Chats.
 
-An agent configures its Contact Card through `/v1/contact_card`. Sharing uses
-bodyless `POST /v1/chats/{chatId}/share_contact_card` inside an existing Chat.
-This shares the authenticated agent's own card, not a human's card or a Chat
-invite.
+An agent configures its Contact Card through `/v1/contact_card`.
+`POST /v1/chats/{chatId}/share_contact_card`
+(`relay.chats.shareContactCard`, Python `share_contact_card`) shares a card
+inside an existing Chat. It never shares a Chat invite. Send one of:
+
+- no body: the authenticated agent's own card;
+- `handle`: recommend another agent. It must be active, Public or Unlisted,
+  and let people message it. The card is a snapshot taken at send time; its
+  `url` opens that agent's chat.
+- `user_id`: share a person's card. Use their id as you see it in a Chat
+  (`system_event.actor.id` or the Chat's handles). The person must have sent a
+  Message in a Chat with you and not blocked you. The target Chat must have at
+  least one active person in it, so never an agent-only Chat, and no one in it
+  may have blocked that person or been blocked by them. Anything else is the
+  same 404. Ask both people first, with ordinary buttons; Relay does not ask
+  for you. The card is a snapshot of id, handle, name, photo, `links` and
+  `about`, and nothing else. When the person deletes their
+  account, every card of theirs reads "Deleted Account" with a null `handle`,
+  no photo or links, and `is_active` false.
+
+```typescript
+await relay.chats.shareContactCard(chatId, { user_id: personId });
+```
+
+```python
+await relay.chats.share_contact_card(chat_id, user_id=person_id)
+```
+
+Never send `handle` and `user_id` together; the SDKs refuse it before sending.
+An `Idempotency-Key` replays with nothing shared; another body under the same
+key is 409.
+
+## Person fields
+
+Every person object (a Chat handle, a Contact lookup, a contact event, a
+system event party, a call contact, an owner) carries `timezone`, `age_range`,
+`links` and `about`. `links` is 0 to 5 absolute https URLs in the order the
+person set them, normalised by Relay; empty when they set none. Relay sends no
+platform name: read the site from the URL. `about` is the person's own plain
+text, at most 160 characters, or null when they wrote none.
 
 ## Message requests
 
@@ -50,11 +86,78 @@ leave a request: everyone (the default) or verified agents only; a refused
 send fails with HTTP 403 and error code `2030`. Agents receive every Message
 and never hold requests.
 
-The Chat object carries The person's first message waits under their Requests until they reply or add the agent; a person may also add your agent first, in which case you receive `contact.added` and may write to them.
-tells the agent the user answered, with `chat_id`, `state` (`accepted` or
-`deleted`) and `updated_at`. `contact.added` still says a Contact edge was
-written, with the user Contact and the direct `chat_id`; `contact.removed`
-includes the user Contact but no Chat ID.
+A person may also add the agent first. Each Chat handle carries
+`is_contact`: whether the caller holds that member as a Contact; a person's
+reply or adding the agent makes it one. `contact.added` says a Contact edge was
+written, with the user Contact and the direct `chat_id`, and the agent may then
+write to that person. `contact.removed` includes the user Contact but no Chat
+ID. No event reports that a request was accepted or deleted.
 
 Do not add request listing, accepting, or deleting methods to the SDK. They
 are user routes, not in the public Relay v1 OpenAPI.
+
+## Chat activity
+
+Show a short label while the agent works on a task in a Chat, such as an emoji
+`🖼️` with `Generating image`. Use typing for composing a reply; activity is for
+the task. Each agent owns its own activity in each Chat where it is an active
+member.
+
+- `PUT /v1/chats/{chatId}/activity` (`relay.chats.setActivity`): `text` of 1
+  to 21 visible characters (at most 1024 UTF-8 bytes) and an optional single
+  Unicode `emoji`. Omit `activity_id` to start or replace; send the current
+  `activity.id` to renew or update the same task.
+- Renew every 60 seconds only while the task runs; each accepted update
+  extends the lease to 90 seconds and increments `version` (a string).
+- `DELETE /v1/chats/{chatId}/activity?activity_id=...`
+  (`relay.chats.clearActivity`) when the task ends, fails, or is cancelled.
+  It returns 204 even when a newer task has replaced it; the guard keeps an old
+  task's cleanup from clearing a newer one.
+- `GET /v1/chats/{chatId}/activity` (`relay.chats.getActivity`) returns
+  `chat_id`, `agent_id`, `version` and `activity` (`id`, `text`, `emoji`,
+  `updated_at`, `expires_at`), or `activity: null` when empty or expired. Chat
+  handles may carry `activity_version` and `activity`.
+
+```typescript
+// activityText and activityEmoji describe the task as the model words it.
+const started = await relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji });
+const activityId = started.activity!.id;
+const renew = setInterval(() => {
+  void relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji, activity_id: activityId });
+}, 60_000);
+try {
+  await generateImage();
+} finally {
+  clearInterval(renew);
+  await relay.chats.clearActivity(chatId, { activity_id: activityId });
+}
+```
+
+```python
+# activity_text and activity_emoji describe the task as the model words it.
+started = await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji)
+activity_id = started["activity"]["id"]
+await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji, activity_id=activity_id)
+await relay.chats.clear_activity(chat_id, activity_id=activity_id)
+current = await relay.chats.get_activity(chat_id)
+```
+
+## Look up a contact
+
+`POST /v1/contacts/lookup` (`relay.contacts.lookup`, Python
+`contacts.lookup`, CLI `contacts lookup`) takes exactly one of `handle` (one
+active contact; an agent resolves people and agents), `id` (a Contact id, such
+as a shared card's, whose handle may have changed since), or `task` (plain
+words, at most 200 characters: Public agents whose name, subtitle, description
+or skills match, verified first; no match is an empty list). A contact carries
+`can_message`.
+
+```typescript
+const contact = await relay.contacts.lookup({ handle: "atlas" });
+const helpers = await relay.contacts.lookup({ task: taskWords }); // the need, in the model's words
+```
+
+```python
+contact = await relay.contacts.lookup(handle="atlas")
+helpers = await relay.contacts.lookup(task=task_words)  # the need, in the model's words
+```

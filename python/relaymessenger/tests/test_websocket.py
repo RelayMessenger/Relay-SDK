@@ -175,6 +175,34 @@ async def test_it_connects_with_the_token_and_acks_only_after_the_handler_return
     assert request.headers["User-Agent"] == USER_AGENT
 
 
+@pytest.mark.parametrize(
+    "body",
+    json.loads((Path(__file__).resolve().parents[3] / "test/fixtures/rating-server.json").read_text())["webhook_bodies"],
+    ids=["rating.created", "rating.updated", "rating.deleted"],
+)
+async def test_actual_server_rating_event_is_delivered_then_acked(relay_server: FakeRelay, body: str) -> None:
+    envelope = json.loads(body)
+    handled: List[Dict[str, Any]] = []
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready())
+        # Reuse the actual serialized Server body, without rebuilding its payload.
+        await connection.send('{"type":"event","sequence":"1","event":' + body + "}")
+        finished.set_result(await recv(connection))
+
+    async def on_event(event: Dict[str, Any], context: Dict[str, str]) -> None:
+        assert context["sequence"] == "1"
+        handled.append(event)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    assert handled == [envelope]
+    query = relay_server.requests[0].path.partition("?")[2]
+    assert envelope["event_type"] in [value for name, value in parse_qsl(query) if name == "subscribed_events"]
+
+
 async def test_it_answers_relays_ping_with_pong(relay_server: FakeRelay) -> None:
     finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
 
@@ -563,3 +591,29 @@ async def test_a_peer_close_runs_none_of_the_buffered_events(relay_server: FakeR
     await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
     assert calls[0] == ("1", 1)
     assert ("2", 1) not in calls
+
+
+@pytest.mark.parametrize("event_type", ["rating.created", "rating.updated", "rating.deleted"])
+async def test_rating_events_reach_handler_before_ack(relay_server: FakeRelay, event_type: str) -> None:
+    finished = asyncio.get_running_loop().create_future()
+    handled = []
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready())
+        value = json.loads(event(1, event_type))
+        value["event"]["data"] = {"contact": {"id": AGENT, "handle": "person", "display_name": "Person",
+                                             "timezone": None, "age_range": None, "links": [], "about": None}}
+        if event_type != "rating.deleted":
+            value["event"]["data"].update(stars=4, review="Helpful", created_at="2026-10-02T00:00:00Z", updated_at="2026-10-02T00:00:00Z")
+        await connection.send(json.dumps(value))
+        ack = await recv(connection)
+        assert handled == [value["event"]]
+        finished.set_result(ack)
+
+    async def on_event(envelope, context) -> None:
+        assert context["sequence"] == "1"
+        handled.append(envelope)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}

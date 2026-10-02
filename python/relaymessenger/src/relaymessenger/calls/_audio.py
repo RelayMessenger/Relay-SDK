@@ -185,6 +185,10 @@ class RelayAudioSource:
         self._stopped = True
         self.clear()
 
+    def media_time_ms(self) -> float:
+        """RTP time of the next packet in milliseconds: the timestamp starts at 0 and advances 960 per 20 ms packet, silence included."""
+        return self._pts * 1_000 / WIRE_SAMPLE_RATE
+
     def queued_ms(self) -> float:
         return len(self._packets) * PACKET_MS + (self._pending.size / WIRE_CHANNEL_COUNT / WIRE_SAMPLE_RATE) * 1_000
 
@@ -275,11 +279,36 @@ class _RelayAudioTrack(MediaStreamTrack):
     def __init__(self, source: RelayAudioSource) -> None:
         super().__init__()
         self._source = source
+        #: Packets handed to this peer's sender, and the source timestamp of the last one.
+        self.returned = 0
+        self.last_pts = 0
 
     async def recv(self) -> "av.Packet[Any]":
         if self.readyState != "live":
             raise MediaStreamError
-        return await self._source.next_packet(self)
+        packet = await self._source.next_packet(self)
+        self.returned += 1
+        self.last_pts = int(packet.pts or 0)
+        return packet
+
+
+def rtp_origin(sender: Any) -> Optional[int]:
+    """The random RTP timestamp origin aiortc added on this sender, once a packet has left in step.
+
+    aiortc's ``RTCRtpSender._run_rtp`` sends ``uint32_add(random32(), frame
+    timestamp)``, so the wire timestamp is that origin plus the source's own
+    timestamp. The origin is read back from the sender's last sent packet
+    (``__rtp_timestamp``) while its packet count equals the packets this track
+    handed it; ``None`` before that.
+    """
+    track = getattr(sender, "track", None)
+    if not isinstance(track, _RelayAudioTrack) or track.returned == 0:
+        return None
+    sent = getattr(sender, "_RTCRtpSender__packet_count", None)
+    last = getattr(sender, "_RTCRtpSender__rtp_timestamp", None)
+    if not isinstance(sent, int) or not isinstance(last, int) or sent != track.returned:
+        return None
+    return (last - track.last_pts) & 0xFFFFFFFF
 
 
 AudioHandler = Callable[[Int16Array, int, int], None]

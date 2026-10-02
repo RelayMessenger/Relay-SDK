@@ -1,10 +1,10 @@
 import type Relay from "@relaymessenger/sdk";
-import type { ContactCardItem } from "@relaymessenger/sdk";
+import type { SetContactCardResponse } from "@relaymessenger/sdk";
 import type { LocalAgentImage } from "./local-image.js";
 
 export type AgentImageUploadPhase = "agent" | "prepare" | "upload" | "check" | "save";
 export type AgentImageUploadResult =
-  | { status: "updated"; attachment_id: string; agent: ContactCardItem }
+  | { status: "updated"; attachment_id: string; agent: SetContactCardResponse }
   | { status: "incomplete"; phase: AgentImageUploadPhase; attachment_id?: string; message: string };
 
 /** Uses only the signed-in file-upload calls that already exist. The caller passes
@@ -13,7 +13,7 @@ export type AgentImageUploadResult =
 export async function uploadAgentImage(
   input: { handle: string; image?: LocalAgentImage; attachmentID?: string },
   client: Pick<Relay, "attachments" | "contactCard">,
-  promote: (attachmentID: string) => Promise<ContactCardItem>,
+  promote: (attachmentID: string) => Promise<SetContactCardResponse>,
 ): Promise<AgentImageUploadResult> {
   let phase: AgentImageUploadPhase = "agent";
   let attachmentID = input.attachmentID;

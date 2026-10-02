@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 349431592ca866731a95407ab8836611989371d2
- * OpenAPI 1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc
+ * Relay Server af7f1802cbad49485c8753cb1ad503dd97ae1ada
+ * OpenAPI 7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -34,6 +34,9 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "rating.created",
+  "rating.updated",
+  "rating.deleted",
 ] as const;
 
 export type RelayWebhookEventType =
@@ -265,12 +268,22 @@ export interface RelayPaymentRequestList {
   next_cursor: string | null;
 }
 
+/** Ask a person to rate this agent; send alone in a direct or group chat. */
+export interface RelayRatingRequestPart { type: "rating_request" }
+export interface RelayRatingRequestPartResponse extends RelayRatingRequestPart {
+  /** "Enjoying <agent display name>?", the words a client that does not draw the card shows in its place. */
+  value: string;
+  rating: { stars: 1 | 2 | 3 | 4 | 5; review: string | null } | null;
+  reactions: RelayReaction[] | null;
+}
+
 export type RelayOutgoingPart =
   | RelayTextPart
   | RelayMediaPart
   | RelayLinkPart
   | RelayButtonsPart
   | RelaySelectionPart
+  | RelayRatingRequestPart
   | RelayPaymentPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
@@ -321,7 +334,8 @@ export type RelayMessagePartResponse =
   | RelayPaymentPartResponse
   | RelayPaymentReceiptPartResponse
   | RelayLocationRequestPartResponse
-  | RelayLocationPartResponse;
+  | RelayLocationPartResponse
+  | RelayRatingRequestPartResponse;
 
 export interface RelayReplyTo {
   message_id: string;

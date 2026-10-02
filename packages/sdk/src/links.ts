@@ -1,6 +1,8 @@
+import { ratingRequestPart } from "./rating.js";
 import { splitButtons } from "./buttons.js";
 import { splitPayment } from "./payment.js";
 import { splitSelection } from "./selection.js";
+import { splitForm } from "./form.js";
 import type { ButtonsPart, LinkPart, MessagePart, PaymentRequestCreateParams, TextPart } from "./types.js";
 
 /**
@@ -93,6 +95,24 @@ export interface AnswerMessages {
  * components remain text with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
+  // A text-only bridge may request this server-drawn part, but never attach
+  // words or other components to it. Malformed authoring stays text, as with
+  // the existing component fences; it cannot become a different rating call.
+  if (/^```rating_request\s*$/mu.test(answer)) {
+    const only = /^\s*```rating_request\s*\r?\n\s*\{\s*\}\s*\r?\n```\s*$/u.test(answer);
+    if (only) return { messages: [[ratingRequestPart()]] };
+    return { messages: [[{ type: "text", value: answer }]],
+      error: "A rating_request fence contains only {} and is the whole answer." };
+  }
+  const formed = splitForm(answer);
+  if (formed.error) return { messages: splitLinks(answer).map((segment) => [segment]), error: formed.error };
+  if (formed.form) {
+    const messages: MessagePart[][] = splitLinks(formed.text).map((segment) => [segment]);
+    const prompt = messages.findLast((parts) => parts[0]?.type === "text" && parts[0].value.trim());
+    if (prompt) prompt.push(formed.form);
+    else messages.push([formed.form]);
+    return { messages };
+  }
   const paid = splitPayment(answer);
   if (paid.error) {
     // The block stays in the words, but a link still travels alone; a bad

@@ -169,6 +169,9 @@ class RelayAudioOutput(AudioOutput):
         self._interrupted_event = asyncio.Event()
         self._interrupted_ms = 0.0
         self._closed = False
+        #: Where the open segment's first sample sits on the agent's audio track
+        #: (what `write_audio` returned), for timing Rive messages; None between segments.
+        self.segment_start_ms: Optional[float] = None
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
         if self._closed:
@@ -177,18 +180,27 @@ class RelayAudioOutput(AudioOutput):
         if self._flush_task is not None and not self._flush_task.done():
             logger.error("capture_frame called while flush is in progress")
             await self._flush_task
-        if not self._first_frame_emitted:
-            self._first_frame_emitted = True
-            self.on_playback_started(created_at=time.time())
+        first = not self._first_frame_emitted
+        self._first_frame_emitted = True
+        estimate: Optional[float] = None
+        if first:
+            try:
+                estimate = self._transport.audio_time_ms()
+            except Exception:
+                estimate = None
         self._pushed_duration += frame.duration
-        # Returns once the slices are queued; the pacer paces the wire.
-        await self._transport.write_audio(
+        # Returns once the slices are queued, with where they start on the track; the pacer paces the wire.
+        start = await self._transport.write_audio(
             RelayAudioFrame(
                 samples=_int16(frame),
                 sample_rate=frame.sample_rate,
                 channel_count=frame.num_channels,
             )
         )
+        if first:
+            # Exact when the person already receives the audio; the estimate while it is held.
+            self.segment_start_ms = start if start is not None else estimate
+            self.on_playback_started(created_at=time.time())
 
     def flush(self) -> None:
         """Mark the segment complete; `on_playback_finished` fires once the transport has drained."""
@@ -234,6 +246,7 @@ class RelayAudioOutput(AudioOutput):
             self._interrupted_event = asyncio.Event()
             self._interrupted_ms = 0.0
         self.on_playback_finished(playback_position=position, interrupted=interrupted)
+        self.segment_start_ms = None
 
 
 def _int16(frame: rtc.AudioFrame) -> Any:
