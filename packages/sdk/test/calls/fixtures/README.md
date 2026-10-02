@@ -1,7 +1,7 @@
 # Public synthetic decoder fixtures
 
 These are one-frame 64x48 FFmpeg `testsrc2` color patterns, not captured screens.
-Generated with FFmpeg/libx264; no private images, NALs, URLs or device data.
+Generated with FFmpeg 6.0/libx264; no private images, NALs, URLs or device data.
 The `.yuv` references are independent FFmpeg decoder output, retaining the
 stream's range (full: YUVJ420P/pc; limited: YUV420P/tv). Tests compare all planes
 byte-for-byte through the actual factory receiver and RTP assembler.

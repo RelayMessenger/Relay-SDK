@@ -8,7 +8,7 @@ const fake = (layout = [{ offset: 0, stride: 4 }, { offset: 8, stride: 2 }, { of
   copyTo: vi.fn(async (data: Uint8Array) => { data.set(Array.from({ length: size }, (_, i) => i)); return layout; }),
 });
 
-it("copies verified I420 without a format conversion", async () => {
+it("copies public I420 without a format conversion", async () => {
   const frame = fake();
   expect(await copyDecodedI420(frame)).toEqual(Uint8Array.from({ length: 12 }, (_, i) => i));
   expect(frame.allocationSize).toHaveBeenCalledWith(undefined);
@@ -67,3 +67,12 @@ it("requests conversion for actual native NV12, preserving Y/U/V ordering", asyn
     expect(spy.mock.calls[0]![1]).toEqual({ format: "I420" });
   } finally { frame.close(); }
 });
+
+for (const format of ["I420A", "I422", "I444", "NV12", "RGBA", "RGBX", "BGRA", "BGRX"] as const) {
+  it(`requests matching I420 allocation and copy options for ${format}`, async () => {
+    const frame = { ...fake(), format };
+    await copyDecodedI420(frame);
+    expect(frame.allocationSize).toHaveBeenCalledWith({ format: "I420" });
+    expect(frame.copyTo).toHaveBeenCalledWith(expect.any(Uint8Array), { format: "I420" });
+  });
+}

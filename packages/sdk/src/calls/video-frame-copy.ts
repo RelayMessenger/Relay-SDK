@@ -8,8 +8,9 @@ export const copyDecodedI420 = async (frame: DecodedFrame): Promise<Uint8Array> 
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
     throw new Error("Invalid decoded video dimensions");
   }
-  // Never treat an unknown format as planar bytes. These are the formats that
-  // node-webcodecs supports converting to I420.
+  // Reject unknown public formats rather than guessing a pixel layout.
+  // node-webcodecs 1.3 masks unknown native formats as public I420; neither
+  // its allocation nor returned layout independently verifies that metadata.
   if (!["I420", "I420A", "I422", "I444", "NV12", "RGBA", "RGBX", "BGRA", "BGRX"].includes(frame.format ?? "")) {
     throw new Error("Unsupported decoded video format");
   }
