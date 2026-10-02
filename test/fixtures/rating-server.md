@@ -1,7 +1,7 @@
 # Rating wire fixture
 
 `rating-server.json` came from real Relay Server routes at commit
-`f9d9b498bd4f5b8c51764568c578ee373b44559c`, not handwritten payloads.
+`af7f1802cbad49485c8753cb1ad503dd97ae1ada`, not handwritten payloads.
 Its `source.contract_sha256` identifies the public contract used by this batch.
 Only seeded dummy contacts and disposable database IDs appear here.
 
