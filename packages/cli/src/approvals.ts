@@ -282,6 +282,14 @@ export class OwnerApprovals {
   readonly #pending = new Map<string, Pending>();
   /** Cards already settled, so a late tap on one is dropped quietly. */
   readonly #settled = new Set<string>();
+  /** Cards being sent: Relay has not yet named their message ids. */
+  #sending = 0;
+  /**
+   * Answers to cards this process does not hold yet, kept while a card is
+   * being sent: the owner can tap a card before the response that names it
+   * arrives. Forgotten once nothing is being sent.
+   */
+  readonly #early = new Map<string, RelayWebhookEvent>();
 
   constructor(options: OwnerApprovalsOptions) {
     this.#client = options.client;
@@ -316,6 +324,7 @@ export class OwnerApprovals {
     const done = new Promise<ApprovalOutcome>((resolve) => { settle = resolve; });
     const pending: Pending = { request, owners: new Set(owners.map((owner) => owner.handle)), cards: [], settle };
     for (const owner of owners) {
+      this.#sending += 1;
       try {
         // The chat between the agent and this owner: Relay reuses the direct
         // chat of the pair (Relay-Server messaging.ts, `createOrReuseChat`).
@@ -327,8 +336,16 @@ export class OwnerApprovals {
         const card = { chatId: sent.chat.id, messageId: sent.chat.message.id, owner: owner.handle };
         pending.cards.push(card);
         this.#pending.set(card.messageId, pending);
+        const early = this.#early.get(card.messageId);
+        if (early) {
+          this.#early.delete(card.messageId);
+          await this.take(early);
+        }
       } catch (error) {
         this.#say(`The approval card did not reach @${owner.handle}: ${error instanceof Error ? error.message : String(error)}.`);
+      } finally {
+        this.#sending -= 1;
+        if (this.#sending === 0) this.#early.clear();
       }
     }
     if (!pending.cards.length) {
@@ -372,7 +389,12 @@ export class OwnerApprovals {
     // An answer to an approval card this process does not hold (sent before a
     // restart, or by another bridge of the same agent) is dropped quietly: the
     // harness that asked is gone, and the tap is not a message to answer.
-    if (!pending) return isApprovalReplyId(answer.id);
+    if (!pending) {
+      if (!isApprovalReplyId(answer.id)) return false;
+      // A card being sent right now may be this one.
+      if (this.#sending > 0) this.#early.set(answer.messageId, event);
+      return true;
+    }
     const sender = event.data.sender_handle;
     // Anyone but an owner is not registered, and the card stays open.
     if (sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;

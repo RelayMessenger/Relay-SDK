@@ -102,6 +102,9 @@ class FormPart(_Part, total=False):
 
 
 class FormPartResponse(FormPart):
+    #: The form's received_message.title, else its title; the words a client
+    #: that does not draw the form shows.
+    value: str
     has_responded: bool
     answers: Optional[FormAnswers]
     reactions: None

@@ -75,6 +75,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { releasePackages } from "./release-packages.mjs";
+import { PUBLISH_PROPAGATION } from "./verify-npm-registry-integrity.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const cookbookRoot = join(root, "cookbook");
@@ -161,6 +162,91 @@ export function unlockedReleaseCandidates({ channel, locked, dependencies, candi
   return dependencies
     .filter(({ name }) => candidates.has(name))
     .map((dependency) => ({ ...dependency, ...candidates.get(dependency.name) }));
+}
+
+// A Relay dependency range whose lowest release is X.Y.Z: `^X.Y.Z`, `~X.Y.Z`,
+// `X.Y.Z`, or a staging range `^X.Y.Z-staging.N` that the release derives to
+// `^X.Y.Z` (release-derive.mjs, rewriteCookbook). An exact staging pin is
+// releaseDeferredPins' to leave.
+const RELEASE_RANGE = /^(?:[\^~]?(\d+\.\d+\.\d+)|[\^~](\d+\.\d+\.\d+)-staging\.\d+)$/u;
+
+/**
+ * On the release channel, the Relay ranges of an unlocked folder whose lowest
+ * version npm does not have yet. On a push to main this check runs beside the
+ * release job, which is still publishing that version: `^0.5.0` resolves to
+ * nothing (ETARGET) until it lands. The release proves such a folder itself:
+ * from its packed tarballs in its dry run (release-dry-run in ci.yml), and
+ * from npm after the publish (release.yml).
+ */
+export function unpublishedReleaseRanges({ channel, locked, dependencies, tarballs, isPublished }) {
+  if (channel !== "release" || locked || tarballs.length > 0) return [];
+  return dependencies.filter(({ name, range }) => {
+    const match = RELEASE_RANGE.exec(range);
+    const base = match?.[1] ?? match?.[2];
+    return base !== undefined && !isPublished(name, base);
+  });
+}
+
+function onNpm(name, version) {
+  const result = spawnSync(npm, ["view", `${name}@${version}`, "version", "--json", "--registry", "https://registry.npmjs.org/"], {
+    encoding: "utf8",
+  });
+  if (result.status === 0) return result.stdout.trim() !== "";
+  if (/E404|404 Not Found|is not in this registry|No match found/iu.test(`${result.stdout}\n${result.stderr}`)) return false;
+  throw new Error(`npm view ${name}@${version} failed:\n${result.stdout}\n${result.stderr}`);
+}
+
+/** Every `--published <name@version>` argument: what the release just published. */
+export function publishedArguments(argv) {
+  const found = [];
+  argv.forEach((value, index) => {
+    if (value !== "--published") return;
+    const spec = argv[index + 1] ?? "";
+    const at = spec.lastIndexOf("@");
+    assert.ok(at > 0 && /^\d+\.\d+\.\d+$/u.test(spec.slice(at + 1)), `--published takes name@version, not ${spec}`);
+    found.push({ name: spec.slice(0, at), version: spec.slice(at + 1) });
+  });
+  return found;
+}
+
+/**
+ * After a publish: waits until npm's install metadata lists each released
+ * version and names it `latest`, read every `retryDelayMs` up to
+ * `maxAttempts` times (the shared publish budget). npm serves a version by
+ * its own URL before every view of the package has it; an install in that
+ * window resolves an older release, or none, and the check would fail on a
+ * package that published.
+ */
+export async function waitForPublishedLatest({
+  specs,
+  read = readInstallMetadata,
+  maxAttempts = PUBLISH_PROPAGATION.maxAttempts,
+  retryDelayMs = PUBLISH_PROPAGATION.retryDelayMs,
+  sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+  say: log = say,
+}) {
+  for (const { name, version } of specs) {
+    for (let attempt = 1; ; attempt += 1) {
+      const { latest, versions } = await read(name);
+      if (latest === version && versions.includes(version)) {
+        log(`  npm installs ${name}@${version} as latest`);
+        break;
+      }
+      assert.ok(attempt < maxAttempts,
+        `${name}@${version} is not npm's latest after ${maxAttempts} reads (latest ${latest}, ${versions.includes(version) ? "listed" : "not listed"})`);
+      log(`  npm does not install ${name}@${version} as latest yet (latest ${latest}); reading again in ${retryDelayMs} ms`);
+      await sleep(retryDelayMs);
+    }
+  }
+}
+
+/** What `npm install` reads: the package's dist-tags and versions, revalidated past npm's own cache. */
+async function readInstallMetadata(name) {
+  const out = execFileSync(npm, [
+    "view", name, "dist-tags.latest", "versions", "--json", "--prefer-online", "--registry", "https://registry.npmjs.org/",
+  ], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  return { latest: parsed["dist-tags.latest"], versions: parsed.versions ?? [] };
 }
 
 /** The package name and version inside each release tarball. */
@@ -298,12 +384,12 @@ function run(command, args, cwd) {
 const EXCLUDED = new Set([".artifacts", ".dev.vars", ".git", ".wrangler", "coverage", "dist", "node_modules"]);
 
 function distTag(packageName, tag) {
-  const out = execFileSync(npm, ["view", packageName, `dist-tags.${tag}`, "--json", "--registry", "https://registry.npmjs.org/"], { encoding: "utf8" });
+  const out = execFileSync(npm, ["view", packageName, `dist-tags.${tag}`, "--json", "--prefer-online", "--registry", "https://registry.npmjs.org/"], { encoding: "utf8" });
   const parsed = JSON.parse(out);
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
-function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = null } = {}) {
+function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = null, published = [] } = {}) {
   const tag = CHANNEL_TAGS[channel];
   const source = join(cookbookRoot, name);
   const temporary = mkdtempSync(join(tmpdir(), `relay-cookbook-standalone-${name}-`));
@@ -328,6 +414,15 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
         + "(release-dry-run in ci.yml from the packed tarballs, release.yml after the publish)");
       return false;
     }
+    const pending = unpublishedReleaseRanges({ channel, locked: hasLock, dependencies, tarballs, isPublished: onNpm });
+    // After the publish nothing is left to anyone else: every range names a version npm has.
+    assert.ok(pending.length === 0 || published.length === 0,
+      `${name} pins ${pending.map(({ name: dependency, range }) => `${dependency}@${range}`).join(", ")}, which npm does not have after the publish`);
+    if (pending.length > 0) {
+      say(`  ${name}: ${pending.map(({ name: dependency, range }) => `${dependency}@${range}`).join(", ")} names a version npm does not have yet; `
+        + "the release proves this folder (release-dry-run in ci.yml from the packed tarballs, release.yml after the publish)");
+      return false;
+    }
     if (channel === "staging" && !hasLock) {
       // What a developer on the staging channel runs: the newest staging
       // build of each Relay package, by its dist-tag. Only the copy changes.
@@ -342,7 +437,10 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
       for (const { field, name: dependency, path } of unreleased) manifest[field][dependency] = `file:${path}`;
       writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     }
-    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", ...(cache ? ["--cache", cache, "--prefer-offline"] : [])], copy);
+    // After a publish, revalidate npm's cached metadata: a packument cached
+    // earlier in this job would not list the version just published.
+    const fresh = published.length > 0 ? ["--prefer-online"] : [];
+    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", ...(cache ? ["--cache", cache, "--prefer-offline"] : fresh)], copy);
     for (const dependency of dependencies) {
       const installed = readJson(join(copy, "node_modules", ...dependency.name.split("/"), "package.json")).version;
       let tagged;
@@ -366,7 +464,7 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
   }
 }
 
-function main(argv) {
+async function main(argv) {
   const linkCheckOnly = argv.includes("--link-check");
   const onlyIndex = argv.indexOf("--only");
   const only = onlyIndex === -1 ? null : argv[onlyIndex + 1];
@@ -397,14 +495,17 @@ function main(argv) {
     say(`  channel ${channel} (${reason}): npm dist-tag ${CHANNEL_TAGS[channel]}`);
     const taggedByName = new Map();
     const tarballs = tarballArguments(argv);
+    const published = publishedArguments(argv);
+    assert.ok(tarballs.length === 0 || published.length === 0, "--tarball is the dry run, --published the run after the publish; not both");
     const cache = seededCache(tarballs);
     if (cache) say(`  ${tarballs.length} release tarballs seeded into ${cache}`);
+    if (published.length > 0) await waitForPublishedLatest({ specs: published });
     const proven = [];
     const left = [];
     try {
       for (const name of checked) {
         say(`\n=== ${name} ===`);
-        (standaloneCheck(name, channel, taggedByName, { tarballs, cache }) ? proven : left).push(name);
+        (standaloneCheck(name, channel, taggedByName, { tarballs, cache, published }) ? proven : left).push(name);
       }
     } finally {
       if (cache) rmSync(cache, { recursive: true, force: true });
@@ -415,5 +516,5 @@ function main(argv) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  main(process.argv);
+  await main(process.argv);
 }

@@ -96,6 +96,12 @@ export class ProgressStore {
     return Boolean(this.#db.prepare("SELECT 1 FROM events WHERE message_id = ?").get(messageId));
   }
 
+  /** The event that took this Message and has not finished it, if any. */
+  unfinished(messageId: string): string | undefined {
+    return (this.#db.prepare("SELECT event_id FROM events WHERE message_id = ? AND done = 0").get(messageId) as
+      { event_id: string } | undefined)?.event_id;
+  }
+
   /** A video request already sent to Grok Imagine, so polling resumes instead of paying again. */
   video(key: string): { requestId: string; deadline: number } | undefined {
     const row = this.#db.prepare("SELECT request_id, deadline FROM videos WHERE key = ?").get(key) as

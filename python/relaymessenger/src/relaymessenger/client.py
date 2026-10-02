@@ -969,7 +969,8 @@ class ContactCardItem(TypedDict, total=False):
     subtitle: Optional[str]
     url: str
     description: Optional[str]
-    handle: Optional[str]
+    #: Empty ("") only on a shared person's card after they deleted their account.
+    handle: str
     first_name: str
     last_name: Optional[str]
     image_url: Optional[str]

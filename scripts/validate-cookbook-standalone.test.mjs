@@ -7,10 +7,13 @@ import { resolve } from "node:path";
 import {
   CHANNEL_TAGS,
   installedMismatch,
+  publishedArguments,
   releaseDeferredPins,
   standaloneChannel,
   tarballArguments,
   unlockedReleaseCandidates,
+  unpublishedReleaseRanges,
+  waitForPublishedLatest,
 } from "./validate-cookbook-standalone.mjs";
 
 const sdk = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.3.0-staging.0" };
@@ -103,4 +106,71 @@ test("--tarball is repeatable and takes only .tgz paths", () => {
   assert.deepEqual(tarballArguments(["node", "x"]), []);
   assert.throws(() => tarballArguments(["node", "x", "--tarball"]), /--tarball takes a .tgz path/u);
   assert.throws(() => tarballArguments(["node", "x", "--tarball", "sdk.tar"]), /--tarball takes a .tgz path/u);
+});
+
+test("release: an unlocked folder whose range names a version npm does not have yet is left to the release", () => {
+  // A push to main runs this check while the release job is still publishing
+  // 0.5.0: `^0.5.0` resolves to nothing (ETARGET) until it lands.
+  const next = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.5.0" };
+  const current = { field: "dependencies", name: "@relaymessenger/chat-sdk-adapter", range: "~0.3.7" };
+  const exact = { field: "dependencies", name: "@relaymessenger/pi", range: "0.1.6" };
+  const onNpm = new Set(["@relaymessenger/chat-sdk-adapter@0.3.7", "@relaymessenger/sdk@0.4.0"]);
+  const isPublished = (name, version) => onNpm.has(`${name}@${version}`);
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [next, current, exact], tarballs: [], isPublished }),
+    [next, exact]);
+  // Once npm has it, the folder is proven here again.
+  onNpm.add("@relaymessenger/sdk@0.5.0");
+  onNpm.add("@relaymessenger/pi@0.1.6");
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [next, exact], tarballs: [], isPublished }), []);
+  onNpm.delete("@relaymessenger/sdk@0.5.0");
+  // The release's dry run installs its own tarballs; a locked folder installs its lockfile; staging installs staging builds.
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [next], tarballs: ["/r/sdk.tgz"], isPublished }), []);
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: true, dependencies: [next], tarballs: [], isPublished }), []);
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "staging", locked: false, dependencies: [next], tarballs: [], isPublished }), []);
+  // A staging range is the release's `^0.5.0` once derived: left to the release until npm has 0.5.0.
+  const staging = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.5.0-staging.0" };
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [staging], tarballs: [], isPublished }), [staging]);
+  onNpm.add("@relaymessenger/sdk@0.5.0");
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [staging], tarballs: [], isPublished }), []);
+  // An exact staging pin is releaseDeferredPins' to leave, not this one's.
+  const exactStaging = { field: "dependencies", name: "@relaymessenger/sdk", range: "0.5.0-staging.4" };
+  assert.deepEqual(unpublishedReleaseRanges({ channel: "release", locked: false, dependencies: [exactStaging], tarballs: [], isPublished }), []);
+});
+
+test("after a publish the check waits until npm installs the released version as latest, within the shared budget", async () => {
+  const reads = [];
+  const answers = [
+    { latest: "0.4.0", versions: ["0.4.0"] },
+    { latest: "0.4.0", versions: ["0.4.0", "0.5.0"] },
+    { latest: "0.5.0", versions: ["0.4.0", "0.5.0"] },
+  ];
+  const waits = [];
+  await waitForPublishedLatest({
+    specs: [{ name: "@relaymessenger/sdk", version: "0.5.0" }],
+    read: async (name) => { reads.push(name); return answers.shift(); },
+    maxAttempts: 5,
+    retryDelayMs: 7,
+    sleep: async (ms) => { waits.push(ms); },
+    say: () => undefined,
+  });
+  assert.equal(reads.length, 3);
+  assert.deepEqual(waits, [7, 7]);
+  await assert.rejects(
+    waitForPublishedLatest({
+      specs: [{ name: "@relaymessenger/sdk", version: "0.5.0" }],
+      read: async () => ({ latest: "0.4.0", versions: ["0.4.0"] }),
+      maxAttempts: 3,
+      retryDelayMs: 1,
+      sleep: async () => undefined,
+      say: () => undefined,
+    }),
+    /@relaymessenger\/sdk@0\.5\.0 is not npm's latest after 3 reads \(latest 0\.4\.0, not listed\)/u,
+  );
+});
+
+test("--published is repeatable and takes name@version", () => {
+  assert.deepEqual(publishedArguments(["node", "x", "--published", "@relaymessenger/sdk@0.5.0", "--channel", "release", "--published", "relaymessenger@0.1.16"]),
+    [{ name: "@relaymessenger/sdk", version: "0.5.0" }, { name: "relaymessenger", version: "0.1.16" }]);
+  assert.deepEqual(publishedArguments(["node", "x"]), []);
+  assert.throws(() => publishedArguments(["node", "x", "--published", "@relaymessenger/sdk"]), /--published takes name@version/u);
 });

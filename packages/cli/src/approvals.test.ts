@@ -192,6 +192,38 @@ describe("owner approvals", () => {
     expect(await asked).toEqual({ reason: "timeout" });
   });
 
+  it("takes an owner's tap that arrives before Relay has answered the card's own send", async () => {
+    // The card reaches the owner's phone, and the owner taps it, before the
+    // HTTP response that names the card's message id reaches this process.
+    const relay = fakeRelay([OWNERS[0]!]);
+    let approvals!: OwnerApprovals;
+    let early: Promise<boolean> | undefined;
+    const create = relay.client.chats.create.bind(relay.client.chats);
+    (relay.client.chats as { create: unknown }).create = async (body: Parameters<typeof create>[0]) => {
+      const sent = await create(body);
+      early = approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, "proceed_always", "Allow for this session"));
+      await early;
+      return sent;
+    };
+    approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
+    const asked = approvals.ask({ ...REQUEST, timeoutMs: 200 });
+    expect(await asked).toEqual({ reason: "answered", by: "ada", choice: REQUEST.choices[1] });
+    expect(await early).toBe(true);
+  });
+
+  it("forgets an early tap on a card no prompt of this process registers", async () => {
+    const relay = fakeRelay([OWNERS[0]!]);
+    let approvals!: OwnerApprovals;
+    const create = relay.client.chats.create.bind(relay.client.chats);
+    (relay.client.chats as { create: unknown }).create = async (body: Parameters<typeof create>[0]) => {
+      // A tap on another bridge's card while this card is in flight.
+      expect(await approvals.take(tap("card-of-another-bridge", { handle: "ada", kind: "user" }))).toBe(true);
+      return create(body);
+    };
+    approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
+    expect(await approvals.ask({ ...REQUEST, timeoutMs: 30 })).toEqual({ reason: "timeout" });
+  });
+
   it("after a restart, drops a tap on an approval card it no longer holds instead of starting a turn", async () => {
     // A fresh process: nothing pending, nothing settled. The card was sent by the process before it.
     const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });

@@ -20,7 +20,10 @@ const form: FormPart = {
 };
 const answers: FormAnswers = { name: "Ada", multi: ["a"], date: "2028-02-29" };
 const response: FormResponsePart = { type: "form_response", answers };
-const read: FormPartResponse = { ...form, has_responded: true, answers, reactions: null };
+const read: FormPartResponse = { ...form, value: "Details", has_responded: true, answers, reactions: null };
+// @ts-expect-error Server af7f1802: every read form carries value, received_message.title else its title.
+const readWithoutValue: FormPartResponse = { ...form, has_responded: true, answers, reactions: null };
+void readWithoutValue;
 const content: MessageContent = {
   parts: [{ type: "text", value: "Form sent" }, response],
   reply_to: { message_id: "source", part_index: 0 },

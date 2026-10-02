@@ -16,7 +16,7 @@ from relaymessenger.webhooks import sign_webhook_headers
 def test_request_and_response_types_are_distinct():
     assert rating_request_part() == {"type": "rating_request"}
     assert set(get_type_hints(RatingRequestPart)) == {"type"}
-    assert set(get_type_hints(RatingRequestPartResponse)) == {"type", "rating", "reactions"}
+    assert set(get_type_hints(RatingRequestPartResponse)) == {"type", "value", "rating", "reactions"}
     assert set(get_type_hints(RatingEvent)) == {"contact", "stars", "review", "created_at", "updated_at"}
     assert set(get_type_hints(RatingDeletedEvent)) == {"contact"}
     for cls in (RatingCreatedWebhook, RatingUpdatedWebhook, RatingDeletedWebhook):

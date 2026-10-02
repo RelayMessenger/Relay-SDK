@@ -93,6 +93,8 @@ export interface FormPart {
 }
 
 export interface FormPartResponse extends FormPart {
+  /** The form's received_message.title, else its title; the words a client that does not draw the form shows in its place. */
+  readonly value: string;
   /** Viewer-specific durable state. False for an agent viewer. */
   readonly has_responded: boolean;
   /** This viewer's answers, or null. Agents read answers on form_response instead. */

@@ -110,6 +110,8 @@ class RatingRequestRating(TypedDict):
 class RatingRequestPartResponse(RatingRequestPart):
     """Only this reader's own rating, never another person's."""
 
+    #: "Enjoying <agent display name>?", the words a client that does not draw the card shows.
+    value: str
     rating: Optional[RatingRequestRating]
     reactions: Optional[List[Dict[str, Any]]]
 

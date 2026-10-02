@@ -888,6 +888,8 @@ export interface RatingRequestPart {
 }
 
 export interface RatingRequestPartResponse extends RatingRequestPart {
+  /** "Enjoying <agent display name>?", the words a client that does not draw the card shows in its place. */
+  value: string;
   /** Only this reader's rating, never another person's. */
   rating: { stars: 1 | 2 | 3 | 4 | 5; review: string | null } | null;
   reactions: Reaction[] | null;
@@ -1663,8 +1665,8 @@ export interface ContactCardItem {
   url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
-  /** Null only on a shared person's card after they deleted their account. */
-  handle: string | null;
+  /** Empty ("") only on a shared person's card after they deleted their account. */
+  handle: string;
   first_name: string;
   last_name: string | null;
   image_url: string | null;
@@ -1689,7 +1691,7 @@ export interface ContactCardItem {
 
 /**
  * What `POST` and `PATCH /v1/contact_card` return: the agent's own card, whose
- * handle is never null. (`GET /v1/contact_card` returns `ContactCardItem`, the
+ * handle is never empty. (`GET /v1/contact_card` returns `ContactCardItem`, the
  * contract's one schema for every card, shared ones included.)
  */
 export interface SetContactCardResponse {

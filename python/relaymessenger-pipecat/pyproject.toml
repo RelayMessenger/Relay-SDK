@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
   "numpy>=1.26",
   "pipecat-ai>=1.11,<2",
-  "relaymessenger[calls]>=0.1.0.dev1",
+  "relaymessenger[calls]>=0.1.0",
 ]
 
 [project.urls]

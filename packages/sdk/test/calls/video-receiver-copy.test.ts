@@ -4,9 +4,15 @@ import { MediaStreamTrack, RtpPacket } from "werift";
 import { createWeriftVideoFactory, loadWebCodecs } from "../../src/calls/engine-werift-video.js";
 import { createVideoPacketizer } from "../../src/calls/video-rtp.js";
 import type { RelayMediaStreamTrackLike } from "../../src/calls/transport.js";
+import { MISSING_WEBCODECS, WEBCODECS_NATIVE } from "./webcodecs-presence.js";
+
+// Every case below decodes real H264/VP8 through node-webcodecs.
+it.skipIf(WEBCODECS_NATIVE)("names the missing optional dependency where node-webcodecs does not load", async () => {
+  await expect(loadWebCodecs()).rejects.toThrow(MISSING_WEBCODECS);
+});
 
 for (const [name, codec] of [["full-range", "h264"], ["limited-range", "h264"], ["vp8", "vp8"]] as const) {
-  it(`factory receiver preserves ${name} decoded planes`, async () => {
+  it.runIf(WEBCODECS_NATIVE)(`factory receiver preserves ${name} decoded planes`, async () => {
     await loadWebCodecs();
     const track = new MediaStreamTrack({ kind: "video" });
     const receiver = createWeriftVideoFactory().createVideoReceiver!(track as unknown as RelayMediaStreamTrackLike, {
@@ -35,7 +41,7 @@ for (const [name, codec] of [["full-range", "h264"], ["limited-range", "h264"], 
   });
 }
 
-it("counts invalid copy layouts as decode errors and closes every output", async () => {
+it.runIf(WEBCODECS_NATIVE)("counts invalid copy layouts as decode errors and closes every output", async () => {
   const wc = await loadWebCodecs();
   const copy = vi.spyOn(wc.VideoFrame.prototype, "copyTo").mockResolvedValue([]);
   const close = vi.spyOn(wc.VideoFrame.prototype, "close");
@@ -68,7 +74,7 @@ it("counts invalid copy layouts as decode errors and closes every output", async
   }
 });
 
-it("rejects an actual 10-bit H264 frame masked as public I420", async () => {
+it.runIf(WEBCODECS_NATIVE)("rejects an actual 10-bit H264 frame masked as public I420", async () => {
   const wc = await loadWebCodecs();
   const { copyDecodedI420 } = await import("../../src/calls/video-frame-copy.js");
   const outputs: InstanceType<typeof wc.VideoFrame>[] = [];

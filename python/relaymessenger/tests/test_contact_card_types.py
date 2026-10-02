@@ -26,3 +26,20 @@ def test_rive_file_requires_every_key_but_allows_null_names() -> None:
 def test_contact_card_create_and_update_return_the_rive_response_type() -> None:
     assert get_type_hints(ContactCards.create)["return"] is SetContactCardResponse
     assert get_type_hints(ContactCards.update)["return"] is SetContactCardResponse
+
+
+def test_a_contact_card_handle_is_a_string_never_none() -> None:
+    # Relay Server af7f1802: a shared person's card after they deleted their
+    # account reads handle "" (Deleted Account), never null.
+    from relaymessenger.client import ContactCardItem
+
+    assert get_type_hints(ContactCardItem)["handle"] is str
+
+
+def test_a_read_form_and_rating_request_carry_their_fallback_words() -> None:
+    from relaymessenger.form_types import FormPartResponse
+    from relaymessenger.parts import RatingRequestPartResponse
+
+    for part in (FormPartResponse, RatingRequestPartResponse):
+        assert get_type_hints(part)["value"] is str, part.__name__
+        assert "value" in part.__required_keys__, part.__name__
