@@ -175,6 +175,34 @@ async def test_it_connects_with_the_token_and_acks_only_after_the_handler_return
     assert request.headers["User-Agent"] == USER_AGENT
 
 
+@pytest.mark.parametrize(
+    "body",
+    json.loads((Path(__file__).resolve().parents[3] / "test/fixtures/rating-server.json").read_text())["webhook_bodies"],
+    ids=["rating.created", "rating.updated", "rating.deleted"],
+)
+async def test_actual_server_rating_event_is_delivered_then_acked(relay_server: FakeRelay, body: str) -> None:
+    envelope = json.loads(body)
+    handled: List[Dict[str, Any]] = []
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready())
+        # Reuse the actual serialized Server body, without rebuilding its payload.
+        await connection.send('{"type":"event","sequence":"1","event":' + body + "}")
+        finished.set_result(await recv(connection))
+
+    async def on_event(event: Dict[str, Any], context: Dict[str, str]) -> None:
+        assert context["sequence"] == "1"
+        handled.append(event)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    assert handled == [envelope]
+    query = relay_server.requests[0].path.partition("?")[2]
+    assert envelope["event_type"] in [value for name, value in parse_qsl(query) if name == "subscribed_events"]
+
+
 async def test_it_answers_relays_ping_with_pong(relay_server: FakeRelay) -> None:
     finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
 
