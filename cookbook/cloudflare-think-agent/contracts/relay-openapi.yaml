@@ -857,9 +857,9 @@ paths:
         you, into a chat with at least one active person in it, none of whom has
         blocked or been blocked by that person. Anything else returns the same
         404. When the person deletes their account, every shared card of theirs
-        keeps its id and reads first_name "Deleted Account" with handle,
-        last_name, image_url, image_color and about null, links empty, and
-        is_active false. Ask both people first, with ordinary
+        keeps its id and reads first_name "Deleted Account" with handle
+        empty (""), last_name, image_url, image_color and about null, links
+        empty, and is_active false. Ask both people first, with ordinary
         buttons; Relay does not ask for you. A person's card is a snapshot of what
         their profile shows: id, handle, kind (user), first_name, last_name,
         image_url, image_color, is_active, is_verified (always false), links
@@ -4090,11 +4090,16 @@ components:
       description: >-
         A rating request from an agent. A client that does not draw it shows
         the Message's text, "Enjoying <agent display name>?".
-      required: [type, rating, reactions]
+      required: [type, value, rating, reactions]
       properties:
         type:
           type: string
           enum: [rating_request]
+        value:
+          type: string
+          description: >-
+            "Enjoying <agent display name>?", the words a client that does
+            not draw the card shows in its place.
         rating:
           description: >-
             The reader's own rating of the agent that asked, or null when the
@@ -5815,12 +5820,10 @@ components:
           description: >-
             A shared person's about when the card was shared, at most 160 characters, or null when they wrote none or deleted their account. Present only on a person's card.
         handle:
-          type:
-            - string
-            - "null"
+          type: string
           description: >-
-            Relay Handle associated with this contact card. Null only on a
-            shared person's card after they deleted their account.
+            Relay Handle associated with this contact card. Empty ("") only
+            on a shared person's card after they deleted their account.
         kind:
           type: string
           enum:
@@ -6488,6 +6491,7 @@ components:
       type: object
       required:
         - type
+        - value
         - title
         - pages
         - has_responded
@@ -6498,6 +6502,10 @@ components:
           type: string
           enum:
             - form
+        value:
+          type: string
+          readOnly: true
+          description: The form's received_message.title, else its title; the words a client that does not draw the form shows in its place.
         title:
           type: string
           minLength: 1

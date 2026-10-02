@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server f9d9b498bd4f5b8c51764568c578ee373b44559c
- * OpenAPI e219a7869c1a6ce3c1364d5dd1155a66e7989c80ecaed2368fce5cf1ba78510e
+ * Relay Server af7f1802cbad49485c8753cb1ad503dd97ae1ada
+ * OpenAPI 7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -271,6 +271,8 @@ export interface RelayPaymentRequestList {
 /** Ask a person to rate this agent; send alone in a direct or group chat. */
 export interface RelayRatingRequestPart { type: "rating_request" }
 export interface RelayRatingRequestPartResponse extends RelayRatingRequestPart {
+  /** "Enjoying <agent display name>?", the words a client that does not draw the card shows in its place. */
+  value: string;
   rating: { stars: 1 | 2 | 3 | 4 | 5; review: string | null } | null;
   reactions: RelayReaction[] | null;
 }

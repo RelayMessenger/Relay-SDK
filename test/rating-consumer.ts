@@ -1,9 +1,12 @@
-import type { MessageContent, MessagePartResponse, RatingRequestPart, RatingEvent, RelayWebhookEvent } from "@relaymessenger/sdk";
+import type { MessageContent, MessagePartResponse, RatingRequestPart, RatingRequestPartResponse, RatingEvent, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { ratingRequestPart } from "@relaymessenger/sdk";
 
 const request: RatingRequestPart = ratingRequestPart();
 const message: MessageContent = { parts: [request] };
-const response: MessagePartResponse = { type: "rating_request", rating: { stars: 5, review: null }, reactions: null };
+const response: MessagePartResponse = { type: "rating_request", value: "Enjoying Echo?", rating: { stars: 5, review: null }, reactions: null };
+// @ts-expect-error Server af7f1802: every read rating_request carries value, the words a client that does not draw the card shows.
+const withoutValue: RatingRequestPartResponse = { type: "rating_request", rating: null, reactions: null };
+const shown: string = (response as RatingRequestPartResponse).value;
 // @ts-expect-error Prompt words are not caller-owned.
 const withTitle: RatingRequestPart = { type: "rating_request", title: "Rate me" };
 // @ts-expect-error An agent cannot select somebody else's target.
@@ -26,4 +29,4 @@ export function receivedRating(event: RelayWebhookEvent): RatingEvent | null {
   }
   return null;
 }
-void message; void response; void withTitle; void withTarget; void withStars;
+void message; void response; void withTitle; void withTarget; void withStars; void withoutValue; void shown;

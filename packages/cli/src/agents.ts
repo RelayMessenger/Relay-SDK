@@ -46,7 +46,7 @@ export const agentRecord = (card: Pick<ContactCardItem, "handle" | "first_name" 
  * it, after that person deletes their account.
  */
 export const cardHandle = (card: Pick<ContactCardItem, "handle">): string => {
-  if (card.handle === null) throw new Error("This contact card has no Handle.");
+  if (card.handle === "") throw new Error("This contact card has no Handle.");
   return card.handle;
 };
 

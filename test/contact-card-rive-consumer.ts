@@ -61,3 +61,12 @@ void [
   missingStateMachine, missingViewModel, nullFile, numericFile,
   numericArtboard, numericStateMachine, objectViewModel, bareAddress,
 ];
+
+// Server af7f1802: a card's handle is always a string; a shared person's card
+// after they deleted their account reads "" (Deleted Account), never null.
+import type { ContactCardItem } from "@relaymessenger/sdk";
+declare const card: ContactCardItem;
+const cardHandle: string = card.handle;
+// @ts-expect-error The contract no longer sends a null handle.
+const nullHandle: ContactCardItem["handle"] = null;
+void cardHandle; void nullHandle;
