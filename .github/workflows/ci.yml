@@ -80,6 +80,19 @@ jobs:
           enable-cache: false
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
+      # The OpenClaw pack smoke and gateway harness install the plugin as a
+      # user would. Its SDK pin names this tree's SDK version, which the
+      # registry may already hold with older bytes (a pull request that adds
+      # an SDK export the plugin imports). Point both at the SDK packed from
+      # this commit; the release on main still validates against the registry.
+      - name: Pack this commit's SDK for the plugin install checks
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sdk-candidate"
+          npm pack --workspace @relaymessenger/sdk --pack-destination "$RUNNER_TEMP/sdk-candidate"
+          tarballs=("$RUNNER_TEMP"/sdk-candidate/*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          echo "RELAY_OPENCLAW_SDK_CANDIDATE_TARBALL=${tarballs[0]}" >> "$GITHUB_ENV"
       - run: npm run validate
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures

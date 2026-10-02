@@ -251,6 +251,9 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "rating.created",
+  "rating.updated",
+  "rating.deleted",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.

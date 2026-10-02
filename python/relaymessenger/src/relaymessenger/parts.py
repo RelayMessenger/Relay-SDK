@@ -12,7 +12,7 @@ one place and adds the ones that had none.
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, Union
 from urllib.parse import urlsplit
 
 from .form_types import FormPart, FormResponsePart
@@ -96,6 +96,29 @@ class PaymentPart(TypedDict):
     checkout_url: str
 
 
+class RatingRequestPart(TypedDict):
+    """Ask a person to rate the sending agent. This is the whole Message."""
+
+    type: Literal["rating_request"]
+
+
+class RatingRequestRating(TypedDict):
+    stars: Literal[1, 2, 3, 4, 5]
+    review: Optional[str]
+
+
+class RatingRequestPartResponse(RatingRequestPart):
+    """Only this reader's own rating, never another person's."""
+
+    rating: Optional[RatingRequestRating]
+    reactions: Optional[List[Dict[str, Any]]]
+
+
+def rating_request_part() -> RatingRequestPart:
+    """Send alone: {"type": "rating_request"}; words/target are server-owned."""
+    return {"type": "rating_request"}
+
+
 #: Any part an agent may send.
 MessagePart = Union[
     TextPart,
@@ -111,6 +134,7 @@ MessagePart = Union[
     FormPart,
     FormResponsePart,
     PaymentPart,
+    RatingRequestPart,
     PlacePart,
 ]
 
@@ -232,6 +256,10 @@ __all__ = [
     "PaymentPart",
     "PlacePart",
     "ReactionType",
+    "RatingRequestPart",
+    "RatingRequestPartResponse",
+    "RatingRequestRating",
+    "rating_request_part",
     "RichCardPart",
     "SelectionPart",
     "SelectionResponsePart",

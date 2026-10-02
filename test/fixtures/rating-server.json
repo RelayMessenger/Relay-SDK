@@ -1,0 +1,96 @@
+{
+  "source": {
+    "repository": "RelayMessenger/Relay-Server",
+    "commit": "f9d9b498bd4f5b8c51764568c578ee373b44559c",
+    "contract_sha256": "e219a7869c1a6ce3c1364d5dd1155a66e7989c80ecaed2368fce5cf1ba78510e",
+    "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests."
+  },
+  "send_response": {
+    "chat_id": "01a0fb84-2763-71b9-b16b-d6d8f213261f",
+    "message": {
+      "id": "01a0fb84-299b-7209-a7d6-1f99c4852610",
+      "chat_id": "01a0fb84-2763-71b9-b16b-d6d8f213261f",
+      "from": "echo",
+      "from_handle": {
+        "id": "01a0fb84-2760-7680-b81c-dabb2b7a4ccf",
+        "handle": "echo",
+        "status": "active",
+        "joined_at": "2026-10-02T07:28:57.188Z",
+        "left_at": null,
+        "is_me": true,
+        "kind": "agent",
+        "display_name": "Echo",
+        "image_url": null,
+        "image_color": null,
+        "subtitle": null,
+        "verified": false,
+        "owner": {
+          "kind": "organization",
+          "name": null,
+          "verified": false
+        },
+        "rive": null
+      },
+      "parts": [
+        {
+          "type": "rating_request",
+          "rating": null,
+          "reactions": null
+        }
+      ],
+      "reply_to": null,
+      "thread": null,
+      "is_system_message": false,
+      "is_from_me": true,
+      "delivery_status": "delivered",
+      "created_at": "2026-10-02T07:28:57.755Z",
+      "updated_at": "2026-10-02T07:28:57.755Z",
+      "sent_at": "2026-10-02T07:28:57.755Z",
+      "delivered_at": "2026-10-02T07:28:57.755Z",
+      "read_at": null,
+      "silent": false,
+      "deliveries": [
+        {
+          "contact": {
+            "id": "01a0fb84-275a-7486-a84f-5b3ac660f376",
+            "handle": "alice",
+            "status": "active",
+            "joined_at": "2026-10-02T07:28:57.188Z",
+            "left_at": null,
+            "is_me": false,
+            "kind": "user",
+            "display_name": "Alice",
+            "image_url": null,
+            "image_color": null,
+            "subtitle": null,
+            "verified": false,
+            "timezone": null,
+            "age_range": null,
+            "links": [],
+            "about": null
+          },
+          "delivered_at": "2026-10-02T07:28:57.755Z",
+          "read_at": null
+        }
+      ]
+    }
+  },
+  "agent_card_after_rating": {
+    "type": "rating_request",
+    "rating": null,
+    "reactions": null
+  },
+  "person_card_after_rating": {
+    "type": "rating_request",
+    "rating": {
+      "stars": 5,
+      "review": "Helped with the test."
+    },
+    "reactions": null
+  },
+  "webhook_bodies": [
+    "{\"api_version\":\"v1\",\"webhook_version\":\"2026-08-30\",\"event_type\":\"rating.created\",\"event_id\":\"01a0fb84-29c3-7387-b9f8-443efc22ea4d\",\"created_at\":\"2026-10-02T07:28:57.795Z\",\"trace_id\":\"6af7b2be3eee8378bca7eba1a96f8e93\",\"agent_id\":\"01a0fb84-2760-7680-b81c-dabb2b7a4ccf\",\"data\":{\"contact\":{\"id\":\"01a0fb84-275a-7486-a84f-5b3ac660f376\",\"handle\":\"alice\",\"display_name\":\"Alice\",\"timezone\":null,\"age_range\":null,\"links\":[],\"about\":null},\"stars\":4,\"review\":null,\"created_at\":\"2026-10-02T07:28:57.783Z\",\"updated_at\":\"2026-10-02T07:28:57.783Z\"}}",
+    "{\"api_version\":\"v1\",\"webhook_version\":\"2026-08-30\",\"event_type\":\"rating.updated\",\"event_id\":\"01a0fb84-29d9-77ea-8831-86fcde836a40\",\"created_at\":\"2026-10-02T07:28:57.817Z\",\"trace_id\":\"4255013776e701c9cb055fda7df2db91\",\"agent_id\":\"01a0fb84-2760-7680-b81c-dabb2b7a4ccf\",\"data\":{\"contact\":{\"id\":\"01a0fb84-275a-7486-a84f-5b3ac660f376\",\"handle\":\"alice\",\"display_name\":\"Alice\",\"timezone\":null,\"age_range\":null,\"links\":[],\"about\":null},\"stars\":5,\"review\":\"Helped with the test.\",\"created_at\":\"2026-10-02T07:28:57.783Z\",\"updated_at\":\"2026-10-02T07:28:57.803Z\"}}",
+    "{\"api_version\":\"v1\",\"webhook_version\":\"2026-08-30\",\"event_type\":\"rating.deleted\",\"event_id\":\"01a0fb84-2a08-71f1-a916-81922fe6f8e5\",\"created_at\":\"2026-10-02T07:28:57.864Z\",\"trace_id\":\"09d5e4cb4f1c1a01a8147a3697a1eef5\",\"agent_id\":\"01a0fb84-2760-7680-b81c-dabb2b7a4ccf\",\"data\":{\"contact\":{\"id\":\"01a0fb84-275a-7486-a84f-5b3ac660f376\",\"handle\":\"alice\",\"display_name\":\"Alice\",\"timezone\":null,\"age_range\":null,\"links\":[],\"about\":null}}}"
+  ]
+}

@@ -54,6 +54,7 @@ import {
 } from "./video.js";
 import { defaultVideoEncoding } from "./video-presets.js";
 import { VideoBufferType, VideoFrame, VideoRotation, videoFrameLength } from "./video-frame.js";
+import { copyDecodedI420, H264I420InputGuard } from "./video-frame-copy.js";
 import {
   type AssembledVideoFrame,
   type RelayVideoCodecName,
@@ -386,6 +387,7 @@ export class WeriftVideoReceiver implements RelayVideoReceiverLike {
   #jitter: JitterBuffer<VideoRtpPacket> | undefined;
   #assembler: VideoFrameAssembler | undefined;
   #decoder: WcVideoDecoder | undefined;
+  #inputGuard: H264I420InputGuard | undefined;
   #waitingForKeyframe = true;
   #lastKeyframeRequestAt = Number.NEGATIVE_INFINITY;
   #keyframeTimer: NodeJS.Timeout | undefined;
@@ -507,6 +509,7 @@ export class WeriftVideoReceiver implements RelayVideoReceiverLike {
     }
     const timestampUs = this.#timestampUs(frame.timestamp);
     try {
+      if (this.#codec === "h264") this.#inputGuard?.observe(frame.data);
       this.#decoder.decode(new wc.EncodedVideoChunk({
         type: frame.keyframe ? "key" : "delta",
         timestamp: timestampUs,
@@ -518,10 +521,13 @@ export class WeriftVideoReceiver implements RelayVideoReceiverLike {
   }
 
   #createDecoder(wc: WebCodecs): WcVideoDecoder {
+    const inputGuard = new H264I420InputGuard();
+    this.#inputGuard = inputGuard;
     const decoder: WcVideoDecoder = new wc.VideoDecoder({
       output: (output) => {
         const rotation = this.#rotation;
-        this.#outputChain = this.#outputChain.then(() => this.#emit(output, rotation));
+        const verifiedH264 = inputGuard.verified;
+        this.#outputChain = this.#outputChain.then(() => this.#emit(output, rotation, verifiedH264));
       },
       error: () => {
         if (this.#decoder === decoder) this.#decodeFailed();
@@ -531,15 +537,12 @@ export class WeriftVideoReceiver implements RelayVideoReceiverLike {
     return decoder;
   }
 
-  async #emit(output: WcVideoFrame, rotation: VideoRotation): Promise<void> {
+  async #emit(output: WcVideoFrame, rotation: VideoRotation, verifiedH264: boolean): Promise<void> {
     try {
       const width = output.codedWidth;
       const height = output.codedHeight;
-      const options = { format: "I420" as const };
-      const data = new Uint8Array(output.allocationSize(options));
-      await output.copyTo(data, options);
-      const tight = videoFrameLength(VideoBufferType.I420, width, height);
-      const frame = new VideoFrame(data.length === tight ? data : data.subarray(0, tight), width, height, VideoBufferType.I420);
+      const data = await copyDecodedI420(output, verifiedH264);
+      const frame = new VideoFrame(data, width, height, VideoBufferType.I420);
       this.#width = width;
       this.#height = height;
       this.#decoded.mark();

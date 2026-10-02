@@ -1783,6 +1783,12 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: A person cannot block a built-in agent such as `relay` (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: The Handle is not a registered Relay Handle that can be blocked (error code `2001`).
           content:
@@ -1823,6 +1829,9 @@ paths:
 
         `reason` is a free-text note returned on the list endpoint. Nothing is
         sent to the blocked Handle, so blocking is silent from their side.
+
+        A person cannot block a built-in agent, the one every account starts
+        with (`relay`); the request is refused with `403` (error code `2003`).
     delete:
       operationId: unblockHandle
       summary: Unblock a handle
@@ -2703,6 +2712,56 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
   /v1/contacts/{handle}/rating:
+    get:
+      operationId: getMyAgentRating
+      summary: Read your rating
+      description: >-
+        Your own rating of an agent, or null when you have not rated it, the
+        way an app's page shows your stars under Tap to Rate. Only a person
+        rates; an agent token is refused with 403 (error code `2003`).
+      tags:
+        - Directory
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RatedAgentHandle"
+      responses:
+        "200":
+          description: Your rating, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - rating
+                properties:
+                  rating:
+                    oneOf:
+                      - type: "null"
+                      - $ref: "#/components/schemas/AgentRating"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is an agent (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The handle is not an active agent (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The handle belongs to the caller (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
     put:
       operationId: rateAgent
       summary: Rate an agent
@@ -2711,7 +2770,10 @@ paths:
         per rater per agent: sending it again replaces the stars and the
         review. Rate an agent only after a real exchange -- one chat you share
         carries at least ten messages between you and at least three from the
-        agent.
+        agent. Only a person rates; an agent token is refused with 403 (error
+        code `2003`). The agent hears it as `rating.created`, then
+        `rating.updated` each time the stars or the review change; sending the
+        same stars and review again changes nothing and sends no event.
       tags:
         - Directory
       security:
@@ -2758,7 +2820,7 @@ paths:
         "403":
           description: >-
             The exchange is below the bar: ten messages and three replies
-            (error code `1005`).
+            (error code `1005`), or the caller is an agent (error code `2003`).
           content:
             application/json:
               schema:
@@ -2780,7 +2842,10 @@ paths:
     delete:
       operationId: deleteAgentRating
       summary: Remove your rating
-      description: Take your rating and review off an agent.
+      description: >-
+        Take your rating and review off an agent. The agent hears it as
+        `rating.deleted`; a later rating is `rating.created` again. Only a
+        person rates; an agent token is refused with 403 (error code `2003`).
       tags:
         - Directory
       security:
@@ -2789,9 +2854,15 @@ paths:
         - $ref: "#/components/parameters/RatedAgentHandle"
       responses:
         "204":
-          description: The rating is gone
+          description: The rating is gone, or there was none
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is an agent (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: The handle is not an active agent (error code `2001`).
           content:
@@ -3026,7 +3097,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message, or adding the agent, establishes that relationship. An agent calls only a person who added it and who has not turned off Allow Calls for it; Allow Calls is the person's own switch for each agent they added, on by default, and it never stops the person's own call to the agent. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 32-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit. When calls are switched off on this server, every create is refused with 503 and nothing is written; `calls_enabled` on GET /v1/me says whether calls are on.
+      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message, or adding the agent, establishes that relationship. An agent calls only a person who added it and who has not turned off Allow Calls for it; Allow Calls is the person's own switch for each agent they added, on by default, and it never stops the person's own call to the agent. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 32-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit. When calls are switched off on this server, every create is refused with 503 and nothing is written; `calls_enabled` on GET /v1/me says whether calls are on. An agent's call to a person none of whose devices runs a Relay build that takes calls is refused with 422 and nothing is written (no Call, no call marker, no missed call).
       parameters:
         - name: chatId
           in: path
@@ -3083,7 +3154,15 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
-          description: The Chat cannot take a Call because it is not an individual Chat containing exactly one user and one agent (error code `1005`).
+          description: |-
+            The Call cannot be placed (error code `1005`). A Chat that is not
+            an individual Chat containing exactly one user and one agent is
+            refused. An agent's call to a person who has no device running a
+            Relay build that takes calls is refused with "This person's Relay
+            app cannot take calls yet. They need to update Relay."; no Call
+            and no call marker are written, so the person sees no missed
+            call. Tell the person in your own words, or send a Message
+            instead.
           content:
             application/json:
               schema:
@@ -3987,6 +4066,61 @@ components:
           description: Reactions on this message part
           items:
             $ref: "#/components/schemas/Reaction"
+    RatingRequestPart:
+      type: object
+      additionalProperties: false
+      description: >-
+        Ask the people in the chat to rate your agent, the way an app asks for
+        a rating. The part carries no words: Relay draws "Enjoying
+        <your agent's name>?", "Tell us what you think." and a Rate button.
+        The button opens one sheet with stars and an optional review.
+        It is the whole message and only an agent sends it, in a
+        one-to-one chat or a group; it always rates the agent that sent it.
+        Only people rate: a chat with no person is refused with 409 (error
+        code `2017`). The answer arrives as `rating.created`,
+        then `rating.updated` whenever the person changes it, and
+        `rating.deleted` when they take it back.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [rating_request]
+    RatingRequestPartResponse:
+      type: object
+      description: >-
+        A rating request from an agent. A client that does not draw it shows
+        the Message's text, "Enjoying <agent display name>?".
+      required: [type, rating, reactions]
+      properties:
+        type:
+          type: string
+          enum: [rating_request]
+        rating:
+          description: >-
+            The reader's own rating of the agent that asked, or null when the
+            reader has not rated it. Nobody else's rating is shown here.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [stars, review]
+              properties:
+                stars:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                review:
+                  type:
+                    - string
+                    - "null"
+                  maxLength: 1000
+        reactions:
+          type:
+            - array
+            - "null"
+          description: Reactions on this message part
+          items:
+            $ref: "#/components/schemas/Reaction"
     PlacePart:
       type: object
       additionalProperties: false
@@ -4070,6 +4204,81 @@ components:
         name: Philz Coffee
         address: 101 Forest Ave, Palo Alto, CA 94301
         reactions: null
+    RatingEvent:
+      type: object
+      additionalProperties: false
+      required: [contact, stars, review, created_at, updated_at]
+      description: >-
+        A person's rating of your agent, as it is now stored. One rating per
+        person: a new one replaces the stars and the review.
+      properties:
+        contact:
+          $ref: "#/components/schemas/ContactEventContact"
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review:
+          type:
+            - string
+            - "null"
+          maxLength: 1000
+          description: The person's words, trimmed; null when they gave stars only.
+        created_at:
+          type: string
+          format: date-time
+          description: When the person first rated your agent.
+        updated_at:
+          type: string
+          format: date-time
+          description: When the stars or the review last changed.
+    RatingCreatedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: rating.created
+            data:
+              $ref: "#/components/schemas/RatingEvent"
+    RatingUpdatedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: rating.updated
+            data:
+              $ref: "#/components/schemas/RatingEvent"
+    RatingDeletedEvent:
+      type: object
+      additionalProperties: false
+      required: [contact]
+      description: A person took their rating of your agent back.
+      properties:
+        contact:
+          $ref: "#/components/schemas/ContactEventContact"
+    RatingDeletedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: rating.deleted
+            data:
+              $ref: "#/components/schemas/RatingDeletedEvent"
     LocationSharingStartedEvent:
       type: object
       required: [shared_by, shared_with, chat_id, began_at, ends_at]
@@ -5098,6 +5307,14 @@ components:
           description: Agents only.
         visibility:
           $ref: "#/components/schemas/AgentVisibility"
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls, so the app can load it
+            before a call. Null when it has none. Present only when kind is
+            agent.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFile"
+            - type: "null"
         creator:
           description: >-
             Who made the agent: its organization, by the name the organization
@@ -7463,6 +7680,7 @@ components:
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
+              - $ref: "#/components/schemas/RatingRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
               - $ref: "#/components/schemas/SystemPartResponse"
@@ -7649,6 +7867,7 @@ components:
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
+              - $ref: "#/components/schemas/RatingRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
             discriminator:
@@ -7668,6 +7887,7 @@ components:
                 payment: "#/components/schemas/PaymentPartResponse"
                 payment_receipt: "#/components/schemas/PaymentReceiptPartResponse"
                 location_request: "#/components/schemas/LocationRequestPartResponse"
+                rating_request: "#/components/schemas/RatingRequestPartResponse"
                 location: "#/components/schemas/LocationPartResponse"
                 place: "#/components/schemas/PlacePartResponse"
         sent_at:
@@ -7732,6 +7952,7 @@ components:
           suggestion_response: "#/components/schemas/SuggestionResponsePart"
           payment: "#/components/schemas/PaymentPart"
           place: "#/components/schemas/PlacePart"
+          rating_request: "#/components/schemas/RatingRequestPart"
       oneOf:
         - $ref: "#/components/schemas/TextPart"
         - $ref: "#/components/schemas/MediaPart"
@@ -7746,6 +7967,7 @@ components:
         - $ref: "#/components/schemas/SuggestionResponsePart"
         - $ref: "#/components/schemas/PaymentPart"
         - $ref: "#/components/schemas/PlacePart"
+        - $ref: "#/components/schemas/RatingRequestPart"
     MessageReadWebhook:
       description: Complete webhook payload for message.read events (2026-08-30 format)
       allOf:
@@ -8306,6 +8528,7 @@ components:
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
+              - $ref: "#/components/schemas/RatingRequestPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
         created_at:
@@ -9292,6 +9515,9 @@ components:
         - payment.expired
         - location.sharing.started
         - location.sharing.stopped
+        - rating.created
+        - rating.updated
+        - rating.deleted
     WebhookEventsResult:
       type: object
       required:
@@ -10053,6 +10279,54 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/LocationSharingStoppedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  rating.created.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookRatingCreatedV20260830
+      summary: Rating created
+      description: A person rated your agent for the first time, with stars and maybe a review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RatingCreatedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  rating.updated.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookRatingUpdatedV20260830
+      summary: Rating updated
+      description: A person changed their rating of your agent, its stars or its review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RatingUpdatedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  rating.deleted.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookRatingDeletedV20260830
+      summary: Rating deleted
+      description: A person took their rating of your agent back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RatingDeletedWebhook"
       responses:
         "200":
           description: Webhook received successfully

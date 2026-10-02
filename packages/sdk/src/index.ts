@@ -146,3 +146,5 @@ export {
   replyTargetContext,
   replyTargetParts,
 } from "./reply-target.js";
+
+export { RATING_REQUEST_GUIDANCE, RATING_REQUEST_BLOCK_INSTRUCTION, ratingRequestPart, ratingRequestPartsError } from "./rating.js";

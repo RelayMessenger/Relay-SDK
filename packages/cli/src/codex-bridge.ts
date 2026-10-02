@@ -1,6 +1,8 @@
 import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
 import {
   BUTTONS_BLOCK_INSTRUCTION,
+  RATING_REQUEST_GUIDANCE,
+  RATING_REQUEST_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
   PAYMENT_BLOCK_INSTRUCTION,
   PAYMENT_GUIDANCE,
@@ -243,7 +245,7 @@ export const ANSWER_INSTRUCTION =
  * text for every runtime, so the same person gets buttons and link cards
  * under the same conditions whichever agent answers.
  */
-export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE}`;
+export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}`;
 
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during
