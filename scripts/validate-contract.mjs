@@ -19,6 +19,12 @@ const declaredTypes = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../packages/sdk/dist/types.d.ts"),
   "utf8",
 );
+/** One exported interface of the built SDK types, from its opening line to its closing brace. */
+const declaredBlock = (name) => {
+  const start = declaredTypes.search(new RegExp(`export interface ${name}\\b[^{]*\\{\\n`, "u"));
+  assert.notEqual(start, -1, `packages/sdk/dist/types.d.ts declares no ${name}`);
+  return declaredTypes.slice(start, declaredTypes.indexOf("\n}\n", start) + 3);
+};
 const readRequiredFile = (path, label) => {
   try {
     return readFileSync(path);
@@ -366,8 +372,9 @@ const validateOpenAPI = () => {
   assert.match(declaredTypes, /user_id\?: UUID;/u);
   assert.equal(schemas.ContactCardItem.properties.links.type, "array");
   assert.equal(schemas.ContactCardItem.properties.links.maxItems, 5);
-  assert.deepEqual(schemas.ContactCardItem.properties.handle.type, ["string", "null"]);
-  assert.match(declaredTypes, /handle: string \| null;/u);
+  // Server af7f1802: a deleted person's shared card reads handle "", never null.
+  assert.equal(schemas.ContactCardItem.properties.handle.type, "string");
+  assert.match(declaredBlock("ContactCardItem"), /\n\s+handle: string;\n/u);
   for (const field of ["id", "subtitle", "url"]) {
     assert.ok(schemas.ContactCardItem.properties[field]);
     assert.equal(schemas.ContactCardItem.required.includes(field), false);
@@ -700,7 +707,10 @@ const validateOpenAPI = () => {
   assert.equal(rating.additionalProperties, false);
   assert.deepEqual(Object.keys(rating.properties), ["type"]);
   assert.deepEqual(rating.properties.type.enum, ["rating_request"]);
-  assert.deepEqual(document.components.schemas.RatingRequestPartResponse.required, ["type", "rating", "reactions"]);
+  assert.deepEqual(document.components.schemas.RatingRequestPartResponse.required, ["type", "value", "rating", "reactions"]);
+  assert.equal(document.components.schemas.RatingRequestPartResponse.properties.value.type, "string");
+  assert.match(declaredBlock("RatingRequestPartResponse"), /\n\s+value: string;\n/u);
+  assert.ok(document.components.schemas.FormPartResponse.required.includes("value"));
   assert.deepEqual(document.components.schemas.RatingEvent.required, ["contact", "stars", "review", "created_at", "updated_at"]);
   assert.deepEqual(document.components.schemas.RatingDeletedEvent.required, ["contact"]);
   for (const [event, schema] of [["rating.created", "RatingCreatedWebhook"], ["rating.updated", "RatingUpdatedWebhook"], ["rating.deleted", "RatingDeletedWebhook"]]) {
