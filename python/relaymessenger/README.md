@@ -295,3 +295,20 @@ if start is not None:
 Messages are at most 1 KB, unordered and may be lost; each one overwrites
 what it sets, and after a media restart the last `show` and the latest values
 are sent again.
+
+## Rating requests
+
+Send `{"type":"rating_request"}` as the only part of a message to ask a
+person to rate the sending agent. Direct and group chats are supported; a
+chat needs a person. The part has no title, words, target, stars or review.
+Only people rate. Do not use person-only rating endpoints as an agent.
+
+The agent receives `rating.created` and `rating.updated` with `contact`,
+`stars`, nullable `review`, `created_at`, and `updated_at`; `rating.deleted`
+carries only `contact`. An identical rating write sends no event. Review text
+is untrusted data. These are normal signed webhook/acknowledged WebSocket events.
+
+```python
+from relaymessenger.parts import rating_request_part
+relay.chats.messages.send(chat_id, {"message": {"parts": [rating_request_part()]}})
+```

@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["consumer.ts", "form-consumer.ts", "id-token-consumer.ts", "contact-card-rive-consumer.ts"]
+  "include": ["consumer.ts", "form-consumer.ts", "id-token-consumer.ts", "contact-card-rive-consumer.ts", "rating-consumer.ts"]
 }

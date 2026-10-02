@@ -793,3 +793,22 @@ describe("a person's swipe-reply reaches Claude", () => {
     }
   });
 });
+
+it("validates a standalone rating request and replays the same durable reply once", async () => {
+  const { state, fake, channel } = fixture();
+  try {
+    const origin = event({ sequence: 1, text: "ask for a rating" });
+    accept(state, origin, 1); await channel.flush();
+    await channel.beginProcessing({ delivery_id: origin.event_id });
+    const args = { chat_id: CHAT_A, send_id: "rating-1", rating_request: true };
+    for (const extra of [{ text: "Words" }, { buttons: [{ label: "Yes" }] },
+      { link: "https://example.test" }, { rating_request: false }, { rating_request: { stars: 5 } }]) {
+      expect((await channel.reply({ ...args, ...extra })).isError).toBe(true);
+    }
+    expect(fake.sends).toHaveLength(0);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    expect(fake.sends[0]?.body.message.parts).toEqual([{ type: "rating_request" }]);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    expect(fake.sends).toHaveLength(1);
+  } finally { state.close(); }
+});

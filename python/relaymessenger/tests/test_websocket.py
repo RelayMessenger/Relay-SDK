@@ -563,3 +563,29 @@ async def test_a_peer_close_runs_none_of_the_buffered_events(relay_server: FakeR
     await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
     assert calls[0] == ("1", 1)
     assert ("2", 1) not in calls
+
+
+@pytest.mark.parametrize("event_type", ["rating.created", "rating.updated", "rating.deleted"])
+async def test_rating_events_reach_handler_before_ack(relay_server: FakeRelay, event_type: str) -> None:
+    finished = asyncio.get_running_loop().create_future()
+    handled = []
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready())
+        value = json.loads(event(1, event_type))
+        value["event"]["data"] = {"contact": {"id": AGENT, "handle": "person", "display_name": "Person",
+                                             "timezone": None, "age_range": None, "links": [], "about": None}}
+        if event_type != "rating.deleted":
+            value["event"]["data"].update(stars=4, review="Helpful", created_at="2026-10-02T00:00:00Z", updated_at="2026-10-02T00:00:00Z")
+        await connection.send(json.dumps(value))
+        ack = await recv(connection)
+        assert handled == [value["event"]]
+        finished.set_result(ack)
+
+    async def on_event(envelope, context) -> None:
+        assert context["sequence"] == "1"
+        handled.append(envelope)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}

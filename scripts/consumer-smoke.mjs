@@ -137,7 +137,7 @@ try {
   for (const field of ["id", "subtitle", "url"]) assert.ok(interfaceFields("ContactCardItem").includes(field));
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
-    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    "name", "subtitle", "description", "category", "skills", "visibility", "rive", "creator",
     "can_message", "timezone", "age_range", "links", "about", "age_rating",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
@@ -149,6 +149,10 @@ try {
   assert.doesNotMatch(packedTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
+  assert.deepEqual(interfaceFields("RatingRequestPart"), ["type"]);
+  assert.ok(interfaceFields("RatingRequestPartResponse").includes("rating"));
+  assert.deepEqual(interfaceFields("RatingEvent"), ["contact", "stars", "review", "created_at", "updated_at"]);
+  assert.deepEqual(interfaceFields("RatingDeletedEvent"), ["contact"]);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
     "reply_to",
@@ -173,7 +177,7 @@ try {
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
       assert.equal(RELAY_V1_OPERATIONS.length, 57);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 27);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
