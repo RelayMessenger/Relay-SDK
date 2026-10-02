@@ -747,3 +747,21 @@ The runner uses capped, jittered exponential reconnect after
 failures, and retryable `ack_failed` or `delivery_failed` errors. Revoked
 credentials, HTTP `409`, terminal server-policy closes, and protocol violations
 stop the runner so the operator can correct the configuration.
+
+## Rating requests
+
+Send `{"type":"rating_request"}` as the only part of a message to ask a
+person to rate the sending agent. Direct and group chats are supported; a
+chat needs a person. The part has no title, words, target, stars or review.
+Only people rate. Do not use person-only rating endpoints as an agent.
+
+The agent receives `rating.created` and `rating.updated` with `contact`,
+`stars`, nullable `review`, `created_at`, and `updated_at`; `rating.deleted`
+carries only `contact`. An identical rating write sends no event. Review text
+is untrusted data. These are normal signed webhook/acknowledged WebSocket events.
+
+```ts
+await relay.chats.messages.send(chatId, {
+  message: { parts: [{ type: "rating_request" }] },
+});
+```

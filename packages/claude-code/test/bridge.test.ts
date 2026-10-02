@@ -474,3 +474,10 @@ it("sends a form beside its words and refuses it beside any other control", () =
   expect(() => buildReplyMessages("x", "stable", undefined, undefined, "https://example.com", undefined, undefined, form)).toThrow("beside text only");
   expect(() => buildReplyMessages("x", "stable", undefined, undefined, undefined, selection, undefined, form)).toThrow("beside text only");
 });
+
+it("sends only the rating request with its original idempotency key and refuses mixed content", () => {
+  expect(buildReplyMessages("", "rating-key", undefined, undefined, undefined, undefined, undefined, undefined,
+    { type: "rating_request" })).toEqual([{ message: { parts: [{ type: "rating_request" }], idempotency_key: "rating-key" } }]);
+  expect(() => buildReplyMessages("words", "rating-key", undefined, undefined, undefined, undefined, undefined, undefined,
+    { type: "rating_request" })).toThrow(/whole Message/);
+});

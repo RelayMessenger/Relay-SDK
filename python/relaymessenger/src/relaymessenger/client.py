@@ -19,7 +19,7 @@ import json
 import urllib.error
 import urllib.request
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union, cast
 from urllib.parse import quote, urlencode
 
 from .errors import RelayAPIError
@@ -130,6 +130,47 @@ class ContactEventContact(TypedDict):
     #: The person's about, as they wrote it in Relay: plain text, at most 160
     #: characters; None when they wrote none.
     about: Optional[str]
+
+
+class RatingEvent(TypedDict):
+    """Current stored rating, delivered as rating.created or rating.updated."""
+
+    contact: ContactEventContact
+    stars: Literal[1, 2, 3, 4, 5]
+    review: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+class RatingDeletedEvent(TypedDict):
+    contact: ContactEventContact
+
+
+class _RatingWebhookBase(TypedDict):
+    api_version: Literal["v1"]
+    webhook_version: Literal["2026-08-30"]
+    event_id: str
+    created_at: str
+    trace_id: str
+    agent_id: str
+
+
+class RatingCreatedWebhook(_RatingWebhookBase):
+    event_type: Literal["rating.created"]
+    data: RatingEvent
+
+
+class RatingUpdatedWebhook(_RatingWebhookBase):
+    event_type: Literal["rating.updated"]
+    data: RatingEvent
+
+
+class RatingDeletedWebhook(_RatingWebhookBase):
+    event_type: Literal["rating.deleted"]
+    data: RatingDeletedEvent
+
+
+RatingWebhookEvent = Union[RatingCreatedWebhook, RatingUpdatedWebhook, RatingDeletedWebhook]
 
 
 class _PartyRequired(TypedDict):
@@ -361,6 +402,7 @@ class ContactCard(TypedDict, total=False):
     category: Optional[str]
     skills: List[Dict[str, Any]]
     visibility: str
+    rive: Optional[RiveFile]
     #: Who the agent is for: "everyone", or "18_plus" (only people whose age
     #: range is 18_plus reach it).
     age_rating: AgentAgeRating

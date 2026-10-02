@@ -4,6 +4,7 @@ import type {
   Chat,
   Message,
   MessagePart,
+  RatingRequestPart,
   MessagePartResponse,
   MessageSendParams,
   RelayWebhookEvent,
@@ -299,7 +300,13 @@ export function buildReplyMessages(
   selection?: SelectionPart,
   payment?: PaymentPart,
   form?: FormPart,
+  ratingRequest?: RatingRequestPart,
 ): MessageSendParams[] {
+  if (ratingRequest) {
+    if (text || buttons || link || selection || payment || form) throw new Error("a rating request is the whole Message");
+    return [{ message: { parts: [ratingRequest], idempotency_key: idempotencyKey,
+      ...(replyTo ? { reply_to: { message_id: replyTo } } : {}) } }];
+  }
   if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
   if (payment && (buttons || selection)) throw new Error("a payment cannot be combined with buttons or selection");
   if (form && (buttons || link || selection || payment)) throw new Error("a form sits beside text only");

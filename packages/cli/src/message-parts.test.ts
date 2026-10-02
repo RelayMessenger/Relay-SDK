@@ -147,3 +147,16 @@ describe("message parts on every send", () => {
     });
   });
 });
+
+it("sends rating requests alone via the flag and raw parts; rejects mixed/server-owned fields before HTTP", async () => {
+  for (const flags of [["--rating-request"], ["--parts", '[{"type":"rating_request"}]']]) {
+    expect((await sendParts(flags)).parts).toEqual([{ type: "rating_request" }]);
+  }
+  for (const flags of [["--rating-request", "--text", "Rate me"],
+    ["--parts", '[{"type":"rating_request","rating":5}]'],
+    ["--parts", '[{"type":"rating_request","handle":"other"}]'],
+    ["--parts", '[{"type":"rating_request"},{"type":"text","value":"More"}]']]) {
+    const result = await run(["messages", "send", "--to", "ada", ...flags]);
+    expect(result.code).not.toBe(0); expect(result.calls).toHaveLength(0);
+  }
+});

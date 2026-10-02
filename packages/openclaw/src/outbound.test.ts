@@ -265,3 +265,12 @@ it("keeps the words and reports a refused payment request instead of sending a c
   expect(requests).toEqual([{ message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "payment-refused" } }]);
   expect(errors).toEqual(["the payment was not sent: Connect Stripe in the Relay Console first."]);
 });
+
+it("sends a rating request fence alone using the existing delivery key", async () => {
+  const calls: unknown[] = [];
+  const relay = {
+    chats: { messages: { send: async (_chat: string, body: unknown) => { calls.push(body); return { message: { id: "rating" } }; } } },
+  } as unknown as Parameters<typeof sendRelayText>[0]["relay"];
+  await sendRelayText({ relay, chatId: "chat", text: '```rating_request\n{}\n```', idempotencyKey: "rating-key" });
+  expect(calls).toEqual([{ message: { parts: [{ type: "rating_request" }], idempotency_key: "rating-key" } }]);
+});

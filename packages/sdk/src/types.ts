@@ -882,6 +882,17 @@ export interface PlacePartResponse extends PlacePart {
   reactions: Reaction[] | null;
 }
 
+/** Agent-only request to rate the sending agent. Whole Message; the chat needs a person. */
+export interface RatingRequestPart {
+  type: "rating_request";
+}
+
+export interface RatingRequestPartResponse extends RatingRequestPart {
+  /** Only this reader's rating, never another person's. */
+  rating: { stars: 1 | 2 | 3 | 4 | 5; review: string | null } | null;
+  reactions: Reaction[] | null;
+}
+
 export type MessagePart =
   | TextPart
   | MediaPart
@@ -895,6 +906,7 @@ export type MessagePart =
   | FormPart
   | FormResponsePart
   | PaymentPart
+  | RatingRequestPart
   | PlacePart;
 
 export interface TextPartResponse extends TextPart {
@@ -1026,6 +1038,7 @@ export type MessagePartResponse =
   | SuggestionResponsePartResponse
   | FormPartResponse
   | FormResponsePartResponse
+  | RatingRequestPartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
   | LocationRequestPartResponse
@@ -1075,6 +1088,7 @@ export interface SentMessage {
     | SuggestionResponsePartResponse
     | FormPartResponse
     | FormResponsePartResponse
+    | RatingRequestPartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
       | LocationRequestPartResponse
@@ -1537,6 +1551,8 @@ export interface ContactLookup {
   skills?: AgentSkill[];
   /** Whether the agent is listed in the directory. Agents only. */
   visibility?: AgentVisibility;
+  /** Agent-only call animation descriptor, when configured. */
+  rive?: RiveFile | null;
   /**
    * Who made the agent: its organization, by the name the organization gave
    * in the Relay Console. Null when the organization has not given a name.
@@ -1957,6 +1973,24 @@ export interface ContactRemovedEvent {
   contact: ContactEventContact;
 }
 
+/** Current stored rating of your agent; only a person creates or changes it. */
+export interface RatingEvent {
+  contact: ContactEventContact;
+  stars: 1 | 2 | 3 | 4 | 5;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RatingDeletedEvent {
+  contact: ContactEventContact;
+}
+
+export type RatingCreatedWebhook = RelayWebhookEnvelope<RatingEvent, "rating.created">;
+export type RatingUpdatedWebhook = RelayWebhookEnvelope<RatingEvent, "rating.updated">;
+export type RatingDeletedWebhook = RelayWebhookEnvelope<RatingDeletedEvent, "rating.deleted">;
+export type RatingWebhookEvent = RatingCreatedWebhook | RatingUpdatedWebhook | RatingDeletedWebhook;
+
 export interface RelayWebhookEnvelope<
   T = Record<string, unknown>,
   TEventType extends WebhookEventType = WebhookEventType,
@@ -2016,6 +2050,9 @@ type OtherWebhookEventType = Exclude<
   | "payment.expired"
   | "location.sharing.started"
   | "location.sharing.stopped"
+  | "rating.created"
+  | "rating.updated"
+  | "rating.deleted"
 >;
 
 export type RelayWebhookEvent =
@@ -2025,6 +2062,7 @@ export type RelayWebhookEvent =
     TypingIndicatorWebhookEventType
   >
   | MessageFailedWebhook
+  | RatingWebhookEvent
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | CallWebhookEvent

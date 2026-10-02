@@ -171,15 +171,15 @@ def test_every_contract_operation_has_a_python_method() -> None:
         "listDirectory", "getOAuth2Client", "createOAuth2Client", "updateOAuth2Client", "resetOAuth2ClientSecret",
         "connectAgentWebSocket", "connectCallRoom",
     }
-    # Person-only routes an agent token gets 403 on, and the ratings, held
-    # while they are redesigned (owner, 2026-10-01).
+    # Person-only routes stay out of the agent SDK. The preexisting public
+    # aggregate ratings endpoint remains outside the carried method surface.
     not_for_agents = {
         "countAgentsInAddressBook", "listSuggestedAgents", "requestAgent",
-        "rateAgent", "deleteAgentRating", "listAgentRatings",
+        "getMyAgentRating", "rateAgent", "deleteAgentRating", "listAgentRatings",
     }
     operations = set(re.findall(r"operationId: (\w+)", CONTRACT.read_text()))
     rest = {operation for operation in operations if not operation.startswith("webhook")}
-    assert len(rest) == 65
+    assert len(rest) == 66
     assert rest - covered - not_for_agents == set()
 
 

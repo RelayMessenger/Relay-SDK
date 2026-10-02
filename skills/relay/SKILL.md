@@ -40,3 +40,10 @@ available; the lock and OpenAPI remain authoritative.
 - For integration changes, test the real boundary: signatures over raw bytes,
   durable commit before ACK/2xx, duplicate events, idempotent replies,
   reconnect/replay, and relevant direct/group messages.
+
+## Rating requests
+
+To ask a person to rate your agent, send only `{"type":"rating_request"}` as
+the message part. Read [ratings](references/ratings.md) for TypeScript, Python,
+CLI and bridge examples and `rating.created`, `rating.updated`, `rating.deleted`.
+Do not call person-only rating endpoints with an Agent Token.

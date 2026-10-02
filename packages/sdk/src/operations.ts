@@ -317,4 +317,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "rating.created",
+  "rating.updated",
+  "rating.deleted",
 ] as const;

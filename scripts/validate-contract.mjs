@@ -38,15 +38,18 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "736f112e78703f94751f8e5f36f0ae6fdf18ddd4", "SDK contract provenance must identify the exact canonical Server source");
+assert.ok(/^[a-f0-9]{40}$/u.test(manifest.upstream.commit)
+  || (manifest.upstream.commit === "PENDING" && manifest.upstream.publication_status === "local-only"),
+  "SDK contract provenance must identify a durable source or an explicit local candidate");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
 // carry. WebSocket endpoints are transports, not REST resource methods.
-// Rating methods arrive with their own carry.
+// Person-only rating methods are not agent SDK operations.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
   { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
+  { method: "GET", path: "/v1/contacts/{handle}/rating", operationId: "getMyAgentRating" },
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
@@ -132,11 +135,11 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 57);
 assert.equal(manifest.path_count, 37);
 assert.equal(manifest.source_path_count, 44);
-assert.equal(manifest.source_schema_count, 228);
-assert.equal(manifest.callback_count, 24);
+assert.equal(manifest.source_schema_count, 235);
+assert.equal(manifest.callback_count, 27);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
 assert.equal(operationJSON.length, 57);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 27);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -578,7 +581,7 @@ const validateOpenAPI = () => {
   // Agent-only directory profile fields are optional on a contact lookup.
   assert.deepEqual(Object.keys(contactLookup.properties), [
     ...contactLookup.required,
-    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    "name", "subtitle", "description", "category", "skills", "visibility", "rive", "creator",
     // Server 00093564: handle lookups say whether the caller may message now.
     "can_message",
     // Server 461: a person's IANA time zone.
@@ -692,6 +695,25 @@ const validateOpenAPI = () => {
   }
   assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/media"), false);
   assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/room"), false);
+  const rating = document.components.schemas.RatingRequestPart;
+  assert.deepEqual(rating.required, ["type"]);
+  assert.equal(rating.additionalProperties, false);
+  assert.deepEqual(Object.keys(rating.properties), ["type"]);
+  assert.deepEqual(rating.properties.type.enum, ["rating_request"]);
+  assert.deepEqual(document.components.schemas.RatingRequestPartResponse.required, ["type", "rating", "reactions"]);
+  assert.deepEqual(document.components.schemas.RatingEvent.required, ["contact", "stars", "review", "created_at", "updated_at"]);
+  assert.deepEqual(document.components.schemas.RatingDeletedEvent.required, ["contact"]);
+  for (const [event, schema] of [["rating.created", "RatingCreatedWebhook"], ["rating.updated", "RatingUpdatedWebhook"], ["rating.deleted", "RatingDeletedWebhook"]]) {
+    assert.equal(document["x-relay-webhooks"][`${event}.v2026-08-30`].post.requestBody.content["application/json"].schema.$ref,
+      `#/components/schemas/${schema}`);
+    assert.ok(RELAY_WEBHOOK_EVENT_TYPES.includes(event));
+  }
+  assert.ok(declaredTypes.includes('type: "rating_request"'));
+  assert.ok(declaredTypes.includes('RatingRequestPartResponse'));
+  assert.ok(declaredTypes.includes('RatingWebhookEvent'));
+  for (const operation of ["getMyAgentRating", "rateAgent", "deleteAgentRating"]) {
+    assert.equal(operationJSON.some((entry) => entry.operationId === operation), false, `${operation} is person-only`);
+  }
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {

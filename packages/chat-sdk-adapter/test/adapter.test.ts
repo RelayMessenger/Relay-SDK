@@ -2212,3 +2212,23 @@ describe("a swipe-reply's target", () => {
       .toBeUndefined();
   });
 });
+
+it("posts a standalone rating request through the existing message/idempotency lane", async () => {
+  const { adapter, fetchMock } = adapterHarness();
+  const chat = createMockChatInstance(); await adapter.initialize(chat);
+  vi.mocked(chat.processMessage).mockImplementation(async () => {
+    await adapter.postMessageParts(THREAD_ID, [{ type: "rating_request" }]);
+  });
+  const response = await adapter.handleWebhook(await signedRequest(envelope()));
+  expect(response.status).toBe(200);
+  const sends = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(sends).toHaveLength(1);
+  expect(JSON.parse(String(sends[0]?.[1]?.body)).message.parts).toEqual([{ type: "rating_request" }]);
+});
+
+it("refuses mixed rating requests before any outbound HTTP", async () => {
+  const fetchMock = vi.fn();
+  const adapter = createRelayAdapter({ token: "test", fetch: fetchMock as typeof fetch });
+  await expect(adapter.postMessageParts(THREAD_ID, [{ type: "rating_request" }, { type: "text", value: "Words" }])).rejects.toThrow(/whole Message/);
+  expect(fetchMock).not.toHaveBeenCalled();
+});

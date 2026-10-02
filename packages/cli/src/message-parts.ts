@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import {
   buttonsPart,
+  ratingRequestPart,
+  ratingRequestPartsError,
   formPart,
   selectionPart,
   type ButtonItem,
@@ -20,6 +22,7 @@ import { InvalidArgumentError, type Command } from "commander";
  */
 export interface MessagePartOptions {
   text?: string;
+  ratingRequest?: boolean;
   mention?: string;
   media?: string[];
   link?: string;
@@ -48,6 +51,7 @@ const partIndex = (value: string): number => {
 /** Adds the shared message flags to a send command. `--text` stays the first. */
 export const messagePartOptions = (command: Command): Command => command
   .option("--text <text>", "the text to send")
+  .option("--rating-request", "request a rating; send alone")
   .option("--mention <handle>", "mention this @handle written in --text")
   .option("--media <url-or-attachment-id>", "an https file URL or attachment ID", collect)
   .option("--link <url>", "a link with its preview, sent alone")
@@ -140,7 +144,7 @@ const textPart = (text: string, mention: string | undefined): TextPart => {
 };
 
 const PART_FLAGS = [
-  "text", "media", "link", "button", "selection", "form", "richCard", "carousel", "place", "payment",
+  "text", "media", "link", "button", "selection", "form", "richCard", "carousel", "place", "payment", "ratingRequest",
 ] as const;
 
 /**
@@ -169,6 +173,7 @@ export const messageContent = (
     parts = list.map((part, index) => object(`--parts item ${index}`, part)) as unknown as MessagePart[];
   } else {
     parts = [
+      ...(options.ratingRequest ? [ratingRequestPart()] : []),
       ...(options.text === undefined ? [] : [textPart(options.text, options.mention)]),
       ...(options.media ?? []).map((media): MessagePart => {
         const value = media.trim();
@@ -187,6 +192,8 @@ export const messageContent = (
   if (parts.length === 0) {
     throw new Error("Nothing to send. Pass --text, a part flag such as --media or --button, or --parts.");
   }
+  const ratingError = ratingRequestPartsError(parts);
+  if (ratingError) throw new Error(ratingError);
   return {
     parts,
     ...(options.replyTo === undefined
