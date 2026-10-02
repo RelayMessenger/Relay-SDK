@@ -54,6 +54,7 @@ import {
 } from "./video.js";
 import { defaultVideoEncoding } from "./video-presets.js";
 import { VideoBufferType, VideoFrame, VideoRotation, videoFrameLength } from "./video-frame.js";
+import { copyDecodedI420 } from "./video-frame-copy.js";
 import {
   type AssembledVideoFrame,
   type RelayVideoCodecName,
@@ -535,11 +536,8 @@ export class WeriftVideoReceiver implements RelayVideoReceiverLike {
     try {
       const width = output.codedWidth;
       const height = output.codedHeight;
-      const options = { format: "I420" as const };
-      const data = new Uint8Array(output.allocationSize(options));
-      await output.copyTo(data, options);
-      const tight = videoFrameLength(VideoBufferType.I420, width, height);
-      const frame = new VideoFrame(data.length === tight ? data : data.subarray(0, tight), width, height, VideoBufferType.I420);
+      const data = await copyDecodedI420(output);
+      const frame = new VideoFrame(data, width, height, VideoBufferType.I420);
       this.#width = width;
       this.#height = height;
       this.#decoded.mark();
