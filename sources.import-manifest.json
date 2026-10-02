@@ -987,7 +987,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/gateway-harness.mjs",
       "source_sha256": "da567285e213b9facc5c3d78b34df429f86fe610acd122230b1dc77fb81ac0c9",
-      "destination_sha256": "c4cb27ccdfb0337f239641f8043e6dc84ec2dd112006a3fc94910f38a7205ac6",
+      "destination_sha256": "70dc8e49983d67c661c58e124c4cec784b16295c96c75b71322c9655bdce3400",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -998,7 +998,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/pack-smoke.mjs",
       "source_sha256": "2a3f770c4bacc9acd2a998845ff03303d1e9e52d3aa39b73eb432e88b4668a96",
-      "destination_sha256": "0ccc394bdb22a19af14dcfce37df4e1d479ef145e1389d46d62fe5749e715258",
+      "destination_sha256": "55d46c65c58782fba54ecc80cdd6f7016d7c31730ff09478bcf5a6fee621bff4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
