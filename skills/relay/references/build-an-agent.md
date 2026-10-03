@@ -64,7 +64,6 @@ seen: set[str] = set()
 async def on_event(event, context) -> None:
     if event["event_id"] in seen:  # Relay may deliver an event again
         return
-    seen.add(event["event_id"])
     data = event["data"]
     if event["event_type"] == "message.received" and data["direction"] == "inbound":
         chat_id = data["chat"]["id"]
@@ -78,6 +77,7 @@ async def on_event(event, context) -> None:
             }})
     elif event["event_type"] == "call.created":
         ...  # calls.md#answer-a-call: start the call as a task, never await it here
+    seen.add(event["event_id"])  # only after it succeeded; a raise makes Relay deliver it again
 
 async def on_full_sync(context) -> None:
     pass  # Relay could not replay: rebuild history from relay.chats if you keep it
