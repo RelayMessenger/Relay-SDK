@@ -7,8 +7,6 @@ gives it a voice. After each step, open Relay on your phone to see it working.
 ## Before you start
 
 You need Node.js 22 or newer, a coding agent, and the Relay app on your phone.
-Get an xAI API key at https://console.x.ai and an ElevenLabs API key at
-https://elevenlabs.io.
 
 Sign in to Relay. `login` opens your browser; sign in with Google or Apple.
 `@latest` makes sure you run the newest version:
@@ -17,13 +15,13 @@ Sign in to Relay. `login` opens your browser; sign in with Google or Apple.
 npx relaymessenger@latest login
 ```
 
-Add your xAI key:
+Add your xAI key. Get one at https://console.x.ai:
 
 ```sh
 export XAI_API_KEY='paste-your-xai-key'
 ```
 
-Add your ElevenLabs key:
+Add your ElevenLabs key. Get one at https://elevenlabs.io:
 
 ```sh
 export ELEVENLABS_API_KEY='paste-your-elevenlabs-key'
