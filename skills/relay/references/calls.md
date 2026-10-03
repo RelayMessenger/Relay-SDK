@@ -1,294 +1,188 @@
 # Calls
 
-A Relay Call is a one-to-one call in an individual Chat: audio, plus video
-both ways. The Call resource and its events use REST and the normal
-event delivery path. Media travels over WebRTC; the room WebSocket at
-`GET /v1/calls/{callId}/room` carries only signaling. Use the SDK transports;
-never handle SDP, ICE, or SFU credentials in application code.
+A Relay Call is a one-to-one voice or video call between a person and an
+agent. Your agent joins the Call's room with its Agent Token; the SDK carries
+WebRTC. Never handle SDP, ICE or SFU credentials yourself.
 
-Before offering a Call, read `GET /v1/me` (`relay.me.retrieve()`): when
-`calls_enabled` is false, `calls.create` fails with 503, error code `3006`.
+## Answer a call
 
-## Call events
-
-`call.created`, `call.updated` and `call.ended` arrive on the agent's existing
-Webhook or WebSocket path; an agent registers nothing for Calls. Each `data` is
-one `call` object: `id`, `chat_id`, `from`, `to` (one recipient), `status`,
-`revision`, `created_at`, `ringing_at`, `answered_at`, `ended_at`.
-
-- `call.created` fires with `status: "ringing"` when a person calls the agent
-  and when the agent's own Call is created.
-- `call.updated` fires on a change that does not end the Call, such as
-  `ringing` to `in-progress`.
-- `call.ended` fires once with a terminal status.
-
-`status` is `ringing` or `in-progress` while live, then one of `completed`,
-`no-answer`, `canceled`, `busy` or `failed`, which set `ended_at`. Keep the
-snapshot with the highest `revision` per `call.id` and drop older or duplicate
-envelopes. Relay also writes one system Message with `system_event.type:
-"call"` into the Chat; do not reply to it.
-
-## Answer, place, and end a Call
-
-Joining the room answers. Join within 32 seconds of `ringing`, or the Call
-ends `no-answer`. To decline, end it while it rings.
-
-```bash
-npm install @relaymessenger/sdk@staging werift @evan/opus rtp-packet
-```
+Answer in the same process that texts. An agent has one event stream, and two
+consumers of it (a texting process and a separate call process) take events
+from each other. Handle `call.created` next to `message.received`:
 
 ```typescript
-import Relay from "@relaymessenger/sdk";
+// Inside relay.websocket.run({ onEvent }) from build-an-agent.md.
+if (event.event_type === "call.created" && event.data.call.status === "ringing") {
+  void answer(event.data.call.id); // never await call work inside onEvent
+}
+```
+
+Join within 32 seconds of `ringing`, or the Call ends `no-answer`. Joining
+answers it. To decline, `relay.calls.end(callId)` while it rings. A Call your
+agent places also arrives as `call.created` (`from.kind: "agent"`), and your
+agent joins it the same way.
+
+The transport gives you the person's voice as PCM and plays yours:
+
+```typescript
 import { RelayCallTransport } from "@relaymessenger/sdk/calls";
+// npm install @relaymessenger/sdk werift @evan/opus rtp-packet node-webcodecs
 
-const relay = new Relay({ apiKey: process.env.RELAY_AGENT_TOKEN! });
-
-// In the call.created handler, after the event is durably accepted.
-async function answer(callId: string): Promise<RelayCallTransport> {
+async function answer(callId: string): Promise<void> {
   const transport = new RelayCallTransport({ relay, callId });
   transport.on("audio", ({ samples, sampleRate, channelCount }) => {
-    // The person's voice: interleaved PCM16, 48 kHz stereo by default.
+    // The person's voice: interleaved PCM16, 48 kHz stereo by default. Send it to your speech-to-text.
   });
   transport.on("ended", () => transport.close());
   await transport.connect(); // resolves once media is connected
-  await transport.writeAudio({ samples: new Int16Array(480), sampleRate: 48_000, channelCount: 1 });
-  return transport;
+  // Your voice: transport.writeAudio({ samples: Int16Array, sampleRate, channelCount })
+  // Barge-in: transport.clearAudio(). Hang up: transport.end().
 }
-
-// Decline a ringing Call, or end an answered one.
-async function hangUp(callId: string): Promise<void> {
-  await relay.calls.end(callId);
-}
-```
-
-`writeAudio()` queues speech; audio written before the person can hear it
-waits, so a greeting is heard whole. `clearAudio()` drops queued audio for
-barge-in, `setMuted()` publishes mute state, `end()` ends the Call for both
-sides, and `close()` cleans up locally without ending it.
-
-To call a person, use a one-to-one Chat. The person must have added the agent
-and left Allow Calls on; otherwise Relay answers 403 with error code `2003`
-and places no Call. Reuse the `Idempotency-Key` after an uncertain response,
-then join the room as for an incoming Call.
-
-```typescript
-const { call } = await relay.calls.create(
-  chatId,
-  { to: [personHandle] },
-  { idempotencyKey: savedOperation.idempotencyKey },
-);
-```
-
-`relay.calls.retrieve(callId)` reads one Call and `relay.calls.list(chatId)`
-lists a Chat's Calls. In Python:
-
-```python
-call = await relay.calls.create(chat_id, to=[person_handle], idempotency_key=saved_key)
-await relay.calls.retrieve(call["call"]["id"])
-await relay.calls.list(chat_id, limit=20)
-await relay.calls.end(call["call"]["id"])
 ```
 
 Python (`pip install 'relaymessenger[calls]'`) has the same transport:
+`RelayCallTransport(api_key=..., call_id=...)`, `@call.on("audio")`,
+`await call.connect()`, `await call.write_audio(RelayAudioFrame(...))`.
 
-```python
-import os
+### Bridge to a voice provider
 
-import numpy as np
-from relaymessenger.calls import RelayAudioFrame, RelayCallTransport
+Relay carries audio; your provider hears, thinks and speaks. Pick the path
+that already has your providers, and write the whole agent (texting and calls)
+in that language:
 
+| Your providers | Path | Read |
+| --- | --- | --- |
+| Separate speech-to-text, LLM and voice (any mix) | Python, Pipecat `RelayTransport` | https://docs.relayapp.im/integrations/pipecat.md |
+| An ElevenLabs Agent runs the whole conversation | TypeScript `@relaymessenger/elevenlabs` | https://docs.relayapp.im/calls/elevenlabs.md |
+| LiveKit Agents | Python or TypeScript `relaymessenger-livekit` | https://docs.relayapp.im/integrations/livekit.md |
+| A realtime speech-to-speech model | Pipecat, or the raw transport above | https://docs.relayapp.im/calls/audio.md |
 
-async def answer(call_id: str) -> RelayCallTransport:
-    call = RelayCallTransport(api_key=os.environ["RELAY_AGENT_TOKEN"], call_id=call_id)
+Runnable bots: https://github.com/RelayMessenger/Relay-SDK/tree/main/cookbook
+(`elevenlabs-voice-agent`, `elevenlabs-agents-call`, `grok-voice-agent`). They
+run their own WebSocket loop; when you copy one, move its pipeline into your
+one process and keep your single `onEvent`. For framework details read the
+frameworks' own skills: https://github.com/pipecat-ai/skills,
+https://github.com/livekit/agent-skills.
 
-    @call.on("audio")
-    def _heard(frame: RelayAudioFrame) -> None:
-        ...  # frame.samples, frame.sample_rate, frame.channel_count
+Pipecat: pass `call_id` and the Agent Token to `RelayTransport`; its `call`
+property is the Relay transport once connected. `ElevenLabsCall` exposes it as
+`call.transport`.
 
-    await call.connect()
-    await call.write_audio(RelayAudioFrame(np.zeros(480, dtype=np.int16), 48_000, 1))
-    return call
-```
+## The agent's camera
 
-## Video
+Your agent's video is its own track. It shows on the person's phone whenever
+your agent publishes a track; the person's camera does not matter. Publish on
+every call, voice or video. `publishTrack` announces it (`userUpdate
+{ video: true }`); `unpublishTrack` turns it off.
 
-Both sides may send a camera. The transport publishes one `video` track and
-announces it with the room's `userUpdate { video: true }`. Use LiveKit's names:
-`VideoSource`, `LocalVideoTrack.createVideoTrack`, `publishTrack`,
-`trackSubscribed`, `VideoStream`. TypeScript video needs the `werift` engine
-(the default) and `node-webcodecs`.
+Any frame source works: looping video files, a live avatar service, frames
+from a video API, or your own renderer. The phone shows the frames you
+capture, at the rate you capture them. Size 720x1280 (9:16) fills a phone.
+
+Two looping clips, one while the agent speaks and one while it listens:
 
 ```typescript
-import {
-  LocalVideoTrack, VideoBufferType, VideoFrame, VideoSource, VideoStream,
-} from "@relaymessenger/sdk/calls";
+import { spawnSync } from "node:child_process";
+import { LocalVideoTrack, VideoBufferType, VideoFrame, VideoSource } from "@relaymessenger/sdk/calls";
 
-// Send: publish after connect(), then capture frames at the rate you render.
-const source = new VideoSource(1280, 720);
-const camera = LocalVideoTrack.createVideoTrack("camera", source);
-await transport.publishTrack(camera, { videoEncoding: { maxFramerate: 30 } });
-source.captureFrame(new VideoFrame(rgba, 1280, 720, VideoBufferType.RGBA));
-await transport.unpublishTrack(camera); // camera off; publishTrack(camera) resumes
+const W = 720, H = 1280, FPS = 15, SIZE = (W * H * 3) / 2;
 
-// Receive: the person's camera, once per Call.
+// Decode once at startup: I420 frames, scaled to the call size, sound dropped.
+function frames(file: string): Uint8Array[] {
+  const out = spawnSync("ffmpeg", ["-v", "error", "-i", file, "-an", "-vf", `scale=${W}:${H},fps=${FPS}`,
+    "-pix_fmt", "yuv420p", "-f", "rawvideo", "-"], { maxBuffer: 1 << 30 });
+  if (out.status !== 0) throw new Error(String(out.stderr));
+  const list: Uint8Array[] = [];
+  for (let at = 0; at + SIZE <= out.stdout.length; at += SIZE) list.push(out.stdout.subarray(at, at + SIZE));
+  return list;
+}
+const talking = frames("talking.mp4");
+const listening = frames("listening.mp4");
+
+// After transport.connect():
+async function camera(transport: RelayCallTransport): Promise<void> {
+  const source = new VideoSource(W, H);
+  await transport.publishTrack(LocalVideoTrack.createVideoTrack("camera", source),
+    { videoEncoding: { maxFramerate: FPS } });
+  let index = 0, spokeAt = 0;
+  const timer = setInterval(() => {
+    if (transport.queuedAudioMs() > 0) spokeAt = Date.now(); // the agent's voice is playing
+    const clip = Date.now() - spokeAt < 300 ? talking : listening;
+    source.captureFrame(new VideoFrame(clip[index++ % clip.length], W, H, VideoBufferType.I420));
+  }, 1000 / FPS);
+  transport.on("ended", () => clearInterval(timer)).on("close", () => clearInterval(timer));
+}
+```
+
+In Python the names are snake case: `VideoSource(W, H)`,
+`await call.publish_track(LocalVideoTrack.create_video_track("camera", source))`,
+`source.capture_frame(RelayVideoFrame(W, H, "i420", data))`, run from an
+asyncio task you cancel when the call ends. In Pipecat, start it in
+`on_first_participant_joined` with `transport.call`, and take speech from
+Pipecat's own signal: a processor after `transport.output()` that sees
+`BotStartedSpeakingFrame` and `BotStoppedSpeakingFrame`.
+
+Until the first frame, a published track sends one black frame a second. Send
+up to 1920x1080 (either orientation) at 30 frames a second. TypeScript video
+needs `node-webcodecs`. A live lip-synced avatar: https://docs.relayapp.im/calls/avatars.md.
+More on sending and reading video: https://docs.relayapp.im/calls/video.md.
+
+### The person's camera
+
+```typescript
+import { VideoStream } from "@relaymessenger/sdk/calls";
 transport.on("trackSubscribed", async (track) => {
   for await (const { frame } of new VideoStream(track, { capacity: 2, format: VideoBufferType.RGBA })) {
-    // frame.data, frame.width, frame.height
+    // frame.data, frame.width, frame.height: give the newest to a vision model.
   }
 });
-transport.on("remoteVideo", (on) => {
-  // The person's camera started (true) or stopped (false).
-});
+transport.on("remoteVideo", (on) => { /* the person's camera turned on or off */ });
 ```
 
-Send up to 1920x1080 at 30 frames a second. Without `videoEncoding`, each
-frame size gets LiveKit's camera preset: 30 fps from 1280x720 (960x720 at
-4:3) up, 25 fps at 960x540, 20 fps below that. `maxFramerate` and `maxBitrate` override it. The
-codec is H.264 by default, VP8 offered second.
+## Call a person
 
-Python uses the same names in snake case:
-
-```python
-from relaymessenger.calls import (
-    LocalVideoTrack, RelayVideoFrame, TrackPublishOptions, VideoEncoding, VideoSource, VideoStream,
-)
-
-source = VideoSource(1280, 720)
-await call.publish_track(
-    LocalVideoTrack.create_video_track("camera", source),
-    TrackPublishOptions(video_encoding=VideoEncoding(max_framerate=30)),
-)
-source.capture_frame(RelayVideoFrame(1280, 720, "rgb24", rgb_bytes))
-
-
-@call.on("track_subscribed")
-def _camera(track) -> None:
-    async def read() -> None:
-        async for event in VideoStream(track, capacity=2):
-            rgb = event.frame.convert("rgb24")
-```
-
-Until the first frame, a published camera sends one black frame a second.
-
-## Rive
-
-Instead of video, an agent can name a Rive file on its Contact Card
-(`rive: { attachment_id, artboard, state_machine, view_model }` after an
-Attachments upload, at most 10 MB, assets embedded; `rive: null` removes it).
-The phone draws it whenever no agent video arrives, and the agent drives it
-through data binding on the call's `rive` data channel:
+`POST /v1/chats/{chatId}/calls` rings the person in a one-to-one Chat. To call
+the owner, use the `chat_id` returned when you [texted the owner](build-an-agent.md#text-the-owner):
 
 ```typescript
-import { visemesFromAlignment } from "@relaymessenger/sdk/calls";
-
-const rive = await transport.rive(); // after connect(); same handle on every call
-rive.set({ mood: "happy" });          // View Model properties, applied at once
-rive.trigger("wave");                  // a trigger property
-rive.show({ file: card.rive!.file, artboard: "Quiz", view_model: { question: "2+2?" } });
-rive.on("view_model", (values) => {}); // what the person changed in the file
-rive.on("trigger", (name) => {});
-
-// Time a change to speech: writeAudio resolves with where the audio starts on the track.
-const start = await transport.writeAudio(frame);
-if (start !== undefined) {
-  for (const cue of visemesFromAlignment(alignment)) rive.set({ viseme: cue.viseme }, { at: start + cue.t });
+const me = await relay.me.retrieve();
+if (me.calls_enabled) {
+  const { call } = await relay.calls.create(
+    ownerChatId,
+    { to: [me.owner_people[0].handle] },
+    { idempotencyKey: `call-owner-${ownerChatId}-${startedAt}` }, // reuse it on an uncertain retry
+  );
+  // call.created arrives with from.kind "agent": join call.id with the same answer() path.
 }
 ```
 
-Python: `await call.rive()`, `rive.set(values, at=...)`, `await call.write_audio(...)` (the start, or `None` while held),
-`visemes_from_alignment`. Pipecat: `RelayRiveProcessor(transport)` right after
-TTS. LiveKit: `await RelayRive().start(session, call)`. Messages are JSON of at
-most 1 KB on an unordered, lossy channel; each overwrites what it sets. If Relay
-refuses the channel, `rive()` rejects with `media_unavailable` and the call
-goes on.
-
-## Voice frameworks
-
-Relay publishes transports for the two common voice-agent frameworks. Each
-answers the Call by joining its room with the Agent Token.
-
-- Pipecat, Python: `pip install relaymessenger-pipecat`. `RelayTransport`
-  plays the role of Pipecat's LiveKit transport. `RelayParams` takes
-  Pipecat's `TransportParams`: `video_in_enabled` delivers the caller's camera
-  as `UserImageRawFrame`, `video_out_enabled` sends `OutputImageRawFrame`
-  sized by `video_out_width` and `video_out_height`.
-- LiveKit Agents, Python: `pip install relaymessenger-livekit`.
-  `RelayLiveKitCall.connect(api_key=..., call_id=...)`, then
-  `call.attach(session)` wires audio in, audio out and the caller's camera
-  into an `AgentSession`.
-- LiveKit Agents, TypeScript: `npm install @relaymessenger/livekit
-  @livekit/agents @livekit/rtc-node` (and `node-webcodecs` for video).
-  `RelayLiveKitCall.connect({ relay, callId })`, then `call.attach(session)`
-  for audio. LiveKit Agents for Node has no `session.input.video`, so the
-  caller's camera arrives as `@livekit/rtc-node` I420 `VideoFrame`s on
-  `call.videoInput`: read `call.videoInput.latestFrame` when a turn completes,
-  or iterate `call.videoInput`. Nothing is decoded until the first read, so
-  the first `latestFrame` is usually `undefined`; read it once right after
-  connecting to start decoding. A reader always gets the newest frame, and
-  iterating ends when the call's video ends.
-
-```typescript
-import { llm, voice } from "@livekit/agents";
-import { VideoBufferType, VideoFrame } from "@livekit/rtc-node";
-import { LocalVideoTrack, RelayLiveKitCall, VideoSource } from "@relaymessenger/livekit";
-
-const call = await RelayLiveKitCall.connect({ relay, callId });
-void call.videoInput.latestFrame; // the first read starts decoding the camera
-
-class Assistant extends voice.Agent {
-  override async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {
-    const frame = call.videoInput.latestFrame;
-    if (frame) newMessage.content.push(llm.createImageContent({ image: frame }));
-  }
-}
-
-// The agent's own camera, with LiveKit's names.
-const source = new VideoSource(640, 360);
-await call.transport.publishTrack(LocalVideoTrack.createVideoTrack("camera", source), {
-  videoEncoding: { maxFramerate: 15 },
-});
-source.captureFrame(new VideoFrame(rgba, 640, 360, VideoBufferType.RGBA));
+```bash
+curl -sS -X POST "https://api.relayapp.im/v1/chats/$CHAT_ID/calls" \
+  -H "Authorization: Bearer $RELAY_AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $KEY" -d '{"to":["<person handle>"]}'
 ```
 
-A Pipecat bot with a talking avatar uses Pipecat's own Simli service between
-the TTS and the Relay output (`pip install relaymessenger-pipecat
-"pipecat-ai[simli]"`; Pipecat's own Simli example sends 512x512 frames):
+`201` returns the Call with `status: "ringing"`. Join its room as for an
+incoming Call; the person answers on their phone. Failures: `403` code `2003`
+(the person has not added the agent, turned off Allow Calls for it, or a block),
+`422` code `1005` (their app cannot take calls yet), `503` code `3006` (calls
+are off; `calls_enabled` is false). A person already on a call gives status
+`busy`. Tell the person in your own words, or text instead.
 
-```python
-import os
+## Call events
 
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
-from pipecat.services.simli.video import SimliVideoService
-from relaymessenger_pipecat import RelayParams, RelayTransport
+`call.created`, `call.updated` and `call.ended` arrive on the agent's
+WebSocket or Webhook. Each `data.call` has `id`, `chat_id`, `from`, `to`,
+`status`, `revision`, `created_at`, `ringing_at`, `answered_at`, `ended_at`.
+`status` is `ringing` or `in-progress` while live, then `completed`,
+`no-answer`, `canceled`, `busy` or `failed`. Keep the highest `revision` per
+`call.id`. Relay also writes a system Message with `system_event.type: "call"`
+into the Chat; do not reply to it. `relay.calls.retrieve(callId)`,
+`relay.calls.list(chatId)` and `relay.calls.end(callId)` read and end Calls.
 
+## Rive instead of video
 
-def avatar_bot(call_id: str, stt, user_aggregator, llm, tts, assistant_aggregator) -> PipelineWorker:
-    transport = RelayTransport(
-        api_key=os.environ["RELAY_AGENT_TOKEN"],
-        call_id=call_id,
-        params=RelayParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_out_enabled=True,
-            video_out_is_live=True,
-            video_out_width=512,
-            video_out_height=512,
-        ),
-    )
-    simli = SimliVideoService(api_key=os.environ["SIMLI_API_KEY"], face_id=os.environ["SIMLI_FACE_ID"])
-    return PipelineWorker(Pipeline([
-        transport.input(), stt, user_aggregator, llm, tts, simli, transport.output(), assistant_aggregator,
-    ]))
-```
-
-Start the pipeline within the 32-second ring. Whole, runnable bots ship in the
-packages: `python/relaymessenger-pipecat/examples/simli_avatar_bot.py` (run
-with `uv run --with 'pipecat-ai[simli,deepgram,cartesia,openai,silero]'`) and
-`python/relaymessenger-livekit/examples/gemini_live_video_agent.py` (Gemini
-Live sees the caller's camera; `uv run --with 'livekit-agents[google]'`). For framework guidance, read
-the frameworks' own published skills and docs, not copies:
-
-- Pipecat skills: https://github.com/pipecat-ai/skills
-- LiveKit agent skills: https://github.com/livekit/agent-skills
-- LiveKit docs MCP server: https://docs.livekit.io/mcp
+A Rive file on the Contact Card (`rive: { attachment_id, artboard,
+state_machine, view_model }`) is drawn by the phone whenever no agent video
+arrives; drive it live with `await transport.rive()` (`set`, `trigger`,
+`show`). Read https://docs.relayapp.im/calls/rive.md before using it.
