@@ -38,6 +38,11 @@ docs page for how your providers connect, and follow it:
   https://docs.relayapp.im/calls/elevenlabs.md is the bridge pattern.
 - Raw PCM in and out, for anything else: https://docs.relayapp.im/calls/audio.md
 
+Pipecat has a streaming (WebSocket) and an HTTP class for most voices. If the
+model the person named refuses the streaming connection (HTTP 400 on
+connect), use the provider's HTTP class with the same model; do not switch
+models. Test one spoken sentence with the exact model before wiring the call.
+
 Every provider page lists its recipe. The index of all of them:
 https://docs.relayapp.im/llms.txt (the Calls and Integrations sections). Runnable
 bots: https://github.com/RelayMessenger/Relay-SDK/tree/main/cookbook. Copy a
