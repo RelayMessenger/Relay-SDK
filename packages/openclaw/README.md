@@ -193,12 +193,8 @@ npm run pack:smoke
 npm run gateway:harness
 ```
 
-`npm run release:validate` runs all three commands. CI and the guarded manual
-staging workflow use that full sequence. The staging workflow accepts only an
-exact SHA selected from the `staging` branch, the matching
-`x.y.z-staging.n` package version, and the `staging` npm tag. It retains the
-validated tarball and publishes that same digest with npm provenance; its
-publish job is also bound to the `staging` GitHub environment.
+`npm run release:validate` runs all three commands, and CI uses that full
+sequence.
 
 `gateway:harness` packs the plugin, installs the tarball with the OpenClaw
 version in `devDependencies`, inspects the managed installation, starts a real
@@ -215,7 +211,7 @@ candidate: Relay Server commit
 `f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
-and the exact `@relaymessenger/sdk@0.3.1-staging.2` registry integrity, source
+and the exact `@relaymessenger/sdk` registry integrity, source
 commit `1bbcb486b4a91860ee3527ce95d015883e4cc1ae`, REST operations, and WebSocket
 frames consumed by the plugin.
 

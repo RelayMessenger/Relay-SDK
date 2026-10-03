@@ -142,7 +142,7 @@ describe("locked runtime contracts", () => {
     expect(config.vars).toEqual({
       MODEL_ID: "@cf/openai/gpt-oss-120b",
       RELAY_AGENT_HANDLE: "your_agent_handle",
-      RELAY_API_ORIGIN: "https://api.staging.relayapp.im",
+      RELAY_API_ORIGIN: "https://api.relayapp.im",
     });
     expect(config.ai).toEqual({ binding: "AI" });
     expect(config.durable_objects?.bindings).toEqual([{
@@ -230,7 +230,7 @@ describe("locked runtime contracts", () => {
   });
 
   it("documents the locked update operation and an honest idempotent overlap", () => {
-    const readme = readFileSync("README.md", "utf8");
+    const readme = readFileSync("CONTRIBUTING.md", "utf8");
     const openapi = readFileSync("contracts/relay-openapi.yaml", "utf8");
     const reply = readFileSync("src/reply.ts", "utf8");
     const updatePath = openapi.indexOf(
@@ -247,7 +247,7 @@ describe("locked runtime contracts", () => {
     const migrationStart = readme.indexOf(
       "## Move the existing staging webhook",
     );
-    const migrationEnd = readme.indexOf("## Replace the model");
+    const migrationEnd = readme.length;
     const migration = readme.slice(migrationStart, migrationEnd);
 
     expect(updatePath).toBeGreaterThanOrEqual(0);

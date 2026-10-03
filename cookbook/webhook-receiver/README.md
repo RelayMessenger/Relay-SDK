@@ -44,9 +44,7 @@ npm start
 Copy this folder anywhere, or run it inside the Relay-SDK checkout with
 `npm start --workspace @relaymessenger/cookbook-webhook-receiver`.
 
-`RELAY_API_URL` defaults to `https://api.relayapp.im`. To run against staging
-instead, export `RELAY_API_URL='https://api.staging.relayapp.im'` before
-starting.
+`RELAY_API_URL` defaults to `https://api.relayapp.im`.
 
 Expose `POST /webhooks/relay` over HTTPS, then register it with the current v1
 resource:

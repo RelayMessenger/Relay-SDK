@@ -40,9 +40,7 @@ Then create a group in Relay, add this agent to it, and mention it. Stop the
 process with `SIGINT` or `SIGTERM`.
 
 `RELAY_API_URL` must be an HTTPS origin; plain HTTP is accepted only for a
-loopback development server. It defaults to `https://api.relayapp.im`; to run
-against staging instead, export
-`RELAY_API_URL='https://api.staging.relayapp.im'` before starting.
+loopback development server. It defaults to `https://api.relayapp.im`.
 
 ## How it works
 
