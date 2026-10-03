@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/openclaw-plugin",
-  "version": "0.4.9-staging.5",
+  "version": "0.4.10-staging.0",
   "description": "Native Relay channel plugin for OpenClaw",
   "license": "MIT",
   "type": "module",
@@ -37,7 +37,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@relaymessenger/sdk": "0.5.0-staging.6"
+    "@relaymessenger/sdk": "0.5.1-staging.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
