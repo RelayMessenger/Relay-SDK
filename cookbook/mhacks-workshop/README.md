@@ -56,21 +56,3 @@ Save my ElevenLabs API key in .env, then let people call my agent: grok-4.20-030
 
 After the prompt, paste your ElevenLabs key and press Enter. Your agent calls
 you when it's ready. Answer, then turn your camera on.
-
-## Make it yours
-
-```text
-Make a character sheet of my character: front, side, back and a few poses.
-```
-
-```text
-Make happy, hyped and sad versions of my character, and show the one that fits what it's saying.
-```
-
-```text
-Replace the looping videos with a live lip-synced avatar from a service like Simli or LemonSlice. Read https://docs.relayapp.im/calls/avatars.md first.
-```
-
-```text
-Deploy my agent so it stays up when my laptop is closed.
-```
