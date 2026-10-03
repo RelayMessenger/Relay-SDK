@@ -29,7 +29,7 @@ Open an empty folder in your coding agent, then paste each step.
 ## Step 1: generate its profile picture
 
 ```text
-Save my xAI API key in a .env file, then use grok-imagine-image-2.0 to make my character's profile picture and show it to me. Make it a square image that fills the whole frame edge to edge: no circle, no border, no frame, no text. Show the character from the waist up, centered, facing the camera, with some space above its head, on a flat solid-color background. Here's my xAI API key, then what my character looks like:
+Save my xAI API key in .env, then use grok-imagine-image-2.0 to make my character's profile picture and show it to me. Make it square and fill the whole frame: no circle, border or text. Show it from the waist up, centered, facing the camera, with space above its head, on a flat solid-color background. Here's my xAI API key, then what my character looks like:
 ```
 
 After the prompt, paste your xAI key, type what your character looks like, and press Enter.
@@ -37,26 +37,25 @@ After the prompt, paste your xAI key, type what your character looks like, and p
 ## Step 2: text it
 
 ```text
-Connect this project to Relay. Read https://docs.relayapp.im/llms.txt and follow its Agent onboarding section. Make my character a Relay agent with that profile picture, using grok-4.7 for its texts, and start it. Its name and personality are
+Make my character a Relay agent with that profile picture, using grok-4.7 for its texts, and start it. Its name and personality are
 ```
 
-Type its name and how it talks, then press Enter. Text it in Relay.
+Type its name and how it talks, then press Enter. It texts you in Relay; text it back.
 
 ## Step 3: generate its video
 
 ```text
-Make two looping videos of my character for phone video calls, one talking and one listening. First use grok-imagine-image-2.0 to extend its profile picture to a vertical 9:16 frame with its mouth closed, so the video doesn't stretch it. Then use grok-imagine-video-1.5-lite with that frame to make two 7-second 9:16 videos at 720p: in the talking one its mouth moves like it's speaking, in the listening one its mouth stays closed and it blinks and nods. Keep the camera completely still and the character centered, looking at the camera. Blend the last half second into the first so each loops smoothly, remove all sound, and show them to me.
+Make two looping videos of my character for video calls, one talking and one listening. First use grok-imagine-image-2.0 to extend its profile picture to a 9:16 frame with its mouth closed. Then use grok-imagine-video-1.5-lite on that frame for two 7-second 9:16 videos: in one its mouth moves as it talks, in the other its mouth stays closed and it blinks and nods. Keep the camera still. Blend the last half second into the first so each loops, remove the sound, and show them to me.
 ```
 
 ## Step 4: call it
 
 ```text
-Save my ElevenLabs API key in .env, then let people voice and video call my agent: ElevenLabs eleven_v4_turbo for its voice, grok-4.20-0309-non-reasoning as its brain on calls, and its talking and listening videos as its camera on every call, whether or not my camera is on. When it's ready, call me on Relay so I can try it. Here's my ElevenLabs API key:
+Save my ElevenLabs API key in .env, then let people call my agent: grok-4.20-0309-non-reasoning as its brain on calls, ElevenLabs eleven_v4_turbo for its voice, and the talking and listening videos as its camera. Here's my ElevenLabs API key:
 ```
 
-After the prompt, paste your ElevenLabs key and press Enter.
-
-Your agent calls you. Answer it, then try a video call.
+After the prompt, paste your ElevenLabs key and press Enter. Your agent calls
+you when it's ready. Answer, then turn your camera on.
 
 ## Make it yours
 
@@ -66,6 +65,10 @@ Make a character sheet of my character: front, side, back and a few poses.
 
 ```text
 Make happy, hyped and sad versions of my character, and show the one that fits what it's saying.
+```
+
+```text
+Replace the looping videos with a live lip-synced avatar from a service like Simli or LemonSlice. Read https://docs.relayapp.im/calls/avatars.md first.
 ```
 
 ```text
