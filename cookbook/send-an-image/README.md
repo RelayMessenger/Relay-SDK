@@ -16,9 +16,7 @@ npm start -- \
 Copy this folder anywhere, or run it inside the Relay-SDK checkout with
 `npm start --workspace @relaymessenger/cookbook-send-an-image -- <args>`.
 
-`RELAY_API_URL` defaults to `https://api.relayapp.im`. To run against staging
-instead, export `RELAY_API_URL='https://api.staging.relayapp.im'` before
-starting.
+`RELAY_API_URL` defaults to `https://api.relayapp.im`.
 
 Relay first allocates an Attachment, then the SDK uploads the raw bytes with
 the returned upload URL and headers, then the Message references the returned

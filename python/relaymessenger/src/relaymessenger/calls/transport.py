@@ -19,7 +19,7 @@ from typing import Any, Awaitable, Callable, Literal, Optional, Union
 
 import numpy as np
 from aiortc import RTCSessionDescription
-from ._audio import RelayAudioSink, RelayAudioSource, monotonic_ms, rtp_origin
+from ._audio import RelayAudioSink, RelayAudioSource, monotonic_ms, rtp_origin, skip_empty_audio_frames
 from ._audio_format import INBOUND_SAMPLE_RATES, Int16Array
 from ._engine import (
     PeerConfig,
@@ -987,6 +987,12 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
 
         def on_track(track: Any) -> None:
             if self._peer is peer:
+                if track.kind == "audio":
+                    # aiortc emits ``track`` before it starts the receiver's decoder thread.
+                    for transceiver in peer.getTransceivers():
+                        receiver = getattr(transceiver, "receiver", None)
+                        if getattr(receiver, "track", None) is track:
+                            skip_empty_audio_frames(receiver)
                 self._remote_track(track)
 
         peer.on("connectionstatechange", on_connection_state)

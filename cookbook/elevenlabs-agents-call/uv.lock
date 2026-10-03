@@ -1968,7 +1968,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.10" },
     { name = "pipecat-ai", extras = ["elevenlabs"], specifier = ">=1.12,<2" },
-    { name = "relaymessenger-pipecat", git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=5078d833f64bdbb10b2ca9f26445e33179efef82" },
+    { name = "relaymessenger-pipecat", git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8" },
     { name = "websockets", specifier = ">=15" },
 ]
 
@@ -1981,7 +1981,7 @@ dev = [
 [[package]]
 name = "relaymessenger"
 version = "0.1.0"
-source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger&rev=5078d833f64bdbb10b2ca9f26445e33179efef82#5078d833f64bdbb10b2ca9f26445e33179efef82" }
+source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8#2e339167ba211dee3d705bf22c2ee5c8f58d73f8" }
 dependencies = [
     { name = "websockets" },
 ]
@@ -1997,7 +1997,7 @@ calls = [
 [[package]]
 name = "relaymessenger-pipecat"
 version = "0.1.0"
-source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=5078d833f64bdbb10b2ca9f26445e33179efef82#5078d833f64bdbb10b2ca9f26445e33179efef82" }
+source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8#2e339167ba211dee3d705bf22c2ee5c8f58d73f8" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },

@@ -7,6 +7,7 @@ import Relay, {
   PAYMENT_GUIDANCE,
   replyTargetContext,
   selectionReply,
+  locationContext,
   selectionReplyContext,
   SELECTION_GUIDANCE,
   SELECTION_BLOCK_INSTRUCTION,
@@ -106,9 +107,13 @@ class ChildPiProcess implements PiProcess {
 }
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
-  const text = event.data.parts
-    .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
-    .join("\n").trim();
+  // A pin and a location share have no words; their data follows the words.
+  const text = [
+    event.data.parts
+      .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
+      .join("\n").trim(),
+    locationContext(event.data.parts),
+  ].filter(Boolean).join("\n\n");
   const context = selectionReplyContext(selectionReply(event.data.parts, event.data.reply_to), {
     parts: event.data.parts, ...(event.data.reply_to ? { reply_to: event.data.reply_to } : {}),
   });
