@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import fractions
+import queue
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -309,6 +310,32 @@ def rtp_origin(sender: Any) -> Optional[int]:
     if not isinstance(sent, int) or not isinstance(last, int) or sent != track.returned:
         return None
     return (last - track.last_pts) & 0xFFFFFFFF
+
+
+class _SkipEmptyFrames(queue.Queue):  # type: ignore[type-arg]
+    """An aiortc decoder queue that never hands its decoder an empty encoded frame."""
+
+    def put(self, item: Any, block: bool = True, timeout: Optional[float] = None) -> None:
+        if item is not None and not item[1].data:
+            return
+        super().put(item, block, timeout)
+
+
+def skip_empty_audio_frames(receiver: Any) -> None:
+    """Keep an aiortc audio receiver's decoder alive through RTP packets with no payload.
+
+    aiortc queues such a packet for its decoder as an empty frame
+    (aiortc/rtcrtpreceiver.py ``_handle_rtp_packet``: ``packet._data = b""``),
+    and `OpusDecoder` wraps it in an empty `av.Packet`, which libavcodec reads
+    as end of stream: ``avcodec_send_packet`` raises `av.error.EOFError` on the
+    next real packet, the decoder thread exits, and no more of the person's
+    audio is decoded for the rest of the call. Cloudflare's SFU sends them
+    (aiortc issue 1349, closed upstream as not planned). An empty frame has
+    no audio to lose, so it is dropped before the decoder sees it. Swap the
+    queue before the receiver's first ``receive()``, which hands it to the
+    decoder thread (aiortc/rtcrtpreceiver.py ``receive``).
+    """
+    receiver._RTCRtpReceiver__decoder_queue = _SkipEmptyFrames()
 
 
 AudioHandler = Callable[[Int16Array, int, int], None]
