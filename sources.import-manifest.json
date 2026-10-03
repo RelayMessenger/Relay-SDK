@@ -2912,7 +2912,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/message-attachment/package.json",
       "source_sha256": "8bf607ff2c3e86b27165de7e5d359ddd41505187159ba25238e14b3b555b33bb",
-      "destination_sha256": "a196cc4ef744514601356ed06c62db1ded479d9cf295c6c8d5e1252c0b4b6b02",
+      "destination_sha256": "1d7a3c798ad39180fffe31f150766d72b2213554245cd13a268f6b2f88693780",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3000,7 +3000,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/message-attachment/package.json",
       "source_sha256": "8bf607ff2c3e86b27165de7e5d359ddd41505187159ba25238e14b3b555b33bb",
-      "destination_sha256": "5609682424ef66bd8904393a746e02109a40e5be62804266dc20d41a73c87376",
+      "destination_sha256": "5f65dfe9c2af36990777f1e8f01454615c6ea5f2457a85b49c2cff79afd04091",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3088,7 +3088,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/message-attachment/package.json",
       "source_sha256": "8bf607ff2c3e86b27165de7e5d359ddd41505187159ba25238e14b3b555b33bb",
-      "destination_sha256": "69b070232fe02ed0aefd36c72902c40dc2e612f0e1aac44c854298309bbf5228",
+      "destination_sha256": "92d74bd906df41e5eb7605f08d30497eaee26d7d326368761bfda099abaee75d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
