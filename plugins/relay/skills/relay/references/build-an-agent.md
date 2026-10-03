@@ -1,126 +1,120 @@
 # Build an agent
 
-One Node process (Node 22.22.3 or newer) that texts, answers calls, and tells
-its owner it works. Python works the same way with `relaymessenger`.
+One Python process that texts, answers calls, and tells its owner it works.
+Python, because calls with your own speech-to-text, model and voice run on
+Pipecat. Use [uv](https://docs.astral.sh/uv/); it installs Python 3.11+ itself.
+TypeScript (`@relaymessenger/sdk`) has the same methods in camelCase.
 
 ## Create the agent
 
-The person signs in once with `npx relaymessenger@latest login`. Then create
-the agent; `--subtitle` (1 to 60 characters) is required, the handle is
-generated when omitted, and `--image` takes a local file:
+The person signs in once with `npx relaymessenger@latest login`. Create the
+agent once; `--subtitle` (1 to 60 characters) is required and the handle is
+generated when omitted. Then save its Agent Token without printing it:
 
 ```bash
 npx relaymessenger@latest agents create --name "<name>" --subtitle "<one line about it>" --image ./picture.png --json
 printf 'RELAY_AGENT_TOKEN=%s\n' "$(npx relaymessenger@latest auth token)" >> .env
+uv init --bare && uv add relaymessenger python-dotenv
 ```
 
 The new agent becomes the CLI's default profile, so `auth token` prints its
-Agent Token. Never echo it. Run `agents create` once; to retry a picture, use
-`contact-card update`, never a second create.
+token. Never run `agents create` again to fix a picture; update the card.
 
-```bash
-npm install @relaymessenger/sdk dotenv tsx
-```
+```python
+import os
+from dotenv import load_dotenv
+from relaymessenger import Relay
 
-```typescript
-import "dotenv/config";
-import Relay from "@relaymessenger/sdk";
-
-const relay = new Relay({ apiKey: process.env.RELAY_AGENT_TOKEN! }); // https://api.relayapp.im
+load_dotenv()
+TOKEN = os.environ["RELAY_AGENT_TOKEN"]
+relay = Relay(TOKEN)  # https://api.relayapp.im
 ```
 
 ## Set the profile picture
 
-The picture is the photo on the agent's Contact Card. Generate it with any
-image model, save it as PNG or JPEG, then set it:
+The picture is the photo on the agent's Contact Card. Make it with any image
+model, save it as PNG or JPEG, and set it:
 
 ```bash
 npx relaymessenger@latest contact-card update --image ./picture.png
 ```
 
-From code, upload it as an Attachment and name it on the card:
+From code, upload it and name the Attachment on the card:
 
-```typescript
-import { readFile } from "node:fs/promises";
-
-const bytes = await readFile("picture.png");
-const upload = await relay.attachments.create({ filename: "picture.png", content_type: "image/png", size_bytes: bytes.byteLength });
-await relay.attachments.upload(upload, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-const [card] = (await relay.contactCard.retrieve()).contact_cards;
-await relay.contactCard.update({ handle: card.handle, attachment_id: upload.attachment_id });
+```python
+data = open("picture.png", "rb").read()
+upload = await relay.attachments.create(filename="picture.png", content_type="image/png", size_bytes=len(data))
+await relay.attachments.upload(upload, data)
+card = (await relay.contact_card.retrieve())["contact_cards"][0]
+await relay.contact_card.update(card["handle"], attachment_id=upload["attachment_id"])
 ```
-
-A public HTTPS image works too: `{ handle, image_url }`.
 
 ## Text over the WebSocket
 
-`relay.websocket.run` holds the agent's event stream: it reconnects, sends the
-heartbeat, and acknowledges an event when `onEvent` returns. Throwing from
-`onEvent` makes Relay deliver that event again, so skip `event_id`s you have
-handled. Use it only while the agent has no Webhook subscriptions.
+`run_websocket` holds the agent's event stream: it reconnects, sends the
+heartbeat, and acknowledges each event when `on_event` returns. Run one per
+agent, and only while it has no Webhook subscriptions.
 
-```typescript
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+```python
+import asyncio
+from relaymessenger.websocket import run_websocket
 
-const handled = new Set<string>(); // persist this for a long-lived agent
+seen: set[str] = set()
 
-await relay.websocket.run({
-  async onEvent(event: RelayWebhookEvent) {
-    if (handled.has(event.event_id)) return;
-    handled.add(event.event_id);
-    if (event.event_type === "message.received" && event.data.direction === "inbound") {
-      const chatId = event.data.chat.id;
-      const text = event.data.parts.flatMap((part) => (part.type === "text" ? [part.value] : [])).join("\n");
-      if (!text) return;
-      await relay.chats.startTyping(chatId).catch(() => undefined);
-      const reply = await model(chatId, text); // your LLM, with this chat's history
-      await relay.chats.messages.send(chatId, {
-        message: { parts: [{ type: "text", value: reply }], idempotency_key: `reply-${event.event_id}` },
-      });
-    }
-    // call.created: see calls.md#answer-a-call. Start call work without awaiting it.
-  },
-  async onFullSync() {}, // Relay could not replay: rebuild chats from REST if you keep history
-});
+async def on_event(event, context) -> None:
+    if event["event_id"] in seen:  # Relay may deliver an event again
+        return
+    seen.add(event["event_id"])
+    data = event["data"]
+    if event["event_type"] == "message.received" and data["direction"] == "inbound":
+        chat_id = data["chat"]["id"]
+        text = "\n".join(p["value"] for p in data["parts"] if p["type"] == "text")
+        if text:
+            await relay.chats.start_typing(chat_id)
+            reply = await model(chat_id, text)  # your LLM, with this chat's history and the persona
+            await relay.chats.messages.send(chat_id, {"message": {
+                "parts": [{"type": "text", "value": reply}],
+                "idempotency_key": f"reply-{event['event_id']}",
+            }})
+    elif event["event_type"] == "call.created":
+        ...  # calls.md#answer-a-call: start the call as a task, never await it here
+
+async def on_full_sync(context) -> None:
+    pass  # Relay could not replay: rebuild history from relay.chats if you keep it
 ```
 
-Keep each Chat's history yourself (`chatId` to messages) and send it to the
-model with the agent's persona. In a group Chat (`event.data.chat.is_group`)
-answer only when the message is for the agent. Images, buttons, cards and
-other parts: [messaging](messaging.md). Durable inboxes, ACK and replay rules:
-[agent events](agent-events.md).
+Keep each Chat's history yourself and send it with the persona. In a group
+Chat (`data["chat"]["is_group"]`) answer only messages meant for the agent.
+Images, buttons and other parts: [messaging](messaging.md). Durable inboxes and
+replay: [agent events](agent-events.md).
 
 ## Text the owner
 
-When the process is running, text its owner so they see it working. The owner
-gets it in Chats, never as a message request. Do it once per start, after
-`websocket.run` has connected (`onConnectionState("ready")`):
+When the process starts, text the agent's owner so they see it working. The
+owner gets it in Chats, never as a message request:
 
-```typescript
-const me = await relay.me.retrieve();          // GET /v1/me
-const owner = me.owner_people[0];              // the person who owns or issued this agent's token
-if (owner) {
-  const sent = await relay.messages.create({   // POST /v1/messages
-    to: [owner.handle],
-    message: { parts: [{ type: "text", value: hello }], idempotency_key: `hello-${startedAt}` },
-  });
-  ownerChatId = sent.chat_id;                  // keep it to call the owner later
-}
+```python
+async def main() -> None:
+    me = await relay.me.retrieve()             # GET /v1/me
+    owner = me["owner_people"][0]["handle"]    # the person who owns the agent
+    hello = await model_hello()                # the model's own words, in persona
+    sent = await relay.messages.create(        # POST /v1/messages
+        to=[owner],
+        message={"parts": [{"type": "text", "value": hello}], "idempotency_key": f"hello-{STARTED_AT}"},
+    )
+    owner_chat_id = sent["chat_id"]            # keep it to call the owner
+    await run_websocket(relay.base_url, TOKEN, on_event=on_event, on_full_sync=on_full_sync)
+
+asyncio.run(main())
 ```
 
-`hello` is the model's own words in the agent's persona; `startedAt` is the
-process start time, so a restart texts again but a retry does not. `owner_people` is
-empty when no person can be resolved; then there is no one to text.
-
-```bash
-curl -sS https://api.relayapp.im/v1/me -H "Authorization: Bearer $RELAY_AGENT_TOKEN"
-curl -sS -X POST https://api.relayapp.im/v1/messages -H "Authorization: Bearer $RELAY_AGENT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"to":["<owner handle>"],"message":{"parts":[{"type":"text","value":"<hello>"}],"idempotency_key":"<key>"}}'
-```
+`STARTED_AT` is the process start time, so a restart texts again and a retry
+does not. `owner_people` is empty when no person can be resolved.
 
 ## Run it
 
-Start it with `npx tsx agent.ts` and keep it running: Relay delivers events only while the WebSocket is connected, and
-holds them up to 30 days while it is not. Text the agent from the Relay app to
-check a reply comes back. Next: [answer calls](calls.md#answer-a-call).
+`uv run agent.py`, and keep it running in the background (`nohup uv run
+agent.py > agent.log 2>&1 &`). Relay delivers events only while the WebSocket
+is connected and holds them up to 30 days while it is not. Stop the old
+process before starting a new one. Check `agent.log` and a reply to a text.
+Next: [answer calls](calls.md#answer-a-call).
