@@ -15,7 +15,7 @@ npx relaymessenger@latest login
 
 Make two API keys. Keep both tabs open; your coding agent asks for them.
 
-- xAI: https://console.x.ai/team/default/api-keys
+- xAI: https://console.x.ai (open API Keys)
 - ElevenLabs: https://elevenlabs.io/app/api/api-keys
 
 Open an empty folder in your coding agent, then paste each step.
