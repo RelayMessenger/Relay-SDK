@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { emptyConfig, writeConfig } from "./config.js";
+import { defaultConsoleApiURL, emptyConfig, writeConfig } from "./config.js";
 import { waitingLine } from "./console-auth.js";
 import { runCLI } from "./program.js";
 
@@ -12,7 +12,8 @@ import { runCLI } from "./program.js";
 // agent keep reading JSON.
 
 const AUTH = "https://auth.staging.relayapp.im";
-const CONSOLE = "https://console.staging.relayapp.im/api";
+// The Console this build talks to: staging on a -staging version, production once release.yml strips it.
+const CONSOLE = defaultConsoleApiURL();
 const homes: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
