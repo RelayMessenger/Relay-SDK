@@ -2318,7 +2318,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "package-lock.json",
       "source_sha256": "a8b26b0bff63c93112cadc0d399298f81ecbcc81470da5bf3f4ebb31469bce7e",
-      "destination_sha256": "3464855222bd3bec2e20871f4ede62b36588e1cad3fbc46d29cdb41650a81d74",
+      "destination_sha256": "696b4b1bd065065f6c2d79a3ef55ecdc314e4089d81bc7788e7c354ea4927603",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
