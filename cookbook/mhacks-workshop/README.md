@@ -13,7 +13,7 @@ Sign in to Relay:
 npx relaymessenger@latest login
 ```
 
-Make two API keys. Keep both tabs open; your coding agent asks for them.
+Make two API keys. You paste each one into a step below.
 
 - xAI: https://console.x.ai (open API Keys)
 - ElevenLabs: https://elevenlabs.io/app/api/api-keys
@@ -23,10 +23,10 @@ Open an empty folder in your coding agent, then paste each step.
 ## Step 1: generate its image
 
 ```text
-Ask me for my xAI API key and save it in a .env file. Then use grok-imagine-image-2.0 to make a picture of my character and show it to me. My character is
+Save my xAI API key in a .env file, then use grok-imagine-image-2.0 to make a picture of my character and show it to me. Here's my xAI API key, then what my character looks like:
 ```
 
-Type what your character looks like after the prompt, then press Enter.
+After the prompt, paste your xAI key, type what your character looks like, and press Enter.
 
 ## Step 2: text it
 
@@ -45,8 +45,10 @@ Use grok-imagine-video-1.5-lite to turn its picture into two short videos, one o
 ## Step 4: call it
 
 ```text
-Ask me for my ElevenLabs API key and save it in .env. Then let people voice and video call my agent: ElevenLabs eleven_v4_turbo for its voice, grok-4.20-0309-non-reasoning as its brain on calls, and the talking and listening videos on video calls.
+Save my ElevenLabs API key in .env, then let people voice and video call my agent: ElevenLabs eleven_v4_turbo for its voice, grok-4.20-0309-non-reasoning as its brain on calls, and the talking and listening videos on video calls. Here's my ElevenLabs API key:
 ```
+
+After the prompt, paste your ElevenLabs key and press Enter.
 
 Call your agent in Relay, then video call it.
 
