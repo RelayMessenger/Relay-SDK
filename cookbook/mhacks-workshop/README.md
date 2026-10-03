@@ -20,10 +20,10 @@ Make two API keys. You paste each one into a step below.
 
 Open an empty folder in your coding agent, then paste each step.
 
-## Step 1: generate its image
+## Step 1: generate its avatar
 
 ```text
-Save my xAI API key in a .env file, then use grok-imagine-image-2.0 to make a picture of my character and show it to me. Here's my xAI API key, then what my character looks like:
+Save my xAI API key in a .env file, then use grok-imagine-image-2.0 to make a profile picture avatar of my character and show it to me. Here's my xAI API key, then what my character looks like:
 ```
 
 After the prompt, paste your xAI key, type what your character looks like, and press Enter.
@@ -31,7 +31,7 @@ After the prompt, paste your xAI key, type what your character looks like, and p
 ## Step 2: text it
 
 ```text
-Connect this project to Relay. Read https://docs.relayapp.im/llms.txt and follow its Agent onboarding section. Make my character a Relay agent with that picture, using grok-4.7 for its texts, and start it. Its name and personality are
+Connect this project to Relay. Read https://docs.relayapp.im/llms.txt and follow its Agent onboarding section. Make my character a Relay agent with that avatar, using grok-4.7 for its texts, and start it. Its name and personality are
 ```
 
 Type its name and how it talks, then press Enter. Text it in Relay.
@@ -39,7 +39,7 @@ Type its name and how it talks, then press Enter. Text it in Relay.
 ## Step 3: generate its video
 
 ```text
-Use grok-imagine-video-1.5-lite to turn its picture into two short videos, one of it talking and one of it listening, and show them to me.
+Use grok-imagine-video-1.5-lite to turn its avatar into two short videos, one of it talking and one of it listening, and show them to me.
 ```
 
 ## Step 4: call it
