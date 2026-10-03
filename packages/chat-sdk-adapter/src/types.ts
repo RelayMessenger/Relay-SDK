@@ -220,6 +220,16 @@ export interface RelayLocationPartResponse {
   reactions: RelayReaction[] | null;
 }
 
+/** A place sent once: a dropped pin, a location sent once, or a place an agent names. */
+export interface RelayPlacePartResponse {
+  type: "place";
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  reactions: RelayReaction[] | null;
+}
+
 /** `POST /v1/payment_requests`. */
 export interface RelayCreatePaymentRequest {
   amount?: number;
@@ -335,6 +345,7 @@ export type RelayMessagePartResponse =
   | RelayPaymentReceiptPartResponse
   | RelayLocationRequestPartResponse
   | RelayLocationPartResponse
+  | RelayPlacePartResponse
   | RelayRatingRequestPartResponse;
 
 export interface RelayReplyTo {
@@ -382,6 +393,7 @@ export interface RelayWebhookMessageEvent {
     | RelayPaymentReceiptPartResponse
     | RelayLocationRequestPartResponse
     | RelayLocationPartResponse
+    | RelayPlacePartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -407,6 +419,7 @@ export interface RelaySentMessage {
     | RelayPaymentReceiptPartResponse
     | RelayLocationRequestPartResponse
     | RelayLocationPartResponse
+    | RelayPlacePartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;

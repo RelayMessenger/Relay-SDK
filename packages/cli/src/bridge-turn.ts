@@ -1,4 +1,4 @@
-import { selectionReply, selectionReplyContext, type SelectionReply, type ReplyTo, type MediaPartResponse, type MessagePartResponse, type RelayWebhookEvent } from "@relaymessenger/sdk";
+import { locationContext, selectionReply, selectionReplyContext, type SelectionReply, type ReplyTo, type MediaPartResponse, type MessagePartResponse, type RelayWebhookEvent } from "@relaymessenger/sdk";
 
 /** One message this process answers. */
 export interface BridgeTurn {
@@ -66,10 +66,14 @@ export const bridgeTurn = (event: RelayWebhookEvent): BridgeTurn | undefined => 
   const sender = typeof data.sender_handle?.handle === "string" ? data.sender_handle.handle : "";
   const parts = Array.isArray(data.parts) ? data.parts as MessagePartResponse[] : [];
   const media = parts.filter((part): part is MediaPartResponse => part.type === "media");
-  const text = parts
-    .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
-    .join("\n")
-    .trim();
+  // A pin and a location share have no words; their data follows the words.
+  const text = [
+    parts
+      .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
+      .join("\n")
+      .trim(),
+    locationContext(parts),
+  ].filter(Boolean).join("\n\n");
   const selection = selectionReply(parts, data.reply_to);
   const message = { parts, ...(data.reply_to ? { reply_to: data.reply_to } : {}) };
   const richMessage = selectionReplyContext(undefined, message) ? message : undefined;

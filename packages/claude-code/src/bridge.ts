@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, formReply, indexedIdempotencyKey, partsWithButtons, partsWithForm, partsWithSelection, selectionReply, type FormPart, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, formReply, locationContext, indexedIdempotencyKey, partsWithButtons, partsWithForm, partsWithSelection, selectionReply, type FormPart, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -63,10 +63,14 @@ function renderPart(part: MessagePartResponse): string | null {
 }
 
 export function messageContent(parts: readonly MessagePartResponse[], redactor: Redactor): string {
-  const content = parts
-    .map(renderPart)
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .join("\n");
+  // A pin and a location share have no words; their data follows the words.
+  const content = [
+    parts
+      .map(renderPart)
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join("\n"),
+    locationContext(parts),
+  ].filter(Boolean).join("\n\n");
   const redacted = redactor.text(content || "(Relay message with no supported text)");
   if (redacted.length <= MAX_RELAY_TEXT) return redacted;
   return `${redacted.slice(0, MAX_RELAY_TEXT - 1)}…`;

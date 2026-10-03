@@ -66,3 +66,16 @@ describe("replyTargetContext", () => {
       .toBe(`${"a".repeat(1_000)}…`);
   });
 });
+
+describe("replyTargetContext for a place", () => {
+  it("names the pin a reply quotes", () => {
+    const pin = [{ type: "place", latitude: 42.28, longitude: -83.74, name: "Duderstadt Center", reactions: null }] as Message["parts"];
+    expect(data(replyTargetContext({ message_id: TARGET, part_index: 0 }, target(pin, false))).reply_to.text)
+      .toBe('[place {"latitude":42.28,"longitude":-83.74,"name":"Duderstadt Center"}]');
+  });
+  it("names the location share a reply quotes", () => {
+    const card = [{ type: "location", state: "ended", began_at: null, ends_at: null, ended_at: "2026-10-03T20:00:00.000Z", reactions: null }] as Message["parts"];
+    expect(data(replyTargetContext({ message_id: TARGET }, target(card, false))).reply_to.text)
+      .toBe('[location share {"state":"ended","began_at":null,"ends_at":null,"ended_at":"2026-10-03T20:00:00.000Z"}]');
+  });
+});
