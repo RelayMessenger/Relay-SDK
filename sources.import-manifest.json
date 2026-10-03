@@ -1768,7 +1768,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "3c2486c1c2ca71c85f90728fb70e724174901b9d1121a68981a06b4d57f9ada8",
+      "destination_sha256": "dcf41e116fe4bc2f09941822fbd1deefbdf4e1bf6874b867152d36195025aea5",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
