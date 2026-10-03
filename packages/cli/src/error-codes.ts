@@ -9,7 +9,7 @@ import { EXIT_CODES, type ExitCode } from "./exit-codes.js";
  * a string; a fault inside this command takes one of the names below, and
  * nowhere else defines one (decided 2026-09-10, fix rows 4 and 5).
  */
-export const CLI_ERROR_CODES = ["usage", "not_a_tty", "no_runtime", "no_token", "signin_expired", "not_found", "network", "refused"] as const;
+export const CLI_ERROR_CODES = ["usage", "not_a_tty", "no_runtime", "no_token", "signin_expired", "not_found", "network", "refused", "outdated"] as const;
 export type CliErrorCode = (typeof CLI_ERROR_CODES)[number];
 
 /** One sentence per code, and no two codes share one (the test proves it). */
@@ -22,6 +22,7 @@ export const NEXT_STEP: Record<CliErrorCode, string> = {
   not_found: "Run  npx relaymessenger agents list  to see what is saved on this computer.",
   network: "Check this computer's network connection, then run the command again.",
   refused: "Run  npx relaymessenger doctor  to check this computer.",
+  outdated: "Run the same command with  npx relaymessenger@latest  instead.",
 };
 
 export const EXIT_FOR: Record<CliErrorCode, ExitCode> = {
@@ -33,6 +34,7 @@ export const EXIT_FOR: Record<CliErrorCode, ExitCode> = {
   not_found: EXIT_CODES.notFound,
   network: EXIT_CODES.failed,
   refused: EXIT_CODES.failed,
+  outdated: EXIT_CODES.failed,
 };
 
 /** A failure inside this command, named. Anything thrown without a name is `refused`. */

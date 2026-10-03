@@ -4,6 +4,7 @@ import { prepareAgentImage } from "./local-image.js";
 import { uploadAgentImage } from "./agent-image-upload.js";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
 import { codexCommand, runCodexBridge } from "./codex-bridge.js";
@@ -85,6 +86,7 @@ import { addRedirect, createOAuth, removeRedirect, resetSecret, setScopes, showO
 import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
 import { setReachPreset } from "./agent-access.js";
 import { linkPhone, phoneLinkSentence } from "./phone-link.js";
+import { isOutdated, staleRouteStatus, startUpdateCheck, updateNotice, type UpdateCheck } from "./update-check.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -124,6 +126,14 @@ export interface ProgramDependencies {
   helpTTY?: boolean;
   /** A pre-rendered root heading, normally supplied only for TTY animation. */
   helpHeading?: string;
+  /** The update check of this run; `false` turns it off. Built from the registry by default. */
+  updateCheck?: UpdateCheck | false;
+  /** Whether this copy was run from npx's cache; read from the script path by default. */
+  fromNpx?: boolean;
+  /** A person reads stdout (a terminal, no agent, no --json): print sentences, not JSON. */
+  humanOutput?: boolean;
+  /** Opens the sign-in page; the system browser by default. */
+  openBrowser?: (url: string) => Promise<void>;
 }
 
 interface GlobalOptions {
@@ -229,6 +239,27 @@ export const createProgram = (
   const resolveClient = dependencies.resolveClient
     ?? ((profile?: string) => createClientContext(profile, configContext, dependencies.fetch));
   const output = (value: unknown): void => stdout(jsonText(value));
+  // gh and vercel: a sentence for a person at a terminal, JSON for --json, a
+  // pipe, or an agent (runCLI decides; tests and pipes get JSON).
+  const human = (command: Command): boolean => dependencies.humanOutput === true && !globals(command).json;
+  // gh's "✓ Logged in to github.com account <login>": who, and the organization by name.
+  const loggedIn = async (session: RelayConsoleSession): Promise<string> => {
+    let organizationName: string | undefined;
+    let email = session.type === "organization_key" ? undefined : session.user.email;
+    try {
+      const me = await consoleRequest<{ user?: { email?: string }; org?: { name?: string } }>({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, "/me");
+      organizationName = me.org?.name || undefined;
+      if (session.type !== "organization_key") email = me.user?.email || email;
+    } catch { /* The sign-in is saved; the name is only decoration. */ }
+    const organization = organizationName ? ` (${organizationName})` : "";
+    return session.type === "organization_key"
+      ? `\u2713 Logged in to Relay with an organization API key${organization}\n`
+      : `\u2713 Logged in to Relay as ${email}${organization}\n`;
+  };
   const clientFor = async (command: Command): Promise<Relay> =>
     (await resolveClient(globals(command).profile)).client;
 
@@ -565,7 +596,7 @@ export const createProgram = (
       const imageUpdate = created.image;
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
       else {
-        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\nPrint it with \`relay auth token --profile ${result.profile}\`.\n`);
+        stdout(`${human(command) ? "\u2713 Created " : ""}${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\nPrint it with \`relay auth token --profile ${result.profile}\`.\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
           try { stdout(renderTerminalQRForOutput(result.share_url)); }
@@ -590,10 +621,18 @@ export const createProgram = (
   agents.command("list")
     .description("list the agents saved on this computer")
     .option("--json", "JSON output")
-    .action(async () => {
+    .action(async (_options: object, command: Command) => {
       let firstFailure: Error | undefined;
       const result = await listAgents(agentDeps, (error) => { firstFailure ??= error; });
-      output(result);
+      if (human(command)) {
+        // gh repo list: one row per thing, the name first.
+        const rows = result.agents as Array<{ profile: string; handle?: string; display_name?: string; error?: string }>;
+        stdout(rows.length === 0
+          ? "No agents are saved on this computer. Create one with relaymessenger agents create.\n"
+          : rows.map((row) => row.handle
+            ? `@${row.handle}  ${row.display_name ?? ""}  (profile ${row.profile})\n`
+            : `${row.profile}  could not be read: ${row.error ?? "unknown error"}\n`).join(""));
+      } else output(result);
       // Keep successful entries on stdout; the first failed entry determines
       // the standard stderr envelope and classified command exit.
       if (firstFailure) throw firstFailure;
@@ -621,13 +660,15 @@ export const createProgram = (
     .option("--json", "JSON output")
     .action(async (agentHandle: string, _options: object, command: Command) => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmDelete && !await dependencies.confirmDelete()) throw new InteractiveCancelled();
-      output(await deleteAgent(agentHandle, globals(command).profile, {
+      const deleted = await deleteAgent(agentHandle, globals(command).profile, {
         ...agentDeps,
         deleteConsole: (handle, apiURL, agentToken) => deleteConsoleAgent({
           context: configContext, apiURL,
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         }, handle, agentToken),
-      }));
+      });
+      if (human(command)) stdout(`\u2713 Deleted @${agentHandle}\n`);
+      else output(deleted);
     });
 
   // Who may start a chat with an agent: Relay Console's "Available to" field
@@ -832,9 +873,11 @@ again with --number and --code.
       output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored" }, [token]));
       await showSavedAgent(command, { profile, apiURL, runtime: { ownership: "unknown", connection: "unknown" } });
   };
-  const authStatus = async (_options: object, command: Command): Promise<void> => {
+  const authStatus = async (_options: object, command: Command, liveView = true): Promise<void> => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
-      output({
+      if (human(command)) {
+        stdout(`\u2713 Agent token: profile ${resolved.profile}, from ${resolved.tokenSource === "environment" ? "RELAY_AGENT_TOKEN" : resolved.configPath}\n`);
+      } else output({
         configured: true,
         profile: resolved.profile,
         api_url: resolved.apiURL,
@@ -842,7 +885,7 @@ again with --number and --code.
         config_path: resolved.configPath,
       });
       const saved = (await agentDeps.read()).profiles[resolved.profile];
-      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? defaultCreationApiURL()) === resolved.apiURL) {
+      if (liveView && saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? defaultCreationApiURL()) === resolved.apiURL) {
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
   };
@@ -932,6 +975,7 @@ again with --number and --code.
           apiURL: defaultCreationApiURL(),
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         }, await readStdinText());
+        if (human(command)) { stdout(await loggedIn(session)); return; }
         output(safeMetadata(
           { ok: true, type: session.type, organization_id: session.organization_id, token: "stored" },
           [session.organization_key],
@@ -946,7 +990,10 @@ again with --number and --code.
         stderr,
         ...(options.website === undefined ? {} : { website: options.website }),
         nonInteractive: false,
+        human: human(command),
+        ...(dependencies.openBrowser ? { openBrowser: dependencies.openBrowser } : {}),
       });
+      if (human(command)) { stdout(await loggedIn(session)); return; }
       output({
         ok: true,
         ...(session.type === "organization_key" ? { type: session.type } : { user: session.user }),
@@ -959,17 +1006,28 @@ again with --number and --code.
     .helpGroup(HELP_GROUPS.everythingElse);
   whoamiCommand.action(async (options: object, command: Command) => {
     const current = (await readConfig(configContext)).console;
+    if (human(command)) {
+      // gh auth status: the account first, then the agent token this folder uses.
+      const signedIn = current !== undefined && !globals(command).profile;
+      if (signedIn) stdout(await loggedIn(current));
+      try { await authStatus(options, command, false); }
+      catch (error) { if (!signedIn || !(error instanceof CliError) || error.code !== "no_token") throw error; }
+      return;
+    }
     if (current?.type === "organization_key" && !globals(command).profile) {
       const me = await consoleRequest<{ org: { id: string } }>({
         context: configContext,
         apiURL: defaultCreationApiURL(),
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
       }, "/me");
+      if (human(command)) { stdout(await loggedIn(current)); return; }
       output({ type: current.type, organization_id: me.org.id });
       return;
     }
     try {
-      await authStatus(options, command);
+      // whoami names who is signed in and stops (gh auth status); the live
+      // view's full-screen repaint stays with `auth status` and create.
+      await authStatus(options, command, false);
     } catch (error) {
       // A successful Console login does not create an Agent Token. Preserve
       // existing agent/profile behavior, but report that signed-in identity
@@ -986,6 +1044,7 @@ again with --number and --code.
         apiURL: defaultCreationApiURL(),
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
       }, "/me");
+      if (human(command)) { stdout(await loggedIn(config.console)); return; }
       output({
         user: { id: me.user.id, email: me.user.email, ...(me.user.name ? { name: me.user.name } : {}) },
         organization_id: me.org.id,
@@ -2089,6 +2148,14 @@ again with --number and --code.
   return program;
 };
 
+const defaultUpdateCheck = (env: NodeJS.ProcessEnv, context: ConfigContext | undefined): UpdateCheck | undefined => {
+  // Test runs and CI never reach the registry (update-notifier skips CI too).
+  if (process.env.RELAY_NO_UPDATE_CHECK || process.env.VITEST || env.CI || process.env.CI) return undefined;
+  let cacheFile: string;
+  try { cacheFile = join(dirname(configPath(context)), "update-check.json"); } catch { return undefined; }
+  return startUpdateCheck({ version: PACKAGE_VERSION, cacheFile, env });
+};
+
 export const runCLI = async (
   argv: string[],
   dependencies: ProgramDependencies = {},
@@ -2105,6 +2172,19 @@ export const runCLI = async (
   // cancel note and the skill offer all stay silent (clig.dev, standard names).
   const quiet = argv.includes("-q") || argv.includes("--quiet");
   const note = quiet ? (): void => undefined : stderr;
+  // npm's update-notifier shape (gh and vercel too): a cached daily read of
+  // the dist-tag, never blocking or failing the command, one notice on stderr.
+  const updateCheck = dependencies.updateCheck === false ? undefined
+    : dependencies.updateCheck ?? defaultUpdateCheck(env, dependencies.configContext);
+  const outdatedLatest = async (): Promise<string | undefined> => {
+    const latest = await updateCheck?.latest;
+    return updateCheck && latest && isOutdated(updateCheck.version, latest) ? latest : undefined;
+  };
+  const noticeIfOutdated = async (): Promise<void> => {
+    if (json || quiet || !updateCheck) return;
+    const latest = await outdatedLatest();
+    if (latest) stderr(updateNotice(updateCheck, latest, argv, dependencies.fromNpx));
+  };
   if (argv.includes("--verbose")) {
     dependencies = { ...dependencies, fetch: verboseFetch(dependencies.fetch ?? globalThis.fetch, stderr) };
   }
@@ -2193,6 +2273,9 @@ export const runCLI = async (
     }
     await createProgram({
       ...dependencies, isInteractive: interactive, json, stderr,
+      // A caller that captures stdout (a test, an embedding) reads JSON unless it asks.
+      humanOutput: !json && !quiet && driver === undefined
+        && (dependencies.humanOutput ?? (dependencies.stdout === undefined && Boolean(process.stdout.isTTY))),
       ...(helpHeading !== undefined ? { helpHeading } : {}),
       ...(quiet ? { stdout: () => undefined } : {}),
       ...(ui ? {
@@ -2203,11 +2286,23 @@ export const runCLI = async (
         confirmLogout: () => ui.confirm("Remove the saved token from this computer? The agent itself is not deleted."),
       } : {}),
     }).parseAsync(args, { from: "user" });
+    await noticeIfOutdated();
     return EXIT_CODES.ok;
-  } catch (error) {
+  } catch (caught) {
+    let error = caught;
     if (error instanceof InteractiveCancelled) { note("Cancelled.\n"); return EXIT_CODES.ok; }
     if (error instanceof CommanderError && ["commander.helpDisplayed", "commander.version", "commander.help"].includes(error.code)) {
+      await noticeIfOutdated();
       return error.exitCode;
+    }
+    // A route this copy calls that Relay no longer has (404 or 410) is the
+    // old-version dead end: say so, with the command that fixes it.
+    const latest = staleRouteStatus(error) ? await outdatedLatest() : undefined;
+    if (updateCheck && latest) {
+      const text = error instanceof Error ? error.message : String(error);
+      error = new CliError(`${text} This relaymessenger is ${updateCheck.version}, and Relay no longer answers some requests from old versions. The newest is ${latest}.\n${updateNotice(updateCheck, latest, argv, dependencies.fromNpx).split("\n").slice(1).join("\n").trimEnd()}`, "outdated");
+    } else {
+      await noticeIfOutdated();
     }
     let secrets: string[] = [];
     try {

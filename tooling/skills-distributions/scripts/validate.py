@@ -54,10 +54,10 @@ if "\nname: relay\n" not in skill:
 for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", skill):
     if "://" in target or target.startswith("#"):
         continue
-    if not (SKILL_ROOT / target).is_file():
+    if not (SKILL_ROOT / target.split("#", 1)[0]).is_file():
         fail(f"broken skill reference: {target}")
 
-linked = set(re.findall(r"\((references/[^)]+)\)", skill))
+linked = set(re.findall(r"\((references/[^)#]+)(?:#[^)]*)?\)", skill))
 expected = {
     str(path.relative_to(SKILL_ROOT))
     for path in references

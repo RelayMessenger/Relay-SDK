@@ -28,6 +28,7 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [Grok Imagine agent](grok-imagine-agent/) | Chat with Grok, send pictures and videos made with Grok Imagine, and set the agent's profile picture. |
 | [ElevenLabs voice agent](elevenlabs-voice-agent/) | Answer a Call with Grok as the brain and an ElevenLabs voice, on Pipecat. |
 | [Grok Voice agent](grok-voice-agent/) | Answer a Call with xAI's Grok Voice Agent API, on Pipecat. |
+| [MHacks workshop](mhacks-workshop/) | Build a character people text and video call, step by step with any coding agent: Grok texts, Grok Imagine picture and video, ElevenLabs voice. |
 | [ElevenLabs Agents on a Call](elevenlabs-agents-call/) | Put an ElevenLabs Agent on a Call through its WebSocket API. |
 
 ## Run a recipe on its own
