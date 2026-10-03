@@ -40,9 +40,7 @@ npm start
 Copy this folder anywhere, or run it inside the Relay-SDK checkout with
 `npm start --workspace @relaymessenger/cookbook-websocket-agent`.
 
-`RELAY_API_URL` defaults to `https://api.relayapp.im`. To run against staging
-instead, export `RELAY_API_URL='https://api.staging.relayapp.im'` before
-starting.
+`RELAY_API_URL` defaults to `https://api.relayapp.im`.
 
 Stop with `SIGINT` or `SIGTERM`. The SDK reconnects retryable socket failures
 and refuses protocol gaps. The SDK never marks a Chat Read on its own; the

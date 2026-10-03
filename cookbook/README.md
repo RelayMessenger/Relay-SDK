@@ -49,9 +49,8 @@ says otherwise, and needs only an Agent Token. Inside this checkout the same
 folders resolve the workspace SDK instead of the published one;
 `scripts/validate-cookbook-standalone.mjs` proves both on every push and
 explains the dependency range that makes it work. The Cloudflare Think recipe
-is the one exception: it pins exact package versions by contract, ships its
-own lockfile, and its `npm run dev` targets the staging Worker environment;
-see its README.
+is the one exception: it pins exact package versions by contract and ships
+its own lockfile; see its README.
 
 The Cloudflare Think recipe is now the canonical starter. It supersedes the
 old standalone starter and the smaller duplicate Think example, which are not

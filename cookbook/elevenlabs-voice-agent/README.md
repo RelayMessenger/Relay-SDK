@@ -29,7 +29,7 @@ Call the agent from Relay on your phone.
 The default voice is Diego's: "Harry", the highest-pitched male premade voice,
 which every ElevenLabs plan can use through the API. A voice from the Voice Library or Voice Design needs a paid
 ElevenLabs plan. `AGENT_PERSONA` replaces the system prompt; `RELAY_BASE_URL`
-selects another Relay API origin, such as `https://api.staging.relayapp.im`.
+selects the Relay API origin and defaults to `https://api.relayapp.im`.
 
 The call uses `grok-4.20-0309-non-reasoning` because a spoken reply must start
 in under a second: it answered in 0.4 to 0.6 s, and `grok-4.7` took 1.7 to

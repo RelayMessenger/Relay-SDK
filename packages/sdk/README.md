@@ -395,7 +395,7 @@ stores and returns the original bytes unchanged and falls back to
 editor completion. Only pictures and group icons must be images; the current
 attachment rules are at <https://docs.relayapp.im>.
 
-## Individual audio Calls (staging)
+## Individual audio Calls
 
 Calls join one user and one agent in an existing individual Chat. Use
 `relay.calls.create(chatId, { to: [handle] }, { idempotencyKey })`;

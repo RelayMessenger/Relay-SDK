@@ -37,8 +37,5 @@ npm test
 npm run test:live
 ```
 
-Set `RELAY_DOCS_MCP_URL=https://docs.staging.relayapp.im/mcp` when proving a
-staging release.
-
 `test:live` is the strict hosted-search freshness check and can remain blocked
 until the live docs index matches the lock.
