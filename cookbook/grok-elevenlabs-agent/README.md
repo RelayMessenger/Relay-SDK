@@ -3,14 +3,13 @@
 Build a character people can text and video call in Relay. Grok writes its
 texts, Grok Imagine draws it and makes it move, and ElevenLabs gives it a voice.
 
-You build it by talking to a coding agent (Claude Code, Cursor or Codex), one
-step at a time. After each step, open Relay on your phone and you'll see the
+You build it by talking to any coding agent, one step at a time. After each step, open Relay on your phone and you'll see the
 new thing working.
 
 ## What you need
 
 - Node.js 22 or newer
-- Claude Code, Cursor or Codex
+- A coding agent
 - The Relay app on your phone
 - An xAI API key from https://console.x.ai
 - An ElevenLabs API key from https://elevenlabs.io
