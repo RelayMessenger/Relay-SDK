@@ -1,89 +1,49 @@
 # MHacks workshop: build an agent people text and video call
 
-Build your own character in Relay with any coding agent, one step at a time.
-Grok writes its texts, Grok Imagine draws it and makes it move, and ElevenLabs
-gives it a voice. After each step, open Relay on your phone to see it working.
+Build your own character in Relay with any coding agent. Grok writes its texts,
+Grok Imagine draws it and makes it move, and ElevenLabs gives it a voice.
 
-## Before you start
+## You need
 
-You need Node.js 22 or newer, a coding agent, and the Relay app on your phone.
-Get an xAI API key at https://console.x.ai and an ElevenLabs API key at
-https://elevenlabs.io.
-
-Run this in your terminal, with your own keys:
-
-```sh
-npx relaymessenger login
-export XAI_API_KEY='paste-your-xai-key'
-export ELEVENLABS_API_KEY='paste-your-elevenlabs-key'
-mkdir my-agent && cd my-agent
-```
-
-`login` opens your browser. Sign in with Google or Apple. Then open the
-`my-agent` folder in your coding agent and paste each step below. Fill in the
-parts in square brackets.
+- The Relay app on your phone
+- A coding agent
+- An xAI API key from https://console.x.ai
+- An ElevenLabs API key from https://elevenlabs.io
 
 ## Step 1: make your agent and text it
 
+Open an empty folder in your coding agent and paste:
+
 ```text
-Connect this project to Relay. Read https://docs.relayapp.im/llms.txt and follow its Agent onboarding section. Make an agent called [name]. [Who it is and how it talks, in a sentence or two.] Use grok-4.7 for its texts. Start it.
+Connect this project to Relay. Read https://docs.relayapp.im/llms.txt and follow its Agent onboarding section. Sign me in to Relay, ask me for my xAI and ElevenLabs API keys and keep them in a .env file. Then make an agent called [name], [who it is and how it talks], using grok-4.7 for its texts, and start it.
 ```
 
-Open Relay and text your agent.
+Text your agent in Relay.
 
 ## Step 2: give it a face
 
 ```text
-Make my agent's profile picture with grok-imagine-image-2.0: [what it looks like]. Put it on its contact card.
+Make its profile picture with grok-imagine-image-2.0: [what it looks like].
 ```
 
-## Step 3: make it move
+## Step 3: video call it
 
 ```text
-Use grok-imagine-video-1.5-lite to turn its profile picture into two short videos: one of it talking and one of it listening.
+Make it callable. Use grok-imagine-video-1.5-lite to turn its picture into a talking video and a listening video, ElevenLabs eleven_v4_turbo for its voice, and grok-4.20-0309-non-reasoning as the brain on calls.
 ```
 
-## Step 4: give it a voice and video call it
-
-```text
-Let people call my agent. Use ElevenLabs eleven_v4_turbo for its voice, with grok-4.20-0309-non-reasoning as the brain on calls. While it talks, show the talking video; while it listens, show the listening video.
-```
-
-Video call your agent from Relay.
+Video call your agent in Relay.
 
 ## Make it yours
 
 ```text
-Make a character sheet of my agent: front, side, back and a few poses, so every picture of it looks the same.
+Make a character sheet of it: front, side, back and a few poses.
 ```
 
 ```text
-Make happy, hyped and sad versions of my agent, and show the one that fits what it's saying.
+Make happy, hyped and sad versions of it and show the one that fits what it's saying.
 ```
 
 ```text
-Draw my agent in three art styles and let me pick one.
+Deploy it so it stays up when my laptop is closed.
 ```
-
-## Keep it running for judging
-
-Your agent runs on your laptop and works while the laptop is on. To keep it up
-without your laptop:
-
-```text
-Deploy my agent so it stays up when my laptop is closed.
-```
-
-## What it uses
-
-| Part | Model |
-| --- | --- |
-| Texts | `grok-4.7` |
-| Brain on calls | `grok-4.20-0309-non-reasoning` |
-| Picture | `grok-imagine-image-2.0` |
-| Videos | `grok-imagine-video-1.5-lite` |
-| Voice | ElevenLabs `eleven_v4_turbo` |
-| Relay | `@relaymessenger/sdk` over a WebSocket, so it needs no server |
-
-Related recipes: [Grok Imagine agent](../grok-imagine-agent/),
-[ElevenLabs voice agent](../elevenlabs-voice-agent/).
