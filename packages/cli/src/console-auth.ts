@@ -90,7 +90,12 @@ const json = async <T>(response: Response): Promise<T> => {
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   let value: unknown;
-  try { value = JSON.parse(text); } catch { throw new Error(`Relay Console returned HTTP ${response.status}.`); }
+  try { value = JSON.parse(text); } catch {
+    // A route that no longer exists answers with a page, not JSON; the status
+    // still travels so an outdated CLI can say so (update-check.ts).
+    if (!response.ok) throw new ConsoleRefusal(`Relay Console returned HTTP ${response.status}.`, response.status);
+    throw new Error(`Relay Console returned HTTP ${response.status}.`);
+  }
   if (!response.ok) {
     // Console errors are not a safe place to echo arbitrary response text:
     // an upstream error can contain a bearer or refresh token. Only a short

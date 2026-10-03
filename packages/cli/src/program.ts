@@ -4,6 +4,7 @@ import { prepareAgentImage } from "./local-image.js";
 import { uploadAgentImage } from "./agent-image-upload.js";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
 import { codexCommand, runCodexBridge } from "./codex-bridge.js";
@@ -85,6 +86,7 @@ import { addRedirect, createOAuth, removeRedirect, resetSecret, setScopes, showO
 import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
 import { setReachPreset } from "./agent-access.js";
 import { linkPhone, phoneLinkSentence } from "./phone-link.js";
+import { isOutdated, staleRouteStatus, startUpdateCheck, updateNotice, type UpdateCheck } from "./update-check.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -124,6 +126,10 @@ export interface ProgramDependencies {
   helpTTY?: boolean;
   /** A pre-rendered root heading, normally supplied only for TTY animation. */
   helpHeading?: string;
+  /** The update check of this run; `false` turns it off. Built from the registry by default. */
+  updateCheck?: UpdateCheck | false;
+  /** Whether this copy was run from npx's cache; read from the script path by default. */
+  fromNpx?: boolean;
 }
 
 interface GlobalOptions {
@@ -2089,6 +2095,14 @@ again with --number and --code.
   return program;
 };
 
+const defaultUpdateCheck = (env: NodeJS.ProcessEnv, context: ConfigContext | undefined): UpdateCheck | undefined => {
+  // Test runs and CI never reach the registry (update-notifier skips CI too).
+  if (process.env.RELAY_NO_UPDATE_CHECK || process.env.VITEST || env.CI || process.env.CI) return undefined;
+  let cacheFile: string;
+  try { cacheFile = join(dirname(configPath(context)), "update-check.json"); } catch { return undefined; }
+  return startUpdateCheck({ version: PACKAGE_VERSION, cacheFile, env });
+};
+
 export const runCLI = async (
   argv: string[],
   dependencies: ProgramDependencies = {},
@@ -2105,6 +2119,19 @@ export const runCLI = async (
   // cancel note and the skill offer all stay silent (clig.dev, standard names).
   const quiet = argv.includes("-q") || argv.includes("--quiet");
   const note = quiet ? (): void => undefined : stderr;
+  // npm's update-notifier shape (gh and vercel too): a cached daily read of
+  // the dist-tag, never blocking or failing the command, one notice on stderr.
+  const updateCheck = dependencies.updateCheck === false ? undefined
+    : dependencies.updateCheck ?? defaultUpdateCheck(env, dependencies.configContext);
+  const outdatedLatest = async (): Promise<string | undefined> => {
+    const latest = await updateCheck?.latest;
+    return updateCheck && latest && isOutdated(updateCheck.version, latest) ? latest : undefined;
+  };
+  const noticeIfOutdated = async (): Promise<void> => {
+    if (json || quiet || !updateCheck) return;
+    const latest = await outdatedLatest();
+    if (latest) stderr(updateNotice(updateCheck, latest, argv, dependencies.fromNpx));
+  };
   if (argv.includes("--verbose")) {
     dependencies = { ...dependencies, fetch: verboseFetch(dependencies.fetch ?? globalThis.fetch, stderr) };
   }
@@ -2203,11 +2230,23 @@ export const runCLI = async (
         confirmLogout: () => ui.confirm("Remove the saved token from this computer? The agent itself is not deleted."),
       } : {}),
     }).parseAsync(args, { from: "user" });
+    await noticeIfOutdated();
     return EXIT_CODES.ok;
-  } catch (error) {
+  } catch (caught) {
+    let error = caught;
     if (error instanceof InteractiveCancelled) { note("Cancelled.\n"); return EXIT_CODES.ok; }
     if (error instanceof CommanderError && ["commander.helpDisplayed", "commander.version", "commander.help"].includes(error.code)) {
+      await noticeIfOutdated();
       return error.exitCode;
+    }
+    // A route this copy calls that Relay no longer has (404 or 410) is the
+    // old-version dead end: say so, with the command that fixes it.
+    const latest = staleRouteStatus(error) ? await outdatedLatest() : undefined;
+    if (updateCheck && latest) {
+      const text = error instanceof Error ? error.message : String(error);
+      error = new CliError(`${text} This relaymessenger is ${updateCheck.version}, and Relay no longer answers some requests from old versions. The newest is ${latest}.\n${updateNotice(updateCheck, latest, argv, dependencies.fromNpx).split("\n").slice(1).join("\n").trimEnd()}`, "outdated");
+    } else {
+      await noticeIfOutdated();
     }
     let secrets: string[] = [];
     try {
