@@ -396,6 +396,89 @@ async def test_an_audio_video_answer_gives_the_real_peer_its_candidates() -> Non
     await transport.aclose()
 
 
+def cloudflare_sdp(sections: list[list[str]]) -> str:
+    """A Cloudflare session description (`CLOUDFLARE_AUDIO_VIDEO_ANSWER`'s session lines) with these audio sections."""
+    mids = " ".join(str(n) for n in range(len(sections)))
+    lines = [
+        "v=0", "o=- 5156661386025904969 1790184677 IN IP4 0.0.0.0", "s=-", "t=0 0", "a=msid-semantic:WMS*",
+        "a=fingerprint:sha-256 8A:77:80:9B:AC:80:96:9C:FF:EF:7C:1B:1F:B5:4A:5A:8F:37:FF:B7:F1:EE:D7:86:B0:DE:25:5A:E8:E6:80:59",
+        "a=ice-lite", f"a=group:BUNDLE {mids}",
+    ]
+    for mid, extra in enumerate(sections):
+        lines += [
+            "m=audio 9 UDP/TLS/RTP/SAVPF 96", "c=IN IP4 0.0.0.0", f"a=mid:{mid}",
+            "a=ice-ufrag:2777758f", "a=ice-pwd:0123456789abcdef012345", "a=rtcp-mux", "a=rtcp-rsize",
+            "a=rtpmap:96 opus/48000/2", *extra,
+        ]
+    return "\r\n".join([*lines, ""])
+
+
+async def test_an_empty_audio_frame_does_not_stop_the_persons_audio() -> None:
+    # Cloudflare's SFU sends RTP packets with no payload (aiortc issue 1349);
+    # aiortc queues each as an empty frame for its Opus decoder, and libavcodec
+    # reads an empty packet as end of stream, so without the guard the decoder
+    # thread dies on the next real packet and the agent hears nothing more.
+    import fractions
+
+    import av
+    from aiortc.codecs.opus import OpusEncoder
+    from aiortc.jitterbuffer import JitterFrame
+    from aiortc.rtcrtpparameters import RTCRtpCodecParameters, RTCRtpReceiveParameters
+
+    from relaymessenger.calls._engine import create_peer_connection
+
+    room = FakeRoom()
+    room.ice_servers = []
+    peers: list[Any] = []
+
+    def factory(config: PeerConfig) -> Any:
+        peers.append(create_peer_connection(config))
+        return peers[-1]
+
+    transport = RelayCallTransport(call_id="call_1", room=room, _peer_factory=factory)  # type: ignore[arg-type]
+    heard: list[Any] = []
+    transport.on("audio", lambda frame: heard.append(frame.samples))
+    task = asyncio.ensure_future(transport.connect())
+    for _ in range(100):
+        if room.offers():
+            break
+        await asyncio.sleep(0.01)
+    candidates = ["a=candidate:513273236 1 udp 2130706431 192.0.2.1 1473 typ host", "a=end-of-candidates"]
+    room.emit("answer", answer(cloudflare_sdp([["a=setup:passive", "a=recvonly", *candidates]])))
+    await settle()
+    # The room pulls the person's audio: the SFU re-offers with a second, sending section.
+    pull = cloudflare_sdp([
+        ["a=setup:actpass", "a=recvonly", *candidates],
+        ["a=setup:actpass", "a=ssrc:1234 cname:person", "a=sendonly"],
+    ])
+    room.emit("offer", {"type": "offer", "session_description": {"type": "offer", "sdp": pull}, "track": "audio"})
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if any(f["type"] == "answer" for f in room.sent):
+            break
+    receiver = next(t.receiver for t in peers[0].getTransceivers() if t.direction == "recvonly")
+    # What aiortc runs once DTLS connects (rtcpeerconnection.py ``__connect``): the decoder thread starts.
+    opus = RTCRtpCodecParameters(mimeType="audio/opus", clockRate=48_000, channels=2, payloadType=96)
+    await receiver.receive(RTCRtpReceiveParameters(codecs=[opus]))
+
+    silence = av.AudioFrame(format="s16", layout="stereo", samples=960)
+    silence.sample_rate, silence.pts, silence.time_base = 48_000, 0, fractions.Fraction(1, 48_000)
+    for plane in silence.planes:
+        plane.update(bytes(plane.buffer_size))
+    packet = OpusEncoder().encode(silence)[0][0]
+    decoder_queue = receiver._RTCRtpReceiver__decoder_queue
+    for timestamp, data in ((0, packet), (960, b""), (1920, packet)):
+        decoder_queue.put((opus, JitterFrame(data=data, timestamp=timestamp)))
+    for _ in range(200):
+        if len(heard) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    # Both real packets reach the application: 20 ms each, before and after the empty one.
+    assert sum(len(samples) for samples in heard) == 2 * 960 * 2
+    task.cancel()
+    await transport.aclose()
+
+
 async def test_write_audio_slices_into_10_ms_and_validates() -> None:
     import numpy as np
 
