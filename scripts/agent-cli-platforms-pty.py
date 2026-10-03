@@ -53,7 +53,8 @@ def exercise(name, menu=False, cancel=False):
         assert child.returncode==0,'Unexpected Clack cancellation/success exit'
         if cancel or menu:assert not config.exists(),'Cancellation/read-only menu persisted credentials'
         else:assert json.loads(config.read_text())['profiles']['default']['agent_token']==secret
-        if menu and not cancel:assert re.search(rb'"agents"\s*:\s*\[\s*\]',ansi.sub(b'',raw)),'Menu did not invoke read-only local inventory'
+        # A person at a terminal gets the human line since PR 457; JSON is only for pipes and agents.
+        if menu and not cancel:assert b'No agents are saved on this computer.' in ansi.sub(b'',raw),'Menu did not invoke read-only local inventory'
         assert not any(home.rglob('SKILL.md')) and not any(cwd.rglob('SKILL.md')),'Declined offer installed a skill'
         report['cases'].append({'name':name,'command':command,'exit':child.returncode,'realPty':True,'ciFlagsRemovedOnlyForThisOwnedPty':True,'echoDisabled':True,'noEcho':True,'terminalRestored':True,'persisted':not(cancel or menu),'skillOfferShownAndDeclined':offer,'capture':raw.decode(errors='replace').replace(secret,'[REDACTED]')})
     except Exception:
