@@ -109,7 +109,7 @@ asyncio.run(main())
 ```
 
 `STARTED_AT` is the process start time, so a restart texts again and a retry
-does not. `owner_people` is empty when no person can be resolved.
+does not.
 
 ## Run it
 

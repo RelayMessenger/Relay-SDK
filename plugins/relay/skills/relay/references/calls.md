@@ -27,22 +27,22 @@ it rings: `await relay.calls.end(call_id)`.
 
 ### Bridge to a voice provider
 
-Relay carries the audio; your providers hear, think and speak.
+Relay carries the audio; any provider hears, thinks and speaks. Pick the
+docs page for how your providers connect, and follow it:
 
-- Your own speech-to-text, model and voice, any mix: Pipecat with
-  `RelayTransport` (`uv add relaymessenger-pipecat "pipecat-ai[...]"` with your
-  providers' extras). Read https://docs.relayapp.im/integrations/pipecat.md.
-- An ElevenLabs Agent that runs the whole conversation:
-  https://docs.relayapp.im/calls/elevenlabs.md (TypeScript) or the
-  `elevenlabs-agents-call` cookbook (Python).
-- LiveKit Agents: https://docs.relayapp.im/integrations/livekit.md.
-- Raw PCM in and out, for anything else: https://docs.relayapp.im/calls/audio.md.
+- Separate speech-to-text, model and voice, in any mix: Pipecat with
+  `RelayTransport` (`uv add relaymessenger-pipecat "pipecat-ai[<your providers>]"`).
+  https://docs.relayapp.im/integrations/pipecat.md
+- LiveKit Agents: https://docs.relayapp.im/integrations/livekit.md
+- A hosted conversational agent from a voice provider:
+  https://docs.relayapp.im/calls/elevenlabs.md is the bridge pattern.
+- Raw PCM in and out, for anything else: https://docs.relayapp.im/calls/audio.md
 
-Runnable bots, one per provider mix:
-https://github.com/RelayMessenger/Relay-SDK/tree/main/cookbook
-(`elevenlabs-voice-agent`, `elevenlabs-agents-call`, `grok-voice-agent`). Copy
-the pipeline, not their own `run_websocket` loop: your process already has one.
-For framework details read https://github.com/pipecat-ai/skills and
+Every provider page lists its recipe. The index of all of them:
+https://docs.relayapp.im/llms.txt (the Calls and Integrations sections). Runnable
+bots: https://github.com/RelayMessenger/Relay-SDK/tree/main/cookbook. Copy a
+bot's pipeline, not its own `run_websocket` loop: your process already has one.
+Framework details: https://github.com/pipecat-ai/skills,
 https://github.com/livekit/agent-skills.
 
 The shape of `run_call` with Pipecat, video included:
