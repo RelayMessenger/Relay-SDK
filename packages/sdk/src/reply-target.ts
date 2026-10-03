@@ -1,3 +1,4 @@
+import { locationShareData, placeData } from "./selection.js";
 import type { Message, MessagePartResponse, ReplyTo } from "./types.js";
 
 /**
@@ -27,6 +28,8 @@ export const replyTargetParts = (
 const partText = (part: MessagePartResponse): string => {
   if (part.type === "text" || part.type === "link" || part.type === "system") return part.value;
   if (part.type === "media") return `[${part.filename || "attachment"}]`;
+  if (part.type === "place") return `[place ${JSON.stringify(placeData(part))}]`;
+  if (part.type === "location") return `[location share ${JSON.stringify(locationShareData(part))}]`;
   return `[${part.type}]`;
 };
 

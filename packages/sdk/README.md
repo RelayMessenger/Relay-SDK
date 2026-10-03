@@ -66,6 +66,9 @@ The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
 include selection guidance and structured inbound discovery.
 `selectionReply(parts, replyTo)` discovers values, IDs, source-owned reply text,
 and the explicit source target.
+`locationContext(parts)` writes a pin (`place`) or a shared location card
+(`location`) as one line of data for a model, the line every integration above
+gives it, so a Message holding only a pin is never empty.
 
 ### List picker sections
 

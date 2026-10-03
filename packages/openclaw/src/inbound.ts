@@ -1,4 +1,4 @@
-import { selectionReply, selectionReplyContext } from "@relaymessenger/sdk";
+import { locationContext, selectionReply, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   MessagePartResponse,
   RelayWebhookEvent,
@@ -30,10 +30,12 @@ function renderPart(part: MessagePartResponse): string | undefined {
 export function renderRelayMessageParts(
   parts: readonly MessagePartResponse[],
 ): string {
-  return parts
+  // A pin and a location share have no words; their data follows the words.
+  const words = parts
     .map(renderPart)
     .filter((value): value is string => Boolean(value?.trim()))
     .join("\n");
+  return [words, locationContext(parts)].filter(Boolean).join("\n\n");
 }
 
 export function isRelayMessageReceivedEvent(
