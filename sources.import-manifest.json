@@ -52,7 +52,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/package.json",
       "source_sha256": "b9d0f5bba2c5ba5eea904ca4ad490795c01b0a67bd5592d7fdbea50a7ed8b29b",
-      "destination_sha256": "a41780e54177390f7f9a9bb36e2f65f7e96a795241c0b0f01031f966921a81ad",
+      "destination_sha256": "861f939341bbace2f7630a0e90589131e4205c41e3c2dce7bc7f2da1708112ed",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "6b931caeaa9f28f4c1a76974340ef8b9c2575fa23518791e90846739599fda0e",
+      "destination_sha256": "268e9789727f5e146be413823beb52071ca56a137f45c6ad66dfd44141a5542a",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -932,7 +932,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "b4bcb46233c3d140128638aea8b290e963bf9d8949fad2c1d6609c412fd5784d",
-      "destination_sha256": "d3dd5eb8696bec70b7133ac0dba7b6f1a41d793bdbc4da02f590bc6157107df1",
+      "destination_sha256": "6efa7f9292a31a1a1cbe8523c3e150a9e732ecbe8c1bbc2d51ea72eadbdbb5f0",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -976,7 +976,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "package.json",
       "source_sha256": "29b497316ffdc37e35c1f72b8be7a625f2597f704e4e5f390b21d370ef2540a4",
-      "destination_sha256": "3d582b7fe0d5b6aaf81e3203e2909986e8395a1e8ac64b0aedf02b7227e7e564",
+      "destination_sha256": "823c554dc6ed00b6a941c6d44ab7998409476559bb69d9a327dba88fe607ea5c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1306,7 +1306,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": ".claude-plugin/marketplace.json",
       "source_sha256": "6e71333fe92fde3a1593562c798290dea11e3ead076dc61895c2b17ce174a35d",
-      "destination_sha256": "b6a136a5accdd93c39a000e56a8013352b1715453a6c704104381151d8a8560b",
+      "destination_sha256": "2b0531b2e940e73424d5a7ea18fcbc48932a3f43eda68a9108be91f6ea01f225",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1317,7 +1317,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": ".claude-plugin/plugin.json",
       "source_sha256": "c2c3ddd7d2fe931077f0b6e5eb41295e5f020720b0a11fea8ae3c9346f666b04",
-      "destination_sha256": "a6e2145a421d7cb1ed2c0106d674aae4e74c55b1eb3728d585b38d1a40a63ea4",
+      "destination_sha256": "341dec2c6762f4a6ee03676d18f6bcaf8bf0cfa3d3aba581634a5b1c2a85e440",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1416,7 +1416,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "7eb2d40831ff4ba4dfd9c169e46da260e23396e42a92adc912ecb1f84475eb60",
-      "destination_sha256": "715926b0c8e7a1189ec551ae7c10efc7fdcd78d721b889800df875168a6f4c03",
+      "destination_sha256": "c1265eaf1b28b2e7a2ed07bae1e772df3a966e8f3e1e66c9580beb5f393e1669",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1427,7 +1427,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "package.json",
       "source_sha256": "bd3bcfb7d722786d37cb471dbb72a157081b62b0d710b1e2122fa783a89fc31f",
-      "destination_sha256": "004eb8b0d56d60f257ba536326507cea3946e1e18d9126bab52b2bd4bdf9d2df",
+      "destination_sha256": "fd3437d09c1f13abc666594beef937a2eaaf4985b3334d9a6de0a2c6ca4a7b2e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1438,7 +1438,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/.claude-plugin/plugin.json",
       "source_sha256": "c2c3ddd7d2fe931077f0b6e5eb41295e5f020720b0a11fea8ae3c9346f666b04",
-      "destination_sha256": "a6e2145a421d7cb1ed2c0106d674aae4e74c55b1eb3728d585b38d1a40a63ea4",
+      "destination_sha256": "341dec2c6762f4a6ee03676d18f6bcaf8bf0cfa3d3aba581634a5b1c2a85e440",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1504,7 +1504,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/contracts/relay-v1.lock.json",
       "source_sha256": "7eb2d40831ff4ba4dfd9c169e46da260e23396e42a92adc912ecb1f84475eb60",
-      "destination_sha256": "715926b0c8e7a1189ec551ae7c10efc7fdcd78d721b889800df875168a6f4c03",
+      "destination_sha256": "c1265eaf1b28b2e7a2ed07bae1e772df3a966e8f3e1e66c9580beb5f393e1669",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1515,7 +1515,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "cc4bca55f05a615d99ea0463f7c6c2886abd5896412605aef39a7f61ece79eeb",
+      "destination_sha256": "be06d25063eb28091fda94fd3c6f6166328e3a028580fe69118873ce0beb7fce",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1526,7 +1526,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "cc4bca55f05a615d99ea0463f7c6c2886abd5896412605aef39a7f61ece79eeb",
+      "destination_sha256": "be06d25063eb28091fda94fd3c6f6166328e3a028580fe69118873ce0beb7fce",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"

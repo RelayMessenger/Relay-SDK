@@ -33,7 +33,7 @@
   "license": "MIT",
   "dependencies": {
     "@evan/opus": "1.0.3",
-    "@relaymessenger/sdk": "0.5.1-staging.0",
+    "@relaymessenger/sdk": "0.5.1-staging.1",
     "rtp-packet": "0.4.2",
     "werift": "0.24.4"
   },
