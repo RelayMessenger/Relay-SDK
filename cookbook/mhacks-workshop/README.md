@@ -13,6 +13,12 @@ Sign in to Relay:
 npx relaymessenger@latest login
 ```
 
+Give your coding agent Relay's skill, so it knows how to build on Relay:
+
+```sh
+npx skills add RelayMessenger/Relay-SDK --skill relay
+```
+
 Make two API keys. You paste each one into a step below.
 
 - xAI: https://console.x.ai (open API Keys)
@@ -45,12 +51,12 @@ Make two looping videos of my character for phone video calls, one talking and o
 ## Step 4: call it
 
 ```text
-Save my ElevenLabs API key in .env, then let people voice and video call my agent: ElevenLabs eleven_v4_turbo for its voice, grok-4.20-0309-non-reasoning as its brain on calls, and the talking and listening videos on video calls. Here's my ElevenLabs API key:
+Save my ElevenLabs API key in .env, then let people voice and video call my agent: ElevenLabs eleven_v4_turbo for its voice, grok-4.20-0309-non-reasoning as its brain on calls, and its talking and listening videos as its camera on every call, whether or not my camera is on. When it's ready, call me on Relay so I can try it. Here's my ElevenLabs API key:
 ```
 
 After the prompt, paste your ElevenLabs key and press Enter.
 
-Call your agent in Relay, then video call it.
+Your agent calls you. Answer it, then try a video call.
 
 ## Make it yours
 
