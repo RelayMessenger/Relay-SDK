@@ -10,17 +10,32 @@ You need Node.js 22 or newer, a coding agent, and the Relay app on your phone.
 Get an xAI API key at https://console.x.ai and an ElevenLabs API key at
 https://elevenlabs.io.
 
-Run this in your terminal, with your own keys:
+Sign in to Relay. `login` opens your browser; sign in with Google or Apple.
+`@latest` makes sure you run the newest version:
 
 ```sh
-npx relaymessenger login
+npx relaymessenger@latest login
+```
+
+Add your xAI key:
+
+```sh
 export XAI_API_KEY='paste-your-xai-key'
+```
+
+Add your ElevenLabs key:
+
+```sh
 export ELEVENLABS_API_KEY='paste-your-elevenlabs-key'
+```
+
+Make a folder for your agent:
+
+```sh
 mkdir my-agent && cd my-agent
 ```
 
-`login` opens your browser. Sign in with Google or Apple. Then open the
-`my-agent` folder in your coding agent and paste each step below. Fill in the
+Open the `my-agent` folder in your coding agent and paste each step below. Fill in the
 parts in square brackets.
 
 ## Step 1: make your agent and text it
