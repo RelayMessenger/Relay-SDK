@@ -62,6 +62,8 @@ export interface ConsoleAuthDependencies {
   openBrowser?: (url: string) => Promise<void>;
   website?: string;
   nonInteractive?: boolean;
+  /** A person at a terminal: gh's `auth login --web` lines instead of an agent's. */
+  human?: boolean;
 }
 
 export interface ConsoleRequestDependencies {
@@ -90,7 +92,12 @@ const json = async <T>(response: Response): Promise<T> => {
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   let value: unknown;
-  try { value = JSON.parse(text); } catch { throw new Error(`Relay Console returned HTTP ${response.status}.`); }
+  try { value = JSON.parse(text); } catch {
+    // A route that no longer exists answers with a page, not JSON; the status
+    // still travels so an outdated CLI can say so (update-check.ts).
+    if (!response.ok) throw new ConsoleRefusal(`Relay Console returned HTTP ${response.status}.`, response.status);
+    throw new Error(`Relay Console returned HTTP ${response.status}.`);
+  }
   if (!response.ok) {
     // Console errors are not a safe place to echo arbitrary response text:
     // an upstream error can contain a bearer or refresh token. Only a short
@@ -231,15 +238,43 @@ export const consoleSignOut = async (deps: ConsoleRequestDependencies): Promise<
   }
 };
 
+const SPINNER = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"];
+
+/**
+ * One line that turns in place (ora, as gh and vercel draw it): a carriage
+ * return and erase-line per frame, never a screen clear, and the line is
+ * erased when the wait ends so only the result stays.
+ */
+export const waitingLine = (write: (value: string) => void, text: string, everyMs = 100): { stop: () => void } => {
+  let frame = 0;
+  const draw = () => { write(`\r\u001b[2K${SPINNER[frame++ % SPINNER.length]} ${text}`); };
+  draw();
+  const timer = setInterval(draw, everyMs);
+  timer.unref?.();
+  return { stop: () => { clearInterval(timer); write("\r\u001b[2K"); } };
+};
+
 export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<RelayConsoleOAuthSession> => {
   const stderr = deps.stderr ?? ((value) => process.stderr.write(value));
   const start = await postDeviceStart(deps);
   const verification = start.verification_uri_complete ?? start.verification_uri;
-  stderr(`Your code is ${start.user_code}\n`);
-  stderr(`Open ${verification}\n`);
-  stderr(`If it does not open, enter this code at ${start.verification_uri}: ${start.user_code}\n`);
-  await (deps.openBrowser ?? openBrowser)(verification).catch(() => undefined);
-  const token = await pollDevice(deps, start);
+  let token: DeviceToken;
+  if (deps.human) {
+    // gh auth login --web: the code once, the address once, one line that
+    // turns while Relay waits, then the caller's check mark.
+    stderr(`! Your one-time code: ${start.user_code}\n`);
+    stderr(`Opening ${verification} in your browser.\n`);
+    await (deps.openBrowser ?? openBrowser)(verification).catch(() => undefined);
+    const waiting = waitingLine(stderr, "Waiting for you to approve in the browser");
+    try { token = await pollDevice(deps, start); }
+    finally { waiting.stop(); }
+  } else {
+    stderr(`Your code is ${start.user_code}\n`);
+    stderr(`Open ${verification}\n`);
+    stderr(`If it does not open, enter this code at ${start.verification_uri}: ${start.user_code}\n`);
+    await (deps.openBrowser ?? openBrowser)(verification).catch(() => undefined);
+    token = await pollDevice(deps, start);
+  }
   const organizationId = await readOrganization(deps, token);
   const session: RelayConsoleOAuthSession = {
     access_token: token.access_token,
