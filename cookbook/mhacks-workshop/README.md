@@ -39,7 +39,7 @@ Type its name and how it talks, then press Enter. Text it in Relay.
 ## Step 3: generate its video
 
 ```text
-Use grok-imagine-video-1.5-lite to turn its profile picture into two short videos, one of it talking and one of it listening, and show them to me.
+Make two looping videos of my character for phone video calls, one talking and one listening. First use grok-imagine-image-2.0 to extend its profile picture to a vertical 9:16 frame with its mouth closed, so the video doesn't stretch it. Then use grok-imagine-video-1.5-lite with that frame to make two 7-second 9:16 videos at 720p: in the talking one its mouth moves like it's speaking, in the listening one its mouth stays closed and it blinks and nods. Keep the camera completely still and the character centered, looking at the camera. Blend the last half second into the first so each loops smoothly, remove all sound, and show them to me.
 ```
 
 ## Step 4: call it
