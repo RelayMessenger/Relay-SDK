@@ -145,16 +145,20 @@ https://docs.relayapp.im/calls/video.md.
 
 ## Call a person
 
-`POST /v1/chats/{chatId}/calls` rings the person in a one-to-one Chat. To call
-the owner, use the `chat_id` you got when you [texted the owner](build-an-agent.md#text-the-owner),
-after the code that answers calls is running:
+When you finish setting up calls, call the agent's owner once so they can try
+it: restart the agent with the call code, then ring the chat saved in
+`owner.json` ([text the owner](build-an-agent.md#text-the-owner)). The agent
+joins its own call through `call.created`, so the WebSocket must be running.
 
 ```python
+owner = json.loads(OWNER.read_text())
 me = await relay.me.retrieve()
 if me["calls_enabled"]:
-    await relay.calls.create(owner_chat_id, to=[owner], idempotency_key=f"call-owner-{STARTED_AT}")
-    # call.created arrives on the WebSocket: run_call joins it and the phone rings.
+    await relay.calls.create(owner["chat_id"], to=[owner["handle"]], idempotency_key=f"call-owner-{int(time.time())}")
 ```
+
+Run it once, from a short script, after the agent restarted. `POST
+/v1/chats/{chatId}/calls` rings the person in a one-to-one Chat:
 
 ```bash
 curl -sS -X POST "https://api.relayapp.im/v1/chats/$CHAT_ID/calls" \

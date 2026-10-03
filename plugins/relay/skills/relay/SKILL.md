@@ -17,12 +17,12 @@ the SDK source or the iOS app.
 2. Set its profile picture on its Contact Card: [profile picture](references/build-an-agent.md#set-the-profile-picture).
 3. Run one process that reads its events over the WebSocket and texts back:
    [texting agent](references/build-an-agent.md#text-over-the-websocket).
-4. When it runs, text its owner hello: [text the owner](references/build-an-agent.md#text-the-owner).
+4. When it runs, text its owner hello, once: [text the owner](references/build-an-agent.md#text-the-owner).
 5. Answer calls in that same process and bridge the audio to any voice
    provider: [answer calls](references/calls.md#answer-a-call).
 6. Send its own video on every call, from any frame source:
    [the agent's camera](references/calls.md#the-agents-camera).
-7. When calls work, call its owner: [call a person](references/calls.md#call-a-person).
+7. When calls are set up, call its owner so they can try it: [call a person](references/calls.md#call-a-person).
 
 Finish each step by running it against Relay, not only by compiling.
 

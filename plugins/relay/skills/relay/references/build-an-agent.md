@@ -90,26 +90,28 @@ replay: [agent events](agent-events.md).
 
 ## Text the owner
 
-When the process starts, text the agent's owner so they see it working. The
-owner gets it in Chats, never as a message request:
+Once the agent runs, text its owner hello, once per agent, so they see it
+working. The owner gets it in Chats, never as a message request. Save the
+chat id: it is how you call the owner later.
 
 ```python
+import json, pathlib
+OWNER = pathlib.Path("owner.json")  # survives restarts: hello is sent once
+
 async def main() -> None:
-    me = await relay.me.retrieve()             # GET /v1/me
-    owner = me["owner_people"][0]["handle"]    # the person who owns the agent
-    hello = await model_hello()                # the model's own words, in persona
-    sent = await relay.messages.create(        # POST /v1/messages
-        to=[owner],
-        message={"parts": [{"type": "text", "value": hello}], "idempotency_key": f"hello-{STARTED_AT}"},
-    )
-    owner_chat_id = sent["chat_id"]            # keep it to call the owner
+    if not OWNER.exists():
+        me = await relay.me.retrieve()                 # GET /v1/me
+        owner = me["owner_people"][0]["handle"]        # the person who owns the agent
+        hello = await model_hello()                    # the model's own words, in persona
+        sent = await relay.messages.create(            # POST /v1/messages
+            to=[owner],
+            message={"parts": [{"type": "text", "value": hello}], "idempotency_key": f"hello-{me['handle']}"},
+        )
+        OWNER.write_text(json.dumps({"handle": owner, "chat_id": sent["chat_id"]}))
     await run_websocket(relay.base_url, TOKEN, on_event=on_event, on_full_sync=on_full_sync)
 
 asyncio.run(main())
 ```
-
-`STARTED_AT` is the process start time, so a restart texts again and a retry
-does not.
 
 ## Run it
 
