@@ -9,10 +9,12 @@ remote ``a=ice-lite``).
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
+from aioice import ice as aioice_ice
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender
 from aiortc.rtcconfiguration import RTCBundlePolicy
 from aiortc.rtcicetransport import parse_stun_turn_uri
@@ -84,7 +86,8 @@ def order_for_aiortc(servers: list[RelayIceServer]) -> list[RelayIceServer]:
     aiortc keeps only the first usable TURN URL, in list order
     (aiortc/rtcicetransport.py `connection_kwargs`), and allocates it before
     the offer can leave, up to aioice's 5 s (aioice/ice.py
-    `get_component_candidates`, ``timeout=5``). UDP on Cloudflare's primary
+    `get_component_candidates`, ``timeout=5``; `RelayPeerConnection` cuts that
+    wait to `RELAY_GATHERING_BOUND_S`). UDP on Cloudflare's primary
     port is the cheapest TURN allocation, so it goes first. Each server's URLs
     are sorted stably by that rank, and the servers too, with STUN-only
     servers kept first in their given order; `create_peer_connection` then
@@ -133,8 +136,101 @@ def turn_only(servers: list[RelayIceServer]) -> list[RelayIceServer]:
     return out
 
 
+#: Longest the offer waits for the TURN allocation. Cloudflare's TURN answers
+#: an allocation in under 100 ms when it is reachable (measured 2026-10-04,
+#: three runs, 43-85 ms); one second also covers one lost request at aioice's
+#: first 500 ms retransmission (aioice/stun.py ``RETRY_RTO``).
+RELAY_GATHERING_BOUND_S = 1.0
+
+
+class RelayPeerConnection(RTCPeerConnection):
+    """`RTCPeerConnection` whose offer waits at most `RELAY_GATHERING_BOUND_S` for TURN.
+
+    aiortc gathers inside ``setLocalDescription`` (rtcpeerconnection.py
+    ``__gather``), and aioice waits up to 5 s for the TURN allocation before
+    gathering ends (aioice/ice.py ``get_component_candidates``,
+    ``timeout: int = 5`` and ``asyncio.wait(tasks, timeout=timeout)``). Where
+    TURN does not answer, every offer left 5 s late with no relay candidate
+    (iPhone call 2026-10-04, bot in a Cloudflare Container: "gathering→complete
+    6.6s", "relay 0"). See `bound_relay_gathering`.
+    """
+
+    async def setLocalDescription(self, sessionDescription: Any = None) -> None:
+        for transceiver in self.getTransceivers():
+            bound_relay_gathering(transceiver.sender.transport.transport.iceGatherer)
+        if self.sctp is not None:
+            bound_relay_gathering(self.sctp.transport.transport.iceGatherer)
+        await super().setLocalDescription(sessionDescription)
+
+
+def bound_relay_gathering(gatherer: Any, bound_s: Optional[float] = None) -> None:
+    """Allocate TURN beside host gathering; end gathering after ``bound_s`` at most.
+
+    An allocation that answers within the bound is a candidate as before. A
+    later one is still added to the ICE agent when it arrives and paired with
+    the remote candidates, checked at once if checks are already running, so
+    TURN still carries the call when no host pair works. Cloudflare's SFU is
+    ICE-lite: it answers the checks this peer sends from any socket and never
+    reads the offer's candidates, so a relay candidate missing from the SDP
+    loses nothing. Does nothing once gathering has begun, and without TURN.
+    """
+    connection = gatherer._connection
+    if gatherer.state != "new" or connection.turn_server is None or getattr(connection, "_relay_bounded", False):
+        return
+    connection._relay_bounded = True
+    bound = RELAY_GATHERING_BOUND_S if bound_s is None else bound_s
+    turn = {
+        "turn_server": connection.turn_server,
+        "turn_username": connection.turn_username,
+        "turn_password": connection.turn_password,
+        "turn_ssl": connection.turn_ssl,
+        "turn_transport": connection.turn_transport,
+    }
+    connection.turn_server = None  # aioice now gathers host (and STUN) only
+    host_candidates = connection.get_component_candidates
+
+    async def get_component_candidates(component: int, addresses: list[str], timeout: int = 5) -> list[Any]:
+        relay = asyncio.ensure_future(
+            aioice_ice.relayed_candidate(
+                component=component, protocol_factory=lambda: aioice_ice.StunProtocol(connection), **turn
+            )
+        )
+        candidates: list[Any] = await host_candidates(component=component, addresses=addresses, timeout=timeout)
+        await asyncio.wait({relay}, timeout=bound)
+        if relay.done():
+            if not relay.cancelled() and relay.exception() is None:
+                candidate, protocol = relay.result()
+                candidates.append(candidate)
+                connection._protocols.append(protocol)
+        else:
+            relay.add_done_callback(lambda task: _attach_late_relay(connection, task))
+        return candidates
+
+    connection.get_component_candidates = get_component_candidates
+
+
+def _attach_late_relay(connection: Any, task: "asyncio.Future[Any]") -> None:
+    """Give a TURN allocation that outlived the bound to the running ICE agent (aioice/ice.py ``connect``)."""
+    if task.cancelled() or task.exception() is not None:
+        return
+    candidate, protocol = task.result()
+    if connection._closed:
+        asyncio.ensure_future(protocol.close())
+        return
+    connection._local_candidates.append(candidate)
+    connection._protocols.append(protocol)
+    if not connection._early_checks_done or connection._check_list_done:
+        return  # ``connect`` pairs every protocol when it starts; once done, ICE no longer needs it
+    for remote in connection._remote_candidates:
+        if candidate.can_pair_with(remote) and not connection._find_pair(protocol, remote):
+            pair = aioice_ice.CandidatePair(protocol, remote)
+            connection._check_list.append(pair)
+            connection.check_start_task(pair)
+    connection.sort_check_list()
+
+
 def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:
-    """An aiortc peer with max-bundle and the TURN servers among the given ICE servers (`turn_only`).
+    """A `RelayPeerConnection` with max-bundle and the TURN servers among the given ICE servers (`turn_only`).
 
     aiortc uses one TURN URL per peer (aiortc/rtcicetransport.py
     `connection_kwargs`: "only a single TURN server is supported"); the first is used.
@@ -143,7 +239,7 @@ def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:
         RTCIceServer(urls=s.urls, username=s.username, credential=s.credential)
         for s in turn_only(config.ice_servers)
     ]
-    return RTCPeerConnection(RTCConfiguration(iceServers=servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
+    return RelayPeerConnection(RTCConfiguration(iceServers=servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
 
 
 def prefer_h264(transceiver: Any) -> None:
