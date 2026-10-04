@@ -3,6 +3,9 @@
 `rating-server.json` came from real Relay Server routes at commit
 `af7f1802cbad49485c8753cb1ad503dd97ae1ada`, not handwritten payloads.
 Its `source.contract_sha256` identifies the public contract used by this batch.
+Contract `7ccdbec7` (2026-10-04) differs from the generating contract `7ca00235`
+only in the handle pattern (`{2,31}` to `{1,31}`); no rating schema changed, so
+the payloads were not regenerated.
 Only seeded dummy contacts and disposable database IDs appear here.
 
 ## Generation
