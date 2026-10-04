@@ -110,6 +110,42 @@ class ChatHandle(TypedDict, total=False):
     activity: Optional[Dict[str, Any]]
 
 
+class _MessageEventRequired(TypedDict):
+    id: str
+    direction: Literal["inbound", "outbound"]
+    parts: List[Dict[str, Any]]
+
+
+class MessageEvent(_MessageEventRequired, total=False):
+    """The ``data`` of ``message.sent``, ``message.received``,
+    ``message.delivered`` and ``message.read`` (contract ``MessageEvent``).
+
+    Since Relay-Server ed5608a1 (2026-10-04) it carries the REST Message's
+    ``chat_id``, ``from_handle`` and ``is_from_me``. Read those; events from
+    older servers lack them, so fall back to ``chat["id"]`` and the deprecated
+    ``sender_handle``. The event also carries the REST Message's deprecated
+    ``from`` (the sender's handle string, a Python keyword, so untyped here);
+    read ``from_handle["handle"]`` instead."""
+
+    #: ID of the Chat this Message belongs to.
+    chat_id: str
+    #: The sender as a full handle object; None for a sender with no Handle.
+    from_handle: Optional[ChatHandle]
+    #: Whether the agent receiving this event sent this Message.
+    is_from_me: bool
+    #: The Chat, including ``is_group``, the only place an event says
+    #: whether the Chat is a group. Its ``id`` equals ``chat_id``.
+    chat: Dict[str, Any]
+    #: Deprecated: use ``from_handle``. May be None.
+    sender_handle: Optional[ChatHandle]
+    idempotency_key: Optional[str]
+    reply_to: Optional[Dict[str, Any]]
+    silent: bool
+    sent_at: Optional[str]
+    delivered_at: Optional[str]
+    read_at: Optional[str]
+
+
 class ContactEventContact(TypedDict):
     """The person in ``contact.added`` and ``contact.removed``."""
 

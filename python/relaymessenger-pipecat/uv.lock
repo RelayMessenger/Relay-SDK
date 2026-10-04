@@ -2361,6 +2361,7 @@ dependencies = [
 
 [package.optional-dependencies]
 calls = [
+    { name = "aioice" },
     { name = "aiortc" },
     { name = "av" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2369,6 +2370,7 @@ calls = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aioice", marker = "extra == 'calls'", specifier = ">=0.10.2,<0.11" },
     { name = "aiortc", marker = "extra == 'calls'", specifier = ">=1.15,<2" },
     { name = "av", marker = "extra == 'calls'", specifier = ">=14" },
     { name = "numpy", marker = "extra == 'calls'", specifier = ">=1.26" },

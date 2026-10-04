@@ -90,18 +90,48 @@ function isHandle(value: unknown): boolean {
   );
 }
 
+/**
+ * The Chat a message event belongs to: `chat_id`, which matches the Message
+ * object, else `chat.id`, the only Chat key servers before 2026-10-04 send.
+ */
+export function messageEventChatId(data: {
+  chat?: RelayWebhookMessageEvent["chat"];
+  chat_id?: string;
+}): string | undefined {
+  return data.chat_id ?? data.chat?.id;
+}
+
+/**
+ * The sender of a message event: `from_handle`, which matches the Message
+ * object, else the deprecated `sender_handle` that servers before 2026-10-04 send.
+ */
+export function messageEventSender(
+  data: Pick<RelayWebhookMessageEvent, "from_handle" | "sender_handle">,
+): RelayWebhookMessageEvent["from_handle"] {
+  return data.from_handle ?? data.sender_handle;
+}
+
 export function parseWebhookMessageEvent(
   data: Record<string, unknown>,
 ): RelayWebhookMessageEvent {
+  const chatId = messageEventChatId({
+    chat: isRecord(data.chat) ? data.chat as RelayWebhookMessageEvent["chat"] : undefined,
+    chat_id: data.chat_id as string | undefined,
+  });
   if (
-    !isRecord(data.chat) ||
-    typeof data.chat.id !== "string" ||
-    !isRelayUuid(data.chat.id) ||
+    (data.chat !== undefined && !isRecord(data.chat)) ||
+    (data.chat_id !== undefined && typeof data.chat_id !== "string") ||
+    typeof chatId !== "string" ||
+    !isRelayUuid(chatId) ||
     typeof data.id !== "string" ||
     !isRelayUuid(data.id) ||
     (data.direction !== "inbound" &&
       data.direction !== "outbound") ||
-    !isHandle(data.sender_handle) ||
+    !isHandle(messageEventSender({
+      from_handle: data.from_handle as RelayWebhookMessageEvent["from_handle"],
+      sender_handle: data.sender_handle as RelayWebhookMessageEvent["sender_handle"],
+    })) ||
+    (data.is_from_me !== undefined && typeof data.is_from_me !== "boolean") ||
     !Array.isArray(data.parts)
   ) {
     throw new ValidationError(

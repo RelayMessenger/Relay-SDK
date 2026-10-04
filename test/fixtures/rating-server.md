@@ -3,6 +3,8 @@
 `rating-server.json` came from real Relay Server routes at commit
 `af7f1802cbad49485c8753cb1ad503dd97ae1ada`, not handwritten payloads.
 Its `source.contract_sha256` identifies the public contract used by this batch.
+`source.carried_to` names a later contract the fixture was carried to without
+regeneration, and why no rating payload changed.
 Only seeded dummy contacts and disposable database IDs appear here.
 
 ## Generation

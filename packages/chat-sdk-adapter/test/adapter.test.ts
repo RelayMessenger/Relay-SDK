@@ -484,6 +484,71 @@ describe("Relay webhook handling", () => {
     });
   });
 
+  // Owner ruling 2026-10-04: message events carry the REST Message's chat_id,
+  // from_handle and is_from_me. Servers before Relay-Server ed5608a1 send only
+  // chat and the deprecated sender_handle, so the adapter must read both.
+  const { chat: _chat, sender_handle: _sender, ...withoutOldKeys } = webhookMessage();
+  const newKeys = { chat_id: IDS.chat, from: "ada", from_handle: USER_HANDLE, is_from_me: false };
+  it.each([
+    ["only the new keys", { ...withoutOldKeys, ...newKeys }],
+    ["only the old keys", webhookMessage()],
+    ["both shapes", { ...webhookMessage(), ...newKeys }],
+  ])("reads the same sender and chat from an event with %s", async (_shape, data) => {
+    const { adapter } = adapterHarness();
+    const chat = createMockChatInstance();
+    await adapter.initialize(chat);
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope("message.received", data as unknown as Record<string, unknown>)),
+    );
+    expect(response.status).toBe(200);
+    expect(chat.processMessage).toHaveBeenCalledOnce();
+    const [, threadId, message] = vi.mocked(chat.processMessage).mock.calls[0]!;
+    expect(threadId).toBe(THREAD_ID);
+    expect(message).toMatchObject({
+      author: { fullName: "Ada", isBot: false, isMe: false, userId: IDS.user, userName: "ada" },
+      text: "hello Relay",
+    });
+  });
+
+  it("prefers from_handle, chat_id and is_from_me when both shapes disagree", async () => {
+    const { adapter } = adapterHarness();
+    const chat = createMockChatInstance();
+    await adapter.initialize(chat);
+    await adapter.handleWebhook(await signedRequest(envelope("message.received", {
+      ...webhookMessage({
+        chat: { id: IDS.otherChat, is_group: false, owner_handle: USER_HANDLE },
+        sender_handle: { ...USER_HANDLE, handle: "stale", id: IDS.reply },
+      }),
+      chat_id: IDS.chat,
+      from_handle: USER_HANDLE,
+      is_from_me: false,
+    } as unknown as Record<string, unknown>)));
+    const [, threadId, message] = vi.mocked(chat.processMessage).mock.calls[0]!;
+    expect(threadId).toBe(THREAD_ID);
+    expect(message).toMatchObject({ author: { userId: IDS.user, userName: "ada" } });
+
+    const self = createMockChatInstance();
+    await adapter.initialize(self);
+    await adapter.handleWebhook(await signedRequest(envelope("message.received", {
+      ...withoutOldKeys, ...newKeys, from_handle: AGENT_HANDLE, is_from_me: true,
+    })));
+    expect(self.processMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects a message event with neither sender key or neither chat key", async () => {
+    const { adapter } = adapterHarness();
+    await adapter.initialize(createMockChatInstance());
+    for (const data of [
+      { ...withoutOldKeys, chat_id: IDS.chat },
+      { ...withoutOldKeys, from_handle: USER_HANDLE },
+    ]) {
+      const response = await adapter.handleWebhook(
+        await signedRequest(envelope("message.received", data)),
+      );
+      expect(response.status).toBe(422);
+    }
+  });
+
   it("resolves the signing secret for every delivery", async () => {
     const secret = vi.fn(() => WEBHOOK_SECRET);
     const adapter = createRelayAdapter({ webhookSecret: secret });
