@@ -396,8 +396,9 @@ export class OwnerApprovals {
       return true;
     }
     const sender = event.data.sender_handle;
-    // Anyone but an owner is not registered, and the card stays open.
-    if (sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;
+    // A sender with no Handle, or anyone but an owner, is not registered, and
+    // the card stays open.
+    if (!sender || sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;
     const choice = choiceFor(pending.request, answer.id);
     if (!choice) return true;
     pending.settle({ reason: "answered", choice, by: sender.handle });
