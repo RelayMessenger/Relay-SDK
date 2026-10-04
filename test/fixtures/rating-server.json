@@ -3,7 +3,12 @@
     "repository": "RelayMessenger/Relay-Server",
     "commit": "af7f1802cbad49485c8753cb1ad503dd97ae1ada",
     "contract_sha256": "7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9",
-    "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests."
+    "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests.",
+    "carried_to": {
+      "commit": "ed5608a17f35ce6e87bf8f66b6737157c13820b5",
+      "contract_sha256": "d718bf72bef79074ebab8110da7cd42553e151bee86336f1384d5bfb352ef7fb",
+      "reason": "Not regenerated. Contract af7f1802..ed5608a1 changes only MessageEvent, Message.from's deprecation and the createCall description; no rating, contact card or send-response schema."
+    }
   },
   "send_response": {
     "chat_id": "01a0fca2-1e13-73b2-a1a7-76208412a1c7",

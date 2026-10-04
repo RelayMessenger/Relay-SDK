@@ -1114,6 +1114,7 @@ export interface SentMessage {
 export interface Message {
   id: UUID;
   chat_id: UUID;
+  /** @deprecated Use `from_handle`. */
   from?: string | null;
   from_handle?: ChatHandle | null;
   parts?: MessagePartResponse[] | null;
@@ -1899,11 +1900,24 @@ export interface MessageEventChat {
 }
 
 export interface MessageWebhookData {
+  /**
+   * The Chat, including `is_group`, the only place an event says whether the
+   * Chat is a group. Its `id` equals `chat_id`.
+   */
   chat: MessageEventChat;
+  /** ID of the Chat this Message belongs to. Absent on events from servers before 2026-10-04. */
+  chat_id?: UUID;
   id: UUID;
   idempotency_key?: string | null;
   direction: "inbound" | "outbound";
+  /** @deprecated Use `from_handle`, which matches the Message object. */
   sender_handle: ChatHandle;
+  /** @deprecated Use `from_handle`. */
+  from?: string | null;
+  /** The sender as a full handle object, the Message object's `from_handle`. Absent on events from servers before 2026-10-04. */
+  from_handle?: ChatHandle | null;
+  /** Whether the Agent receiving this event sent this Message. Absent on events from servers before 2026-10-04. */
+  is_from_me?: boolean;
   parts: MessagePartResponse[];
   sent_at?: string | null;
   delivered_at?: string | null;
