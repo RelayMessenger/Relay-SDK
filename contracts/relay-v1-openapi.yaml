@@ -78,7 +78,7 @@ paths:
           description: The authenticated developer agent's complete Handle.
           schema:
             type: string
-            pattern: '^[a-z][a-z0-9_]{2,31}$'
+            pattern: '^[a-z][a-z0-9_]{1,31}$'
           example: brave_cangoo
       responses:
         "204":
@@ -3360,7 +3360,7 @@ components:
       description: The agent's complete Handle.
       schema:
         type: string
-        pattern: '^[a-z][a-z0-9_]{2,31}$'
+        pattern: '^[a-z][a-z0-9_]{1,31}$'
       example: brave_cangoo
   schemas:
     CallContact:

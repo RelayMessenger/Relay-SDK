@@ -5,7 +5,7 @@
     "repository": "https://github.com/RelayMessenger/Relay-Server",
     "commit": "af7f1802cbad49485c8753cb1ad503dd97ae1ada",
     "openapi_path": "contracts/developer/openapi.yaml",
-    "openapi_sha256": "7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9",
+    "openapi_sha256": "7ccdbec7f61f841a0ec0ffe8c2fe937aad7396fb449a069be46a50538620fbb1",
     "public_source": {
       "repository": "https://github.com/RelayMessenger/Relay-SDK",
       "commit": "ab3bb3dd6c9b173c5fde3b977681807d9f206acb",

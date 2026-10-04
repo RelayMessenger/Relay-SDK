@@ -92,10 +92,19 @@ it("keeps the public link and a short resize hint when the QR cannot fit", async
 });
 
 describe("nothing is created before the plan is taken", () => {
+  it("--handle takes a 2-character handle and refuses a 1-character one with the server's words", async () => {
+    const ok = await fixture();
+    await runCLI(["connect", "--handle", "pg"], ok.deps);
+    expect(ok.stderr.join("")).not.toContain("A handle is one word");
+    const short = await fixture();
+    expect(await runCLI(["connect", "--handle", "p"], short.deps)).toBe(1);
+    expect(short.stderr.join("")).toContain("Error: A handle is one word using 2–32 lowercase letters, numbers, or underscores.");
+    expect(short.prompts.select).not.toHaveBeenCalled();
+  });
   it("a bad --handle is refused before any question, with the same words", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591.dev"], f.deps)).toBe(1);
-    expect(f.stderr.join("")).toContain("Error: A handle is one word using 3–32 lowercase letters, numbers, or underscores.");
+    expect(f.stderr.join("")).toContain("Error: A handle is one word using 2–32 lowercase letters, numbers, or underscores.");
     expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.prompts.confirm).not.toHaveBeenCalled();
     expect(f.prompts.intro).not.toHaveBeenCalled();
