@@ -349,7 +349,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/adapter.ts",
       "source_sha256": "5cf9ae13db199cdffa265b7499712a250cdaf0b28fcf47f8435806245fbeb8d2",
-      "destination_sha256": "2a96a576dd902173a50c222b0df7f57c037a392f25ff95f14425bbf3d189e7d0",
+      "destination_sha256": "6a83cadc4b22293a96b76c1aab4c8e87d7f5129a793f0213f42ca7c2d0555bec",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -459,7 +459,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/webhook.ts",
       "source_sha256": "d01b0d345d36e030449d62af553a6f972e9451eb50162cd0b03def556211258d",
-      "destination_sha256": "93b4dc1e624382436dbdfa4aa9753741fc48a8d3ba02ea2ef1b8d1c5a4a09c5f",
+      "destination_sha256": "7fc16614a296e64a702154ce24a2fdd91f6647ff059db21f11d96adc0fa76227",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -470,7 +470,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/adapter.test.ts",
       "source_sha256": "e9ba85c37bd36735cb391a56728cd7b22f21839072366e8ee2b5b834e95cd9b8",
-      "destination_sha256": "0e411e60f97229d31e364b891ab487caac45740f638bbbf5180e30e17b0bc9a1",
+      "destination_sha256": "bd04cb08d8ec3117becae345f3bf873deb51ac34a9795e737573d445e1cd213a",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
