@@ -107,6 +107,8 @@ class ChildPiProcess implements PiProcess {
 }
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
+  // A sender with no Handle is skipped.
+  if (!event.data.sender_handle) return null;
   // A pin and a location share have no words; their data follows the words.
   const text = [
     event.data.parts
@@ -289,7 +291,7 @@ export class PiChannel {
     // Turns in one chat already run one after another, so an agent's two
     // messages each get their own answer.
     const opening = data.parts[0]?.type;
-    const replyTo = data.sender_handle.kind === "agent" && opening !== "buttons" && opening !== "selection"
+    const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
       ? { reply_to: { message_id: data.id } }
       : {};
     for (const [index, message] of messages.entries()) {

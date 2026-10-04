@@ -1910,8 +1910,11 @@ export interface MessageWebhookData {
   id: UUID;
   idempotency_key?: string | null;
   direction: "inbound" | "outbound";
-  /** @deprecated Use `from_handle`, which matches the Message object. */
-  sender_handle: ChatHandle;
+  /**
+   * @deprecated Use `from_handle`, which matches the Message object. Null for
+   * a sender with no Handle.
+   */
+  sender_handle: ChatHandle | null;
   /** @deprecated Use `from_handle`. */
   from?: string | null;
   /** The sender as a full handle object, the Message object's `from_handle`. Absent on events from servers before 2026-10-04. */

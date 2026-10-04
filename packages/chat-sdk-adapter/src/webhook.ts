@@ -94,9 +94,10 @@ function isHandle(value: unknown): boolean {
  * The Chat a message event belongs to: `chat_id`, which matches the Message
  * object, else `chat.id`, the only Chat key servers before 2026-10-04 send.
  */
-export function messageEventChatId(
-  data: Pick<RelayWebhookMessageEvent, "chat" | "chat_id">,
-): string | undefined {
+export function messageEventChatId(data: {
+  chat?: RelayWebhookMessageEvent["chat"];
+  chat_id?: string;
+}): string | undefined {
   return data.chat_id ?? data.chat?.id;
 }
 

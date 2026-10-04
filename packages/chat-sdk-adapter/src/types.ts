@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server ed5608a17f35ce6e87bf8f66b6737157c13820b5
- * OpenAPI d718bf72bef79074ebab8110da7cd42553e151bee86336f1384d5bfb352ef7fb
+ * Relay Server 78e958bd35f5e7f33c1ce9b77ac11be1dac3afc8
+ * OpenAPI abe76bc8feadd85462ff4293eba9bc1b2cea44b9929b0fbc772a120d84efb365
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -378,7 +378,7 @@ export interface RelayWebhookMessageEvent {
    * Chat is a group. Every Relay server sends it; read the id from `chat_id`
    * first, as the Message object names it.
    */
-  chat?: {
+  chat: {
     id: string;
     is_group?: boolean | null;
     owner_handle?: RelayChatHandle | null;

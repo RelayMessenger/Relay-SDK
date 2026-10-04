@@ -60,6 +60,9 @@ export function buildRelayInboundFacts(
   event: RelayWebhookEvent,
 ): RelayInboundFacts | null {
   if (!isRelayMessageReceivedEvent(event)) return null;
+  // A sender with no Handle is skipped; isRelayMessageReceivedEvent already
+  // rejects it at runtime.
+  if (!event.data.sender_handle) return null;
   if (
     event.data.sender_handle.kind !== "user" &&
     event.data.sender_handle.kind !== "agent"

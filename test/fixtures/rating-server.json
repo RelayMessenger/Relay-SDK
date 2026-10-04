@@ -5,9 +5,9 @@
     "contract_sha256": "7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9",
     "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests.",
     "carried_to": {
-      "commit": "ed5608a17f35ce6e87bf8f66b6737157c13820b5",
-      "contract_sha256": "d718bf72bef79074ebab8110da7cd42553e151bee86336f1384d5bfb352ef7fb",
-      "reason": "Not regenerated. Contract af7f1802..ed5608a1 changes only MessageEvent, Message.from's deprecation and the createCall description; no rating, contact card or send-response schema."
+      "commit": "78e958bd35f5e7f33c1ce9b77ac11be1dac3afc8",
+      "contract_sha256": "abe76bc8feadd85462ff4293eba9bc1b2cea44b9929b0fbc772a120d84efb365",
+      "reason": "Not regenerated. Contract af7f1802..78e958bd changes only MessageEvent, Message.from's deprecation and the createCall description; no rating, contact card or send-response schema."
     }
   },
   "send_response": {
