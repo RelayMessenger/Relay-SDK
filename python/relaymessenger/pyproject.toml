@@ -24,6 +24,8 @@ dependencies = [
 # (`livekit-agents[codecs,images]`): `pip install 'relaymessenger[calls]'`.
 [project.optional-dependencies]
 calls = [
+  # aioice internals: calls/_engine.py `bound_relay_gathering`.
+  "aioice>=0.10.2,<0.11",
   "aiortc>=1.15,<2",
   "av>=14",
   "numpy>=1.26",
