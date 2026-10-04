@@ -486,7 +486,7 @@ describe("Relay webhook handling", () => {
 
   // Owner ruling 2026-10-04: message events carry the REST Message's chat_id,
   // from_handle and is_from_me. Servers before Relay-Server ed5608a1 send only
-  // the deprecated chat and sender_handle, so the adapter must read both.
+  // chat and the deprecated sender_handle, so the adapter must read both.
   const { chat: _chat, sender_handle: _sender, ...withoutOldKeys } = webhookMessage();
   const newKeys = { chat_id: IDS.chat, from: "ada", from_handle: USER_HANDLE, is_from_me: false };
   it.each([

@@ -1,7 +1,7 @@
 """Message events in both shapes (Relay-Server ed5608a1, 2026-10-04).
 
 The 2026-08-30 fixture is what servers before ed5608a1 send: only the
-deprecated ``chat`` and ``sender_handle``. The 2026-10-04 fixture adds the REST
+``chat`` and the deprecated ``sender_handle``. The 2026-10-04 fixture adds the REST
 Message's ``chat_id``, ``from_handle`` and ``is_from_me``. ``MessageEvent``
 must type every key of both, and the documented read (new key first, old key
 second) must name the same sender and chat for each.

@@ -1313,9 +1313,8 @@ export class RelayAdapter
           message: data,
         };
         const threadId = this.encodeThreadId({ chatId });
-        // An event that still carries the deprecated chat object names the
-        // Chat's kind, so an inbound dispatch settles isDM for this chat
-        // without spending a request on it.
+        // The event's chat object names the Chat's kind, so an inbound
+        // dispatch settles isDM without a request.
         if (data.chat) {
           this.rememberChatKind(chatId, data.chat.is_group === true);
         }

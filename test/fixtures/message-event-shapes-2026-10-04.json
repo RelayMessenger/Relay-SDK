@@ -2,7 +2,7 @@
   "source": {
     "repository": "https://github.com/RelayMessenger/Relay-Server",
     "commit": "ed5608a17f35ce6e87bf8f66b6737157c13820b5",
-    "note": "Relay-Server #519 (2026-10-04): message events add the REST Message's chat_id, from, from_handle and is_from_me; chat and sender_handle stay, deprecated. Derived from packages/sdk/test/fixtures/message.received.json (the 2026-08-30 shape)."
+    "note": "Relay-Server #519 (2026-10-04): message events add the REST Message's chat_id, from, from_handle and is_from_me; chat stays; sender_handle stays, deprecated. Derived from packages/sdk/test/fixtures/message.received.json (the 2026-08-30 shape)."
   },
   "expected": {
     "chat_id": "00000000-0000-7000-8000-000000000023",

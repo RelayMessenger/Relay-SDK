@@ -92,7 +92,7 @@ function isHandle(value: unknown): boolean {
 
 /**
  * The Chat a message event belongs to: `chat_id`, which matches the Message
- * object, else the deprecated `chat.id` that servers before 2026-10-04 send.
+ * object, else `chat.id`, the only Chat key servers before 2026-10-04 send.
  */
 export function messageEventChatId(
   data: Pick<RelayWebhookMessageEvent, "chat" | "chat_id">,
