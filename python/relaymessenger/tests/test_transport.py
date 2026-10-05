@@ -204,7 +204,7 @@ async def connected(transport: RelayCallTransport, room: FakeRoom) -> asyncio.Ta
 
 
 def test_restart_rule_numbers_match_the_protocol() -> None:
-    assert transport_module.RESTART_CONNECT_TIMEOUT_MS == 5_000
+    assert transport_module.RESTART_CONNECT_TIMEOUT_MS == 2_000
     assert transport_module.RESTART_DISCONNECTED_MS == 7_000
     assert [round(restart_delay_ms(n), 4) for n in (1, 2, 3, 4)] == [250, 275, 302.5, 332.75]
     assert restart_delay_ms(60) == 10_000
