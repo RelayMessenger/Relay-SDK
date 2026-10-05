@@ -41,7 +41,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/README.md",
       "source_sha256": "65d47fc483027964b289b70c9f928a6c8532a1f43d94218ab275e2c3a1a7e93a",
-      "destination_sha256": "e0d543341093e3b49130fc3a045850f1ebf1e09cdbfefdbb9586916559b56c07",
+      "destination_sha256": "10699b6b7a53a441de7fe9715a15fe8c506c00c1345bb170ab8bb0a0492a8b10",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
