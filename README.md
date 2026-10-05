@@ -24,6 +24,7 @@ packages/
   livekit/                @relaymessenger/livekit
   elevenlabs/             @relaymessenger/elevenlabs
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
+  think/                  @relaymessenger/think
   cli/                    relaymessenger
   openclaw/               @relaymessenger/openclaw-plugin
   claude-code/            relay-claude-channel
