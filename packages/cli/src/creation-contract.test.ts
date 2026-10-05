@@ -8,10 +8,13 @@ import { handleFromName } from "./connect.js";
 
 it("creation uses a local handle part and the existing 30-character name cap", () => {
   expect(validateHandle("my_agent")).toBe("my_agent");
+  expect(validateHandle("pg")).toBe("pg");
   expect(handleFromName("My Agent")).toBe("my_agent");
+  expect(handleFromName("PG")).toBe("pg");
+  expect(handleFromName("P")).toBeUndefined();
   expect(validateFirstName(`  ${"N".repeat(30)}  `)).toBe("N".repeat(30));
   expect(() => validateFirstName("N".repeat(31))).toThrow("1 to 30");
-  for (const value of ["my_agent.dev", "My_Agent", "@my_agent", "ab", `a${"b".repeat(32)}`]) {
+  for (const value of ["my_agent.dev", "My_Agent", "@my_agent", "p", `a${"b".repeat(32)}`]) {
     expect(() => validateHandle(value)).toThrow("A handle is one word");
   }
 });

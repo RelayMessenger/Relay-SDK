@@ -596,7 +596,7 @@ servers are on `room.iceServers` and its `iceServers` event.
 
 `connect()` resolves when media first reaches `connected`. It has no overall
 deadline: when an SFU session is not `connected` within
-`sessionConnectTimeoutMs` (5 seconds by default) of its answer, becomes
+`sessionConnectTimeoutMs` (2 seconds by default) of its answer, becomes
 `failed`, or stays `disconnected` for 7 seconds, the transport closes that
 peer, waits 250 ms (x1.1 per further attempt, at most 10 s), and publishes
 from a new peer on a new session, for as long as the Call is ringing or in

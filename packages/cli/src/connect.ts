@@ -158,7 +158,7 @@ export const handleFromName = (name: string): string | undefined => {
     .replace(/_+$/u, "")
     .slice(0, 32)
     .replace(/_+$/u, "");
-  return body.length >= 3 ? body : undefined;
+  return body.length >= 2 ? body : undefined;
 };
 
 /** The avatar's path when it is a PNG or JPEG that exists; undefined otherwise. */

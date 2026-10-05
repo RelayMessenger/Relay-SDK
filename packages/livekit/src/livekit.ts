@@ -340,7 +340,7 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   iceGatheringTimeoutMs?: number;
   /**
    * How long one SFU session has to connect before the transport restarts onto
-   * a new one. Defaults to 5 seconds. `connect()` has no overall deadline.
+   * a new one. Defaults to 2 seconds. `connect()` has no overall deadline.
    */
   sessionConnectTimeoutMs?: number;
   /** @deprecated Use `sessionConnectTimeoutMs`; now the per-session wait, not a `connect()` deadline. */
