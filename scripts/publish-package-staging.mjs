@@ -126,7 +126,11 @@ export async function publishPackageStaging({
   const after = view(manifest.name, "dist-tags");
   assert.equal(after.found, true);
   assert.equal(after.value.staging, manifest.version);
-  assert.equal(after.value.latest ?? null, latestBefore, "latest moved");
+  // npm tags a package's very first version `latest` whatever --tag says, so
+  // a brand-new package's first staging publish may only move latest onto
+  // the version just published; every later publish must leave it alone.
+  const firstPublish = !before.found && after.value.latest === manifest.version;
+  if (!firstPublish) assert.equal(after.value.latest ?? null, latestBefore, "latest moved");
 
   const releaseSha = env.RELEASE_SHA;
   const result = {
@@ -138,7 +142,7 @@ export async function publishPackageStaging({
     tarball_sha256: createHash("sha256").update(bytes).digest("hex"),
     integrity,
     publish_attempted: publishAttempted,
-    latest_unchanged: true,
+    latest_unchanged: !firstPublish,
     dist_tags_before: before.found ? before.value : {},
     dist_tags_after: after.value,
   };

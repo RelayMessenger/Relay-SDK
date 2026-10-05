@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { publishPackageStaging } from "./publish-package-staging.mjs";
 
-function fixture(t, { releaseSha = "a".repeat(40), head = "a".repeat(40), exists = true, publishStatus = 0, conflict = false } = {}) {
+function fixture(t, { releaseSha = "a".repeat(40), head = "a".repeat(40), exists = true, publishStatus = 0, conflict = false, tagsBefore = { latest: "0.8.0", staging: "0.8.1-staging.0" }, tagsAfter = { latest: "0.8.0", staging: "0.9.0-staging.1" } } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "publish-mock-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const tarball = join(dir, "mock.tgz");
@@ -24,7 +24,10 @@ function fixture(t, { releaseSha = "a".repeat(40), head = "a".repeat(40), exists
       assert.match(command, /^npm(?:\.cmd)?$/u);
       if (args[0] === "publish") return { status: publishStatus, stderr: "mock ambiguous outcome" };
       assert.equal(args[0], "view");
-      if (args[2] === "dist-tags") return { status: 0, stdout: JSON.stringify({ latest: "0.8.0", staging: "0.9.0-staging.1" }) };
+      if (args[2] === "dist-tags") {
+        const tags = calls.some((row) => row[1] === "publish") || exists ? tagsAfter : tagsBefore;
+        return tags ? { status: 0, stdout: JSON.stringify(tags) } : { status: 1, stderr: "E404" };
+      }
       return visible ? { status: 0, stdout: JSON.stringify(conflict ? "sha512-conflict" : integrity) } : { status: 1, stderr: "E404" };
     },
     async verifyNpmRegistryIntegrity(input) {
@@ -72,4 +75,14 @@ test("unresolved ambiguous publication fails without retry", async (t) => {
   options.verifyNpmRegistryIntegrity = async () => { throw new Error("budget exhausted"); };
   await assert.rejects(publishPackageStaging(options), /budget exhausted/u);
   assert.equal(calls.filter((row) => row[1] === "publish").length, 1);
+});
+test("a brand-new package's first publish may take latest, the way npm tags any first version", async (t) => {
+  const { options } = fixture(t, { exists: false, tagsBefore: null, tagsAfter: { latest: "0.9.0-staging.1", staging: "0.9.0-staging.1" } });
+  const result = await publishPackageStaging(options);
+  assert.equal(result.ok, true);
+  assert.equal(result.latest_unchanged, false);
+});
+test("an existing package's publish that moves latest still fails", async (t) => {
+  const { options } = fixture(t, { exists: false, tagsAfter: { latest: "0.9.0-staging.1", staging: "0.9.0-staging.1" } });
+  await assert.rejects(publishPackageStaging(options), /latest moved/u);
 });
