@@ -2,8 +2,13 @@
   "source": {
     "repository": "RelayMessenger/Relay-Server",
     "commit": "af7f1802cbad49485c8753cb1ad503dd97ae1ada",
-    "contract_sha256": "7ccdbec7f61f841a0ec0ffe8c2fe937aad7396fb449a069be46a50538620fbb1",
-    "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests."
+    "contract_sha256": "7ca002357a04610ee2012ae59d8f0789e9d44a000388ca926ea1ed68f44d96d9",
+    "generation": "Real Hono routes, disposable seeded PostgreSQL; unmodified serialized webhook outbox bodies. No external requests.",
+    "carried_to": {
+      "commit": "6f50fcb69d1ce6dde8bf0fb0e12bd2ef379f0b09",
+      "contract_sha256": "79bd85b0150ef45ea4bbe5f498507dd86d784e7fbf6c3b299a5a81db091aacdd",
+      "reason": "Not regenerated. Contract af7f1802..6f50fcb6 changes only MessageEvent, Message.from's deprecation, the createCall description and 200 response, the voice memo Idempotency-Key and 409, and the handle pattern (2 to 32 characters); no rating, contact card or send-response schema."
+    }
   },
   "send_response": {
     "chat_id": "01a0fca2-1e13-73b2-a1a7-76208412a1c7",

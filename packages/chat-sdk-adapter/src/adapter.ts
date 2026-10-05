@@ -73,6 +73,8 @@ import {
   assertExhaustiveEvent,
   parseReactionEvent,
   isKnownWebhookEventType,
+  messageEventChatId,
+  messageEventSender,
   parseWebhookEnvelope,
   parseWebhookMessageEvent,
   readWebhookBody,
@@ -174,13 +176,15 @@ function json(status: number, body: Record<string, unknown>): Response {
 function isWebhookMessage(
   message: RelayRawMessage["message"],
 ): message is RelayWebhookMessageEvent {
-  return message !== null && "chat" in message;
+  // Only a message event carries `direction`; since 2026-10-04 it also
+  // carries the REST Message's `chat_id`, so that key no longer tells them apart.
+  return message !== null && "direction" in message;
 }
 
 function isRestMessage(
   message: RelayRawMessage["message"],
 ): message is RelayMessage {
-  return message !== null && "chat_id" in message;
+  return message !== null && !("direction" in message) && "chat_id" in message;
 }
 
 function messageParts(
@@ -282,7 +286,7 @@ function messageHandle(
   message: RelayRawMessage["message"],
 ): RelayChatHandle | null | undefined {
   if (message === null) return undefined;
-  if (isWebhookMessage(message)) return message.sender_handle;
+  if (isWebhookMessage(message)) return messageEventSender(message);
   return message.from_handle;
 }
 
@@ -303,7 +307,7 @@ function messageIsMe(
 ): boolean {
   if (message === null) return true;
   if (isWebhookMessage(message)) {
-    return message.direction === "outbound";
+    return message.is_from_me ?? message.direction === "outbound";
   }
   if (isRestMessage(message)) return message.is_from_me;
   return true;
@@ -725,7 +729,7 @@ export class RelayAdapter
   }
 
   private isMentioned(message: RelayWebhookMessageEvent): boolean {
-    if (message.chat.is_group !== true) return false;
+    if (message.chat?.is_group !== true) return false;
     const owner = message.chat.owner_handle;
     if (!owner) return false;
     if (this.botUserId && owner.id !== this.botUserId) return false;
@@ -1293,28 +1297,27 @@ export class RelayAdapter
     switch (envelope.event_type) {
       case "message.received": {
         const data = parseWebhookMessageEvent(envelope.data);
+        // parseWebhookMessageEvent proved one of chat_id / chat.id is present.
+        const chatId = messageEventChatId(data)!;
         if (
           data.direction === "outbound" ||
-          data.sender_handle.is_me === true
+          (data.is_from_me ?? messageEventSender(data)?.is_me) === true
         ) {
           return;
         }
         const raw: RelayRawMessage = {
-          chatId: data.chat.id,
+          chatId,
           createdAt: envelope.created_at,
           eventId: envelope.event_id,
           eventType: envelope.event_type,
           message: data,
         };
-        const threadId = this.encodeThreadId({
-          chatId: data.chat.id,
-        });
-        // The event already carries the Chat's kind, so an inbound dispatch
-        // settles isDM for this chat without spending a request on it.
-        this.rememberChatKind(
-          data.chat.id,
-          data.chat.is_group === true,
-        );
+        const threadId = this.encodeThreadId({ chatId });
+        // The event's chat object names the Chat's kind, so an inbound
+        // dispatch settles isDM without a request.
+        if (data.chat) {
+          this.rememberChatKind(chatId, data.chat.is_group === true);
+        }
         // A newer message supersedes the question the running turn is
         // answering, so it is cancelled before the new event is queued.
         // This runs first: the read is an HTTP round trip to Relay, and the
@@ -1327,7 +1330,7 @@ export class RelayAdapter
         // signature proved the event, and before Chat SDK dispatch, which a
         // debounce, queue or burst window may defer for seconds.
         if (this.markReadOnReceipt) {
-          await this.readOnReceipt(data.chat.id);
+          await this.readOnReceipt(chatId);
         }
         const message = this.parseMessage(raw);
         if (data.reply_to) {

@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server af7f1802cbad49485c8753cb1ad503dd97ae1ada
- * OpenAPI 7ccdbec7f61f841a0ec0ffe8c2fe937aad7396fb449a069be46a50538620fbb1
+ * Relay Server 6f50fcb69d1ce6dde8bf0fb0e12bd2ef379f0b09
+ * OpenAPI 79bd85b0150ef45ea4bbe5f498507dd86d784e7fbf6c3b299a5a81db091aacdd
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -373,11 +373,18 @@ export interface RelayMessage {
 }
 
 export interface RelayWebhookMessageEvent {
+  /**
+   * The Chat, including `is_group`, the only place an event says whether the
+   * Chat is a group. Every Relay server sends it; read the id from `chat_id`
+   * first, as the Message object names it.
+   */
   chat: {
     id: string;
     is_group?: boolean | null;
     owner_handle?: RelayChatHandle | null;
   };
+  /** ID of the Chat this Message belongs to. Absent on events from servers before 2026-10-04. */
+  chat_id?: string;
   delivered_at?: string | null;
   direction: "inbound" | "outbound";
   id: string;
@@ -397,7 +404,14 @@ export interface RelayWebhookMessageEvent {
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
-  sender_handle: RelayChatHandle;
+  /** @deprecated Use `from_handle`, which matches the Message object. */
+  sender_handle?: RelayChatHandle | null;
+  /** @deprecated Use `from_handle`. */
+  from?: string | null;
+  /** The sender as a full handle object. Absent on events from servers before 2026-10-04. */
+  from_handle?: RelayChatHandle | null;
+  /** Whether the receiving Agent sent this Message. Absent on events from servers before 2026-10-04. */
+  is_from_me?: boolean;
   sent_at?: string | null;
   silent?: boolean;
 }
