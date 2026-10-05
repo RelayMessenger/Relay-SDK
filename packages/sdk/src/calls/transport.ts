@@ -280,7 +280,7 @@ export interface RelayCallTransportOptions {
   /**
    * How long one SFU session has, after its answer is applied, to reach
    * `connected` before the transport restarts onto a new session. Defaults to
-   * 5 seconds. `connect()` itself has no deadline: it waits through restarts
+   * 2 seconds. `connect()` itself has no deadline: it waits through restarts
    * until media connects, the Call ends, `close()` is called, or its signal aborts.
    */
   sessionConnectTimeoutMs?: number;
@@ -414,16 +414,18 @@ const STALL_CHECK_MS = 500;
 const STALL_AFTER_MS = 2_000;
 
 /**
- * Restart rule, copied from PartyTracks and Cloudflare (PROTOCOL.md section 4):
- * not `connected` 5 s after the SFU answer (Cloudflare's echo example waits
- * 5000 ms; SFU operations block up to 5 s awaiting `connected`), `failed`, or
- * `disconnected` for 7 s (PartyTracks.ts `timeoutSeconds = 7`). Backoff 250 ms
- * x1.1 per attempt, capped at 10 s (PartyTracks `retryWithBackoff`
- * `backoffFactor: 1.1`, rxjs-helpers.ts defaults). werift never reports
+ * Restart rule, from PartyTracks and Cloudflare (PROTOCOL.md section 4):
+ * not `connected` 2 s after the SFU answer, `failed`, or `disconnected` for
+ * 7 s (PartyTracks.ts `timeoutSeconds = 7`). Backoff 250 ms x1.1 per attempt,
+ * capped at 10 s (PartyTracks `retryWithBackoff` `backoffFactor: 1.1`,
+ * rxjs-helpers.ts defaults). Cloudflare's echo example waits 5000 ms; Relay
+ * waits 2 s because in 1,176 fresh Cloudflare SFU sessions (2026-10-04) about
+ * 11% stalled and answered only after ~15.8 s, while healthy sessions
+ * connected at p99 1,405 ms (4 of 807 took over 2 s). werift never reports
  * `failed` on a session whose checks go unanswered (ice.js:983-986), so the
- * 5 s timer is the trigger that fires in practice.
+ * 2 s timer is the trigger that fires in practice.
  */
-export const RESTART_CONNECT_TIMEOUT_MS = 5_000;
+export const RESTART_CONNECT_TIMEOUT_MS = 2_000;
 /** How long `rive()` waits for the room to open the channel. */
 export const RIVE_OPEN_TIMEOUT_MS = 10_000;
 export const RESTART_DISCONNECTED_MS = 7_000;

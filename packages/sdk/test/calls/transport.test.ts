@@ -9,6 +9,7 @@ import type {
   Relay,
 } from "../../src/index.js";
 import {
+  RESTART_CONNECT_TIMEOUT_MS,
   RESTART_MAX_DELAY_MS,
   RelayCallTransport,
   RelayCallTransportError,
@@ -747,7 +748,8 @@ it("restarts onto a new session when the first never connects, and the same sour
   // Audio written while the first session is dead goes into the one source.
   personReceivesAudio(room);
   await transport.writeAudio({ samples: new Int16Array(480).fill(1), sampleRate: 48_000, channelCount: 1 });
-  await vi.advanceTimersByTimeAsync(4_999);
+  // Not connected 2 s after the answer: the session is replaced (PROTOCOL.md section 4).
+  await vi.advanceTimersByTimeAsync(1_999);
   expect(webRTC.peers).toHaveLength(1);
   expect(first.closed).toBe(false);
   await vi.advanceTimersByTimeAsync(1);
@@ -862,6 +864,7 @@ it("backs off 250 ms x1.1 per dead session, capped at 10 s, resets on connect, a
   expect(restartDelayMs(3)).toBeCloseTo(302.5, 9);
   expect(restartDelayMs(40)).toBe(RESTART_MAX_DELAY_MS);
   expect(RESTART_MAX_DELAY_MS).toBe(10_000);
+  expect(RESTART_CONNECT_TIMEOUT_MS).toBe(2_000);
 
   vi.useFakeTimers();
   const room = new FakeRoom();
@@ -890,9 +893,9 @@ it("backs off 250 ms x1.1 per dead session, capped at 10 s, resets on connect, a
     await flush();
   }
   expect(delays.map((ms) => Math.round(ms * 100) / 100)).toEqual([250, 275, 302.5, 332.75]);
-  // Answer applied at once, so each gap is the 5 s connect wait plus that backoff.
+  // Answer applied at once, so each gap is the 2 s connect wait plus that backoff.
   const gaps = offerTimes.slice(1).map((ms, index) => ms - offerTimes[index]!);
-  [5_250, 5_275, 5_302.5].forEach((expected, index) => expect(Math.abs(gaps[index]! - expected)).toBeLessThanOrEqual(1));
+  [2_250, 2_275, 2_302.5].forEach((expected, index) => expect(Math.abs(gaps[index]! - expected)).toBeLessThanOrEqual(1));
 
   // A session that connects resets the backoff to 250 ms.
   webRTC.peer.neverConnects = false;
@@ -1068,7 +1071,7 @@ it("rejects waitForPeerAudio on timeout, on the Call ending, and on close", asyn
   await expect(other.waitForPeerAudio(0)).rejects.toThrow("waitForPeerAudio timeoutMs must be greater than zero.");
 });
 
-it("connect() has no deadline: three dead sessions then a live one resolves it", async () => {
+it("connect() has no deadline: seven dead sessions then a live one resolves it", async () => {
   vi.useFakeTimers();
   const room = new FakeRoom();
   const webRTC = new FakeWebRTC();
@@ -1079,7 +1082,8 @@ it("connect() has no deadline: three dead sessions then a live one resolves it",
   const connecting = transport.connect().then(() => { settled = "resolved"; }, (error: Error) => { settled = error.message; });
   await flush();
   room.emit("roomState", roomStateFrame("ringing"));
-  for (let dead = 0; dead < 3; dead += 1) {
+  const started = Date.now();
+  for (let dead = 0; dead < 7; dead += 1) {
     webRTC.peer.neverConnects = true;
     answerLatest(room);
     await flush();
@@ -1087,15 +1091,15 @@ it("connect() has no deadline: three dead sessions then a live one resolves it",
     while (webRTC.peers.length === before) await vi.advanceTimersByTimeAsync(10);
     await flush();
   }
-  // Three dead sessions: well past the old 15 s connect() deadline.
-  expect(Date.now()).toBeGreaterThan(15_000);
+  // Seven dead sessions at 2 s each plus backoff: past the old 15 s connect() deadline.
+  expect(Date.now() - started).toBeGreaterThan(15_000);
   expect(settled).toBeUndefined();
-  expect(restarted.map((event) => event.reason)).toEqual(["timeout", "timeout", "timeout"]);
+  expect(restarted.map((event) => event.reason)).toEqual(Array(7).fill("timeout"));
   answerLatest(room);
   await connecting;
   expect(settled).toBe("resolved");
-  expect(webRTC.peers).toHaveLength(4);
-  expect(offersSent(room).map((offer) => offer.restart ?? false)).toEqual([false, true, true, true]);
+  expect(webRTC.peers).toHaveLength(8);
+  expect(offersSent(room).map((offer) => offer.restart ?? false)).toEqual([false, ...Array(7).fill(true)]);
   transport.close();
 });
 
@@ -1108,7 +1112,7 @@ it("connect() rejects when the Call ends in the middle of a restart", async () =
   const connecting = transport.connect().then(() => undefined, (error: Error) => error);
   await flush();
   answerLatest(room);
-  await vi.advanceTimersByTimeAsync(5_100);
+  await vi.advanceTimersByTimeAsync(2_100);
   expect(webRTC.peers[0]!.closed).toBe(true);
   room.emit("ended", { type: "ended", reason: "canceled" });
   const error = await connecting;
@@ -1297,7 +1301,7 @@ it("restarts with the room's latest iceServers, sent again on the room's rejoin"
   await flush();
   // The room socket reopened and Relay sent fresh credentials after the new join.
   sendRoomIceServers(room, ROOM_TURN("u1"));
-  await vi.advanceTimersByTimeAsync(5_000 + 250);
+  await vi.advanceTimersByTimeAsync(2_000 + 250);
   await flush();
   expect(webRTC.peers).toHaveLength(2);
   expect(webRTC.peerConfigs.map((config) => config.iceServers[1]?.username)).toEqual(["u0", "u1"]);
@@ -1336,7 +1340,7 @@ it("is subscribed once the person's roomState receiving has audio and this peer'
   expect(transport.subscribed).toBe(true);
 
   // The first session never connects: a restart resets it until the person pulls the new one.
-  await vi.advanceTimersByTimeAsync(5_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(transport.subscribed).toBe(false);
   await vi.advanceTimersByTimeAsync(250);
   await flush();
@@ -1399,7 +1403,7 @@ it("holds audio written before the person receives it, then queues all of it in 
   expect(playedOut).toBe(true);
 
   // The first session never connects: the restart resets `receiving`, and audio is held again.
-  await vi.advanceTimersByTimeAsync(5_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   const afterRestart = transport.writeAudio(slice(5));
   await flush();
   expect(webRTC.source.data).toHaveLength(4);

@@ -204,7 +204,7 @@ credentials for each restart. The room's servers are on `room.ice_servers` and
 its `ice_servers` event.
 
 `connect()` has no overall deadline: when an SFU session is not `connected`
-within `session_connect_timeout_ms` (5 seconds by default) of its answer,
+within `session_connect_timeout_ms` (2 seconds by default) of its answer,
 becomes `failed`, or stays `disconnected` for 7 seconds, the transport closes
 that peer, waits 250 ms (x1.1 per further attempt, at most 10 s), and
 publishes from a new peer on a new session, for as long as the Call is ringing

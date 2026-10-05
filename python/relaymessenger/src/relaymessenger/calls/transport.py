@@ -50,12 +50,15 @@ from .video import (
 
 logger = logging.getLogger("relaymessenger.calls")
 
-#: Restart rule, copied from PartyTracks and Cloudflare (PROTOCOL.md section 4):
-#: not ``connected`` 5 s after the SFU answer (Cloudflare's echo example waits
-#: 5000 ms), ``failed``, or ``disconnected`` for 7 s (PartyTracks.ts
-#: ``timeoutSeconds = 7``). Backoff 250 ms x1.1 per attempt, capped at 10 s
-#: (PartyTracks ``retryWithBackoff``, rxjs-helpers.ts defaults).
-RESTART_CONNECT_TIMEOUT_MS = 5_000
+#: Restart rule, from PartyTracks and Cloudflare (PROTOCOL.md section 4):
+#: not ``connected`` 2 s after the SFU answer, ``failed``, or ``disconnected``
+#: for 7 s (PartyTracks.ts ``timeoutSeconds = 7``). Backoff 250 ms x1.1 per
+#: attempt, capped at 10 s (PartyTracks ``retryWithBackoff``, rxjs-helpers.ts
+#: defaults). Cloudflare's echo example waits 5000 ms; Relay waits 2 s because
+#: in 1,176 fresh Cloudflare SFU sessions (2026-10-04) about 11% stalled and
+#: answered only after ~15.8 s, while healthy sessions connected at p99 1,405 ms
+#: (4 of 807 took over 2 s).
+RESTART_CONNECT_TIMEOUT_MS = 2_000
 #: How long `rive()` waits for the room to open the channel.
 RIVE_OPEN_TIMEOUT_MS = 10_000
 RESTART_DISCONNECTED_MS = 7_000
