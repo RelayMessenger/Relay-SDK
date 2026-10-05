@@ -40,7 +40,7 @@ npx relaymessenger@staging agents create \
   --api-url https://api.staging.relayapp.im
 ```
 
-The Handle includes `.dev` and follows the existing 3–32-character local-part
+The Handle includes `.dev` and follows the existing 2–32-character local-part
 grammar. Preserve the user's chosen Handle and name. An occupied chosen Handle
 returns `409`; do not replace it with a random one. Omitted choices retain their
 defaults. Random Handles use `adjective_birdID.dev`: a digit in a species ID,

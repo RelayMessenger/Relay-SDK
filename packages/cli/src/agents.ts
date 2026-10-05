@@ -89,8 +89,8 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
 
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
-  if (!/^[a-z][a-z0-9_]{2,31}$/u.test(handle)) {
-    throw new Error("A handle is one word using 3–32 lowercase letters, numbers, or underscores.");
+  if (!/^[a-z][a-z0-9_]{1,31}$/u.test(handle)) {
+    throw new Error("A handle is one word using 2–32 lowercase letters, numbers, or underscores.");
   }
   return handle;
 };
@@ -157,7 +157,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     });
     return safeMetadata({ profile, ...agentRecord(result.agent), share_url: savedAgentShareURL(apiURL, result.agent.handle), api_url: apiURL, token: "stored" as const }, [token]);
   } catch {
-    const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}(?:\.[a-z0-9][a-z0-9_-]{1,62})?$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
+    const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{1,31}(?:\.[a-z0-9][a-z0-9_-]{1,62})?$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
     const assigned = safeMetadata(rawHandle, typeof result.token === "string" ? [result.token] : []);
     let outcome = "Relay could not check whether its token was saved on this computer";
     let present = false;

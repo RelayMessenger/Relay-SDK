@@ -195,7 +195,7 @@ it("maps custom profile flags to canonical create fields and stores the server-r
 it("rejects invalid options and recipe-without-snapshot before creating", async () => {
   const { deps, fetch, home } = await fixture();
   const recipe = join(home, "recipe.json"); await writeFile(recipe, '{"recipe":{"image":{}}}');
-  for (const flags of [["--handle", "Not"], ["--handle", "ab"], ["--name", "   "], ["--image-url", "http://images.example.test/a.png"], ["--image-url", "https://user:password@images.example.test/a.png"], ["--image-recipe", recipe]]) {
+  for (const flags of [["--handle", "Not"], ["--handle", "a"], ["--name", "   "], ["--image-url", "http://images.example.test/a.png"], ["--image-url", "https://user:password@images.example.test/a.png"], ["--image-recipe", recipe]]) {
     expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--json", ...flags], deps)).toBe(1);
   }
   expect(fetch).not.toHaveBeenCalled();
