@@ -173,7 +173,7 @@ export const releasePackages = {
       manifestVersion: ".claude-plugin/plugin.json",
     },
   },
-  // Last: it depends only on the SDK, and nothing pins it.
+  // It depends only on the SDK, and nothing pins it.
   elevenlabs: {
     directory: "packages/elevenlabs",
     workspace: "@relaymessenger/elevenlabs",
@@ -184,6 +184,29 @@ export const releasePackages = {
         {
           specifier: "@relaymessenger/elevenlabs",
           named: ["ELEVENLABS_API", "ElevenLabsCall", "RIVE_LEAD_MS", "getSignedUrl"],
+        },
+      ],
+    },
+  },
+  // Last: it depends on the SDK and the Chat SDK adapter, and nothing pins it.
+  think: {
+    directory: "packages/think",
+    workspace: "@relaymessenger/think",
+    validate: "validate:think",
+    tagPrefix: "think-v",
+    smoke: {
+      imports: [
+        {
+          specifier: "@relaymessenger/think",
+          named: [
+            "RelayGenerationActivities",
+            "callEventSchema",
+            "createRelayClient",
+            "executePaymentRequest",
+            "startRelayCall",
+            "timedRelayModel",
+            "withSelectionReplies",
+          ],
         },
       ],
     },

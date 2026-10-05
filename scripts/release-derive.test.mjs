@@ -34,10 +34,11 @@ test("the catalog order releases every Relay dependency before its dependents", 
   const manifests = readManifests(root);
   assert.deepEqual(releaseOrder(manifests), releaseKeys);
   assert.equal(releaseKeys[0], "sdk");
-  // The reverse order must be refused: the sdk would follow its dependents.
+  // The reverse order must be refused: every Relay dependency would follow
+  // its dependents.
   assert.throws(
     () => releaseOrder(manifests, [...releaseKeys].reverse()),
-    /depends on sdk, which must release before it/u,
+    /depends on (?:sdk|chat-sdk-adapter), which must release before it/u,
   );
 });
 
