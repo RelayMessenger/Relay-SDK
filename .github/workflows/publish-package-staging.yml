@@ -186,13 +186,14 @@ jobs:
     secrets:
       NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
 
-  # Staging may name a Relay dependency only once npm has it: sdk and pi are
-  # the packages another package pins (scripts/validate-workflows.mjs derives
-  # that set from the manifests and holds this job to it). A changed one must
+  # Staging may name a Relay dependency only once npm has it: sdk,
+  # chat-sdk-adapter (pinned by think) and pi are the packages another package
+  # pins (scripts/validate-workflows.mjs derives that set from the manifests
+  # and holds this job to it). A changed one must
   # have published; an unchanged one is already on npm.
   land:
-    needs: [bump, sdk, pi]
-    if: ${{ !cancelled() && needs.bump.result == 'success' && (needs.sdk.result == 'success' || (needs.sdk.result == 'skipped' && !contains(needs.bump.outputs.changed, ',sdk,'))) && (needs.pi.result == 'success' || (needs.pi.result == 'skipped' && !contains(needs.bump.outputs.changed, ',pi,'))) }}
+    needs: [bump, sdk, chat-sdk-adapter, pi]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && (needs.sdk.result == 'success' || (needs.sdk.result == 'skipped' && !contains(needs.bump.outputs.changed, ',sdk,'))) && (needs.chat-sdk-adapter.result == 'success' || (needs.chat-sdk-adapter.result == 'skipped' && !contains(needs.bump.outputs.changed, ',chat-sdk-adapter,'))) && (needs.pi.result == 'success' || (needs.pi.result == 'skipped' && !contains(needs.bump.outputs.changed, ',pi,'))) }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -265,6 +266,17 @@ jobs:
     uses: ./.github/workflows/staging-package.yml
     with:
       package: elevenlabs
+      sha: ${{ needs.bump.outputs.sha }}
+      base: ${{ needs.bump.outputs.base }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  think:
+    needs: [bump, sdk, elevenlabs, land]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.land.result == 'success' && needs.sdk.result != 'failure' && needs.elevenlabs.result != 'failure' && contains(needs.bump.outputs.changed, ',think,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: think
       sha: ${{ needs.bump.outputs.sha }}
       base: ${{ needs.bump.outputs.base }}
     secrets:

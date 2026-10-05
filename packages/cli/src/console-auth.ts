@@ -82,7 +82,7 @@ export const HANDLE_TAKEN = "handle_taken";
 /** A Console refusal, carrying its status and the Console's short code and
  * nothing else from the body: an upstream message can hold a token. */
 export class ConsoleRefusal extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) { super(message); }
+  constructor(message: string, readonly status: number, readonly code?: string, readonly appleIdEmail?: string) { super(message); }
 }
 
 const json = async <T>(response: Response): Promise<T> => {
@@ -104,7 +104,11 @@ const json = async <T>(response: Response): Promise<T> => {
     // code in the Console's own vocabulary travels with the status.
     const code = typeof value === "object" && value !== null && "code" in value && typeof value.code === "string" && /^[a-z_]{1,40}$/u.test(value.code)
       ? value.code : undefined;
-    throw new ConsoleRefusal(`Relay Console returned HTTP ${response.status}.`, response.status, code);
+    // POST /me/beta's 409 names the address the beta already went to; only a
+    // value shaped like an email travels, for the same reason as `code`.
+    const appleIdEmail = typeof value === "object" && value !== null && "apple_id_email" in value && typeof value.apple_id_email === "string" && /^[^\s@]{1,64}@[^\s@]{1,190}$/u.test(value.apple_id_email)
+      ? value.apple_id_email : undefined;
+    throw new ConsoleRefusal(`Relay Console returned HTTP ${response.status}.`, response.status, code, appleIdEmail);
   }
   return value as T;
 };
@@ -516,7 +520,7 @@ export const consoleRequest = async <T>(
         [session.organization_key],
       );
       if (error instanceof CliError) throw new CliError(message, error.code);
-      if (error instanceof ConsoleRefusal) throw new ConsoleRefusal(message, error.status, error.code);
+      if (error instanceof ConsoleRefusal) throw new ConsoleRefusal(message, error.status, error.code, error.appleIdEmail);
       throw new Error(message);
     }
   }

@@ -81,7 +81,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
+import { ConsoleRefusal, consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
 import { addRedirect, createOAuth, removeRedirect, resetSecret, setScopes, showOAuth } from "./agent-oauth.js";
 import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
 import { setReachPreset } from "./agent-access.js";
@@ -1055,6 +1055,52 @@ again with --number and --code.
     .description("remove the saved sign-in")
     .helpGroup(HELP_GROUPS.everythingElse);
   logoutCommand.action((options: object, command: Command) => authLogout(options, command, true));
+
+  // Owner ruling 2026-10-04: no public TestFlight link; Console and CLI
+  // developers get the beta. Relay Console's POST /me/beta invites through
+  // App Store Connect (Relay-Console apps/api/src/routes/me.ts), the route
+  // Settings uses. A user session only: the route refuses organization keys.
+  program.command("beta")
+    .description("join Relay's TestFlight beta for new features first")
+    .option("--email <apple-id>", "Apple ID email, if not your account's")
+    .helpGroup(HELP_GROUPS.everythingElse)
+    .action(async (options: { email?: string }, command: Command) => {
+      const session = (await readConfig(configContext)).console;
+      if (!session) throw new CliError("Relay Console is not signed in. Run relay login.", "no_token");
+      if (session.type === "organization_key") {
+        throw new CliError("The beta needs your own sign-in, not an organization API key. Run relay login.", "no_token");
+      }
+      let invite: { result: "invited" | "already"; apple_id_email: string };
+      try {
+        invite = await accessRequest("/me/beta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(options.email === undefined ? {} : { apple_id_email: options.email }),
+        });
+      } catch (error) {
+        if (!(error instanceof ConsoleRefusal)) throw error;
+        if (error.code === "invalid_email") {
+          // A phone sign-in has no real account email (Console stores a
+          // reserved placeholder), so the person names their Apple ID.
+          throw new CliError(options.email === undefined
+            ? "Your account has no email Apple can use. Run relay beta --email <your Apple ID email>."
+            : "Enter a valid email.", "usage");
+        }
+        if (error.code === "beta_email_taken") {
+          throw new CliError(`The beta was already sent to ${error.appleIdEmail ?? "another email"}.`, "refused");
+        }
+        if (error.status === 502) {
+          throw new CliError(error.code === "staging_outbound_disabled"
+            ? "Beta invites are not sent from this environment."
+            : "Apple could not send the invite. Try again later.", "refused");
+        }
+        throw error;
+      }
+      if (!human(command)) { output(invite); return; }
+      stdout(invite.result === "already"
+        ? `${invite.apple_id_email} is already in the Relay beta.\n`
+        : `Invited ${invite.apple_id_email} to the Relay beta. Open the TestFlight email on your iPhone.\n`);
+    });
 
   const organization = program.command("organization")
     .alias("org")

@@ -106,6 +106,9 @@ jobs:
       - name: Build the Pi workspace for the CLI
         if: inputs.package == 'cli'
         run: npm run build --workspace @relaymessenger/pi
+      - name: Build the chat adapter workspace for think
+        if: inputs.package == 'think'
+        run: npm run build --workspace @relaymessenger/chat-sdk-adapter
       - id: resolve
         run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
       - name: Validate selected package
