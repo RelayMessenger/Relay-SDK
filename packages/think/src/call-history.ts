@@ -1,8 +1,8 @@
 import type { Message } from "@relaymessenger/sdk";
 import type { UIMessage } from "ai";
 
-import type { RelayCall } from "./call-events";
-import { currentReactions } from "./reactions";
+import type { RelayCall } from "./call-events.js";
+import { currentReactions } from "./reactions.js";
 
 interface CallHistoryPart {
   type?: unknown;

@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/think",
-  "version": "0.1.1-staging.0",
+  "version": "0.1.2-staging.0",
   "description": "The Relay agent runtime for Cloudflare Think: calls, reactions, replies, locations, payments, typing and history.",
   "keywords": [
     "relay",
@@ -32,6 +32,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./actions": {
+      "types": "./dist/actions.d.ts",
+      "import": "./dist/actions.js",
+      "default": "./dist/actions.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -51,6 +56,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:all": "npm run check && npm run build && npm test",
+    "pack:types": "node scripts/consumer-types.mjs",
     "prepack": "npm run check && npm test && npm run build"
   },
   "dependencies": {

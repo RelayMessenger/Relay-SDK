@@ -1,7 +1,7 @@
 import type Relay from "@relaymessenger/sdk";
 import type { ChatSetActivityParams } from "@relaymessenger/sdk";
 
-import { abortableDelay } from "./typing";
+import { abortableDelay } from "./typing.js";
 
 export const ACTIVITY_REFRESH_MS = 60_000;
 

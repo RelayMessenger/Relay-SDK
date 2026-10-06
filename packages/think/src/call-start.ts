@@ -7,7 +7,7 @@
 import type Relay from "@relaymessenger/sdk";
 import { RelayAPIError, type RequestOptions } from "@relaymessenger/sdk";
 
-import type { RelayCall } from "./call-events";
+import type { RelayCall } from "./call-events.js";
 
 export type CallStartResult =
   | { status: "ringing"; call_id: string }
