@@ -32,6 +32,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./actions": {
+      "types": "./dist/actions.d.ts",
+      "import": "./dist/actions.js",
+      "default": "./dist/actions.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

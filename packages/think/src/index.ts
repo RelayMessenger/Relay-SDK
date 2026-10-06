@@ -1,7 +1,7 @@
-// The agent runtime every Relay agent on Cloudflare Think shares. Each module
-// was byte-identical in Relay-Agent, SteveJobs-Agent, PaulGraham-Agent and
-// ElonMusk-Agent on 2026-10-05; the names below are the ones those agents
-// import from them.
+// The agent runtime every Relay agent on Cloudflare Think shares. The Actions
+// themselves are the "./actions" entry (@relaymessenger/think/actions): they
+// import @cloudflare/think at run time, which loads only inside a Worker, so
+// this entry stays importable from Node.
 export { RelayGenerationActivities } from "./activity";
 export {
   NO_INBOUND_MEDIA,
@@ -19,6 +19,15 @@ export {
   type RelayCallEvent,
 } from "./call-events";
 export { callHistoryMessage, callWindowMessages } from "./call-history";
+export {
+  CARD_GUIDANCE,
+  RelayCardRefused,
+  cardContent,
+  cardReplyContext,
+  cardSchema,
+  withCardReplies,
+  type CardInput,
+} from "./cards";
 export {
   isUnansweredOutgoingCall,
   relayCallIdempotencyKey,
