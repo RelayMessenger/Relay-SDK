@@ -16,7 +16,7 @@
 import type { Message as ChatMessage } from "chat";
 import type { RelayRawMessage } from "@relaymessenger/chat-sdk-adapter";
 import type { Message } from "@relaymessenger/sdk";
-import { messageSummary, senderName } from "./reactions";
+import { messageSummary, senderName } from "./reactions.js";
 
 /**
  * The data line naming the Message a person's Message replies to: its id,

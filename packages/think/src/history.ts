@@ -86,7 +86,7 @@ export function capHistoryTokens(
  * prompt and Actions, 4 earlier turns made at medium, then "hey how are you
  * today" at `low`, 3 trials each): with the 8 earlier signatures it thought
  * 421-564 tokens, 5.2-5.7 s; without them 0 tokens, 1.8-2.5 s, and Gemini
- * accepted the request. Live persona chats thought 200-1,600 tokens at `low`.
+ * accepted the request. Live agent chats thought 200-1,600 tokens at `low`.
  */
 export function withoutPastThoughtSignatures(
   messages: readonly ModelMessage[],

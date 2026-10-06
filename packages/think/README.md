@@ -20,3 +20,71 @@ import { createRelayClient, startRelayTypingLifecycle } from "@relaymessenger/th
 
 const relay = createRelayClient(env); // reads env.RELAY_AGENT_TOKEN and env.RELAY_API_ORIGIN
 ```
+
+## Load every Relay tool in one call
+
+`relayActions` returns every Relay Action, in the shape Think's
+`getActions()` takes. Spread your own tools beside them.
+
+```ts
+import { Think } from "@cloudflare/think";
+import { relayActions } from "@relaymessenger/think/actions";
+
+export class MyAgent extends Think<Env> {
+  override getActions() {
+    return { ...relayActions(this, { env: this.env, ctx: this.ctx }), ...myOwnTools };
+  }
+}
+```
+
+The Actions are `send`, `react`, `request_location`, `read_location`,
+`start_call`, `find_agents`, `payment_request`, `group`,
+`share_contact_card` and `stay_silent`. They call Relay with
+`RELAY_AGENT_TOKEN` and `RELAY_API_ORIGIN` from `env`. A voice memo's send
+finishes after its Action returns, so it goes to `ctx.waitUntil`.
+
+Options:
+
+- `disable: ["start_call", "group"]` leaves Actions out by name.
+- `media: { image, voiceMemo }` gives `send` your own image and speech
+  models; without them `send` offers no `image` or `voice_memo` kind.
+- `describe: (name, description) => string` changes an Action's description,
+  for example to tell `start_call` your own follow-up tool can call later.
+- `webSearch: true` removes Google Search citation markers (`[1.2]`) from
+  the words `send` sends, for a model that searches.
+
+### Turns that answer no Message
+
+By default each Action reads the turn's Chat and Message from Think's
+messenger context. A turn your agent starts on an event (an unanswered Call,
+a schedule) has none, and the Actions throw `RelayTurnRequired`. For such
+turns, pass `turn`:
+
+```ts
+relayActions(this, {
+  env: this.env,
+  ctx: this.ctx,
+  turn: () => this.currentEventTurn ?? relayTurnFromMessenger(this.getMessengerContext()),
+});
+```
+
+Return `{ chatId, eventId }` with no `replyTo`: then a quote-reply is
+refused (`RelayReplyRefused`) and the model sends without one.
+
+### End the turn
+
+Give Think `stopWhen: relayTurnSettled`: the turn ends once a Relay Action
+has done its one visible act, and goes on after a read or one of your own
+tools. When one of your own tools sends the person something, name it:
+
+```ts
+stopWhen: createRelayTurnSettled({ visibleSends: ["send_video"] }),
+```
+
+### Compose your own
+
+`createRelayActions(deps)` is the factory under `relayActions`, with every
+hook given by hand, for an agent that keeps its own turn bookkeeping.
+
+The Actions come from `@relaymessenger/think/actions` because they load
+`@cloudflare/think`, which runs only inside a Worker.

@@ -1,6 +1,6 @@
-// One ESM file for every runtime: the modules import each other without file
-// extensions (they are copied unchanged from the agents, which bundle with
-// Wrangler), so Node could not load tsc's per-file output. Every dependency
+// One ESM file per entry for every runtime. The sources import each other
+// with .js extensions, so the declarations tsc writes resolve under
+// moduleResolution nodenext as well as bundler. Every dependency
 // stays external, so each agent keeps a single copy. Declarations come from
 // `tsc -p tsconfig.build.json`.
 import { build } from "esbuild";
@@ -13,9 +13,12 @@ const external = [
 ].flatMap((name) => [name, `${name}/*`]);
 
 await build({
-  entryPoints: [new URL("../src/index.ts", import.meta.url).pathname],
-  outfile: new URL("../dist/index.js", import.meta.url).pathname,
+  // Two entries share their modules through chunks, so a class such as
+  // RelayPaymentRefused is one class whichever entry it is imported from.
+  entryPoints: ["index", "actions"].map((name) => new URL(`../src/${name}.ts`, import.meta.url).pathname),
+  outdir: new URL("../dist", import.meta.url).pathname,
   bundle: true,
+  splitting: true,
   format: "esm",
   platform: "neutral",
   target: "es2022",
