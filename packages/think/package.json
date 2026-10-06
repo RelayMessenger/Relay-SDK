@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/think",
-  "version": "0.1.0-staging.0",
+  "version": "0.1.1-staging.0",
   "description": "The Relay agent runtime for Cloudflare Think: calls, reactions, replies, locations, payments, typing and history.",
   "keywords": [
     "relay",
