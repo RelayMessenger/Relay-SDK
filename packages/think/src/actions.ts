@@ -15,7 +15,7 @@ import {
 import type { StopCondition, ToolSet } from "ai";
 import { z } from "zod";
 
-import { RelayGenerationActivities } from "./activity";
+import { RelayGenerationActivities } from "./activity.js";
 import {
   PAYMENT_CATEGORIES,
   PAYMENT_CHAT_METADATA_KEY,
@@ -24,19 +24,20 @@ import {
   RelayPaymentRefused,
   executePaymentRequest,
   paymentRequestInputSchema,
-} from "./payment";
-import { readRelayLocation, requestRelayLocation } from "./location";
-import { relayCallIdempotencyKey, startRelayCall } from "./call-start";
-import { type CardInput, RelayCardRefused, cardContent, cardIssues, cardSchema } from "./cards";
+} from "./payment.js";
+import { readRelayLocation, requestRelayLocation } from "./location.js";
+import { relayCallIdempotencyKey, startRelayCall } from "./call-start.js";
+import { type CardInput, RelayCardRefused, cardContent, cardIssues, cardSchema } from "./cards.js";
 import {
   changeGroup,
   findAgents,
   findAgentsInputSchema,
   groupInputSchema,
   shareContactCard,
-} from "./chat-tools";
-import { abortableDelay, compositionDelayMs, createRelayClient, type RelayClientEnv } from "./typing";
-import type { RelayChatTimingPhase } from "./timing";
+} from "./chat-tools.js";
+import { abortableDelay, compositionDelayMs, createRelayClient, type RelayClientEnv } from "./typing.js";
+import type { RelayChatTimingPhase } from "./timing.js";
+import { withoutSearchMarkers } from "./web-search.js";
 
 /** One option of a selection: a stable value for the app, a label for the person. */
 export interface SendSelectionOption {
@@ -476,6 +477,17 @@ export interface RelayActionDependencies {
   /** Whether this agent takes voice calls. When false, start_call is not offered. Absent means true. */
   voice?: boolean;
   media?: RelayMediaGenerators;
+  /**
+   * Whether the agent's model searches the web (Gemini's Google Search). Then
+   * send removes the search's citation markers ([1.2]) from its words.
+   */
+  webSearch?: boolean;
+  /**
+   * Changes an Action's description before the model sees it: return
+   * `description` with your own words added, or your own text. For example,
+   * an agent with its own follow-up tool tells start_call it can call later.
+   */
+  describe?(name: RelayActionName, description: string): string;
 }
 
 interface SentResult {
@@ -929,36 +941,53 @@ export const RELAY_ACTION_NAMES = [
 ] as const;
 export type RelayActionName = (typeof RELAY_ACTION_NAMES)[number];
 
+/** Options for createRelayTurnSettled. */
+export interface RelayTurnSettledOptions {
+  /**
+   * The agent's own tools that send the person something visible, such as its
+   * own send-a-video tool. Each ends the turn the way send does. Every other
+   * tool of the agent's own is a read whose result the model acts on.
+   */
+  visibleSends?: readonly string[];
+}
+
 /**
  * A turn is one visible act. It goes on to another step only while every tool
  * the model just called gave it something to act on: a location read, a
  * location request, a call or a payment Relay refused with a reason (to tell
  * the person, or not), or a card Relay refused (its reason, to fix and send
- * again). A tool that is not a Relay Action is the agent's own, and its result
- * is something to act on.
+ * again). A tool that is not a Relay Action and not one of `visibleSends` is
+ * the agent's own read, and its result is something to act on.
  * Everything else ends the turn; a ringing call is the turn's act.
  */
-export const relayTurnSettled: StopCondition<ToolSet> = ({ steps }) => {
-  const step = steps.at(-1);
-  if (!step || step.toolCalls.length === 0) return true;
-  return !step.toolCalls.every((call) => {
-    if (!RELAY_ACTIONS.has(call.toolName)) return true;
-    // Reads give the model something to act on.
-    if (CONTINUING_ACTIONS.has(call.toolName)) return true;
-    const result = step.toolResults.find(({ toolCallId }) =>
-      toolCallId === call.toolCallId
-    );
-    if (call.toolName === "send") {
-      const refused = (result?.output as { error?: { name?: unknown } } | undefined)?.error?.name;
-      return refused === "RelayCardRefused" || refused === "RelayPaymentRefused" || refused === "RelayReplyRefused";
-    }
-    const status = (result?.output as { status?: unknown } | undefined)?.status;
-    if (call.toolName === "start_call") return status === "not_called";
-    if (call.toolName === "group" || call.toolName === "share_contact_card") return status === "not_done";
-    if (call.toolName !== "request_location") return false;
-    return status === "not_requested";
-  });
-};
+export function createRelayTurnSettled(options: RelayTurnSettledOptions = {}): StopCondition<ToolSet> {
+  const visibleSends: ReadonlySet<string> = new Set(options.visibleSends ?? []);
+  return ({ steps }) => {
+    const step = steps.at(-1);
+    if (!step || step.toolCalls.length === 0) return true;
+    return !step.toolCalls.every((call) => {
+      if (visibleSends.has(call.toolName)) return false;
+      if (!RELAY_ACTIONS.has(call.toolName)) return true;
+      // Reads give the model something to act on.
+      if (CONTINUING_ACTIONS.has(call.toolName)) return true;
+      const result = step.toolResults.find(({ toolCallId }) =>
+        toolCallId === call.toolCallId
+      );
+      if (call.toolName === "send") {
+        const refused = (result?.output as { error?: { name?: unknown } } | undefined)?.error?.name;
+        return refused === "RelayCardRefused" || refused === "RelayPaymentRefused" || refused === "RelayReplyRefused";
+      }
+      const status = (result?.output as { status?: unknown } | undefined)?.status;
+      if (call.toolName === "start_call") return status === "not_called";
+      if (call.toolName === "group" || call.toolName === "share_contact_card") return status === "not_done";
+      if (call.toolName !== "request_location") return false;
+      return status === "not_requested";
+    });
+  };
+}
+
+/** createRelayTurnSettled with no tools of the agent's own that send. */
+export const relayTurnSettled: StopCondition<ToolSet> = createRelayTurnSettled();
 
 const RELAY_ACTIONS: ReadonlySet<string> = new Set(RELAY_ACTION_NAMES);
 
@@ -982,6 +1011,7 @@ const START_CALL_NOW_ONLY =
 
 /** The part of Think's messenger context a Relay turn is read from. */
 export interface RelayMessengerContext {
+  kind?: string;
   thread: { providerThreadId?: string };
   message?: { id?: string; providerMessageId?: string };
 }
@@ -992,46 +1022,79 @@ export interface RelayActionsAgent {
   getMessengerContext(): RelayMessengerContext | undefined;
 }
 
-/** Everything optional: the hooks an agent overrides, and the Actions it leaves out. */
+/** What a Durable Object's ctx gives the Actions: work that outlives the Action. */
+export interface RelayActionsContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/** The agent's Worker, the hooks it overrides, and the Actions it leaves out. */
 export interface RelayActionsOptions extends Partial<Omit<RelayActionDependencies, "env">> {
+  /** The agent's env: RELAY_AGENT_TOKEN and RELAY_API_ORIGIN. */
+  env: RelayClientEnv;
+  /**
+   * The agent's Durable Object ctx. A voice memo's send finishes after the
+   * Action returns; ctx.waitUntil keeps the Worker alive until it does.
+   */
+  ctx: RelayActionsContext;
   /** Actions not to offer, by name. */
   disable?: readonly RelayActionName[];
 }
 
-/** The Chat and Message of the turn Think is running, from its messenger context. */
+/** Thrown when the turn has no Relay Message to act on and the agent gave no `turn`. */
+export class RelayTurnRequired extends Error {
+  override readonly name = "RelayTurnRequired";
+  constructor(missing: string) {
+    super(
+      `This turn has no Relay ${missing} in Think's messenger context, as in a turn the agent starts on an event `
+      + "(an unanswered Call, a schedule). Pass relayActions a `turn` option that returns its chatId and eventId.",
+    );
+  }
+}
+
+/** Messenger events that are a person's Message, which a quote-reply can answer. */
+const MESSAGE_KINDS: ReadonlySet<string> = new Set(["direct-message", "mention", "subscribed-message"]);
+
+/**
+ * The Chat and Message of the turn Think is running, from its messenger
+ * context. Only a turn on a person's Message can quote-reply to it.
+ */
 export function relayTurnFromMessenger(context: RelayMessengerContext | undefined): RelayTurnIdentity {
   const providerThreadId = context?.thread.providerThreadId;
-  if (!providerThreadId) throw new Error("Relay messenger context is missing a Chat ID");
+  if (!providerThreadId) throw new RelayTurnRequired("Chat");
   const messageId = context.message?.providerMessageId ?? context.message?.id;
-  if (!messageId) throw new Error("Relay messenger context is missing a Message ID");
+  if (!messageId) throw new RelayTurnRequired("Message");
   const { chatId } = decodeRelayThreadId(providerThreadId);
-  return { chatId, eventId: messageId, replyTo: { messageId, partIndex: 0 } };
+  return {
+    chatId,
+    eventId: messageId,
+    ...(context.kind === undefined || MESSAGE_KINDS.has(context.kind)
+      ? { replyTo: { messageId, partIndex: 0 } }
+      : {}),
+  };
 }
 
 /**
- * Every Relay Action, for Think's getActions(). `env` gives RELAY_AGENT_TOKEN
- * and RELAY_API_ORIGIN. Spread the agent's own tools beside them:
+ * Every Relay Action, for Think's getActions(). Spread the agent's own tools
+ * beside them:
  *
- *     getActions() { return { ...relayActions(this.env, this), ...myTools }; }
+ *     getActions() {
+ *       return { ...relayActions(this, { env: this.env, ctx: this.ctx }), ...myTools };
+ *     }
  */
 export function relayActions(
-  env: RelayClientEnv,
   agent: RelayActionsAgent,
-  options: RelayActionsOptions = {},
+  options: RelayActionsOptions,
 ): Record<string, Action> {
-  const { disable = [], ...hooks } = options;
-  const activities = hooks.activities ?? new RelayGenerationActivities();
+  const { disable = [], env, ctx, ...hooks } = options;
   const deps: RelayActionDependencies = {
     signal: (platformSignal) => platformSignal,
     assertCurrentTurn: () => {},
     setIrreversibleSend: () => {},
-    waitUntil: (task) => {
-      void task.catch(() => {});
-    },
+    waitUntil: (task) => ctx.waitUntil(task),
     runChosenAction: (_actionName, operation) => operation(),
     ...hooks,
     env,
-    activities,
+    activities: hooks.activities ?? new RelayGenerationActivities(),
     turn: hooks.turn ?? (() => relayTurnFromMessenger(agent.getMessengerContext())),
   };
   const all = createRelayActions(deps);
@@ -1039,16 +1102,22 @@ export function relayActions(
   return all;
 }
 
-function createRelayActions(
+/**
+ * The factory under relayActions: every hook given by hand, for an agent that
+ * runs its own turn bookkeeping (supersession, an Action choice per turn).
+ */
+export function createRelayActions(
   deps: RelayActionDependencies,
 ): Record<string, Action> {
+  const describe = (name: RelayActionName, description: string) =>
+    deps.describe ? deps.describe(name, description) : description;
   const sendKinds = RELAY_SEND_KINDS.filter((kind) =>
     (kind !== "image" || deps.media?.image !== undefined)
     && (kind !== "voice_memo" || deps.media?.voiceMemo !== undefined)
   );
   return {
     send: action({
-      description:
+      description: describe("send",
         "Send one Relay Message. Use text for a normal Message"
         + (deps.media?.image ? ", image to generate and send one image or meme" : "")
         + (deps.media?.voiceMemo ? ", voice_memo to speak a real voice memo with an optional delivery style" : "")
@@ -1060,7 +1129,7 @@ function createRelayActions(
         + "card the person looks at; see the url field for when. Use payment to "
         + "ask the person to pay, drawn as its own card with a Pay button. Use "
         + "rich_card to show one card with a picture, title, description and "
-        + "suggestions, or carousel to show 2 to 10 of them side by side.",
+        + "suggestions, or carousel to show 2 to 10 of them side by side."),
       inputSchema: relaySendInputSchema(sendKinds),
       idempotencyKey: () => `message:${deps.turn().eventId}`,
       // Think 0.17 creates a framework timeout only when timeoutMs > 0.
@@ -1073,16 +1142,18 @@ function createRelayActions(
           "send",
           () => executeRelaySend(
             deps,
-            input,
+            deps.webSearch && input.text !== undefined
+              ? { ...input, text: withoutSearchMarkers(input.text) }
+              : input,
             deps.signal(context.signal),
           ),
         ),
     }),
     react: action({
-      description:
+      description: describe("react",
         "React to the current Relay Message instead of sending a Message. "
         + "After a person's reaction, the current Message is the one they "
-        + "reacted to.",
+        + "reacted to."),
       inputSchema: reactionInputSchema,
       idempotencyKey: () => `message:${deps.turn().eventId}`,
       execute: (input, context) =>
@@ -1092,11 +1163,11 @@ function createRelayActions(
         ),
     }),
     request_location: action({
-      description:
+      description: describe("request_location",
         "Ask the person in this one-to-one chat to share their location. Relay "
         + "sends them a card with a Share My Location button, and they choose "
         + "how long to share. When they share, their location card comes back "
-        + "to you as a Message.",
+        + "to you as a Message."),
       inputSchema: z.object({}).strict(),
       idempotencyKey: () => `location_request:${deps.turn().eventId}`,
       execute: (_input, context) => {
@@ -1110,10 +1181,10 @@ function createRelayActions(
       },
     }),
     read_location: action({
-      description:
+      description: describe("read_location",
         "Read where the person sharing their location with you in this chat "
         + "is now: latitude, longitude, and when that position arrived. "
-        + "Returns not_sharing when nobody is sharing.",
+        + "Returns not_sharing when nobody is sharing."),
       inputSchema: z.object({}).strict(),
       execute: (_input, context) => {
         const identity = deps.turn();
@@ -1127,7 +1198,7 @@ function createRelayActions(
     }),
     ...(deps.voice === false ? {} : {
       start_call: action({
-        description: START_CALL_NOW_ONLY,
+        description: describe("start_call", START_CALL_NOW_ONLY),
         inputSchema: z.object({}).strict(),
         idempotencyKey: () => `call:${deps.turn().eventId}`,
         execute: (_input, context) => {
@@ -1143,9 +1214,9 @@ function createRelayActions(
       }),
     }),
     find_agents: action({
-      description:
+      description: describe("find_agents",
         "Look up agents on Relay for the person: by task, the public agents that do it, verified first; or one "
-        + "person or agent by handle. Returns each one's handle, name, and what it does, for you to tell the person.",
+        + "person or agent by handle. Returns each one's handle, name, and what it does, for you to tell the person."),
       inputSchema: findAgentsInputSchema,
       execute: (input, context) => {
         const identity = deps.turn();
@@ -1158,9 +1229,9 @@ function createRelayActions(
       },
     }),
     payment_request: action({
-      description:
+      description: describe("payment_request",
         "Read whether a payment request you sent was paid, or cancel it so it can no longer be paid. Name it by "
-        + "the payment_request_id your payment send returned.",
+        + "the payment_request_id your payment send returned."),
       inputSchema: paymentRequestInputSchema,
       execute: (input, context) => {
         const identity = deps.turn();
@@ -1173,9 +1244,9 @@ function createRelayActions(
       },
     }),
     group: action({
-      description:
+      description: describe("group",
         "Change this group chat when someone in it asks: rename it, set its photo, add an agent to it, remove a "
-        + "member, or leave it. Returns done, or not_done with the reason Relay gave; then tell them that reason.",
+        + "member, or leave it. Returns done, or not_done with the reason Relay gave; then tell them that reason."),
       inputSchema: groupInputSchema,
       idempotencyKey: () => `group:${deps.turn().eventId}`,
       execute: (input, context) => {
@@ -1190,9 +1261,9 @@ function createRelayActions(
       },
     }),
     share_contact_card: action({
-      description:
+      description: describe("share_contact_card",
         "Share your own contact card into this chat, so people can add you or pass you on. Returns done, or "
-        + "not_done with the reason Relay gave.",
+        + "not_done with the reason Relay gave."),
       inputSchema: z.object({}).strict(),
       idempotencyKey: () => `contact_card:${deps.turn().eventId}`,
       execute: (_input, context) => {
@@ -1206,8 +1277,8 @@ function createRelayActions(
       },
     }),
     stay_silent: action({
-      description:
-        "End this turn without sending anything when silence is the natural response.",
+      description: describe("stay_silent",
+        "End this turn without sending anything when silence is the natural response."),
       inputSchema: z.object({}).strict(),
       idempotencyKey: () => `message:${deps.turn().eventId}`,
       execute: () =>

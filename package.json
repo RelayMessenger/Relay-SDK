@@ -30,7 +30,7 @@
     "validate:elevenlabs": "npm run validate --workspace @relaymessenger/elevenlabs",
     "validate:pi": "npm run check --workspace @relaymessenger/pi && npm run build --workspace @relaymessenger/pi && npm test --workspace @relaymessenger/pi",
     "validate:chat-sdk": "npm run test:all --workspace @relaymessenger/chat-sdk-adapter",
-    "validate:think": "npm run test:all --workspace @relaymessenger/think",
+    "validate:think": "npm run test:all --workspace @relaymessenger/think && npm run pack:types --workspace @relaymessenger/think",
     "validate:cli": "npm run validate --workspace relaymessenger",
     "validate:openclaw": "npm run validate --workspace @relaymessenger/openclaw-plugin && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin && npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
     "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",

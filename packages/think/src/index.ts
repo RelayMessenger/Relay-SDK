@@ -2,14 +2,14 @@
 // themselves are the "./actions" entry (@relaymessenger/think/actions): they
 // import @cloudflare/think at run time, which loads only inside a Worker, so
 // this entry stays importable from Node.
-export { RelayGenerationActivities } from "./activity";
+export { RelayGenerationActivities } from "./activity.js";
 export {
   NO_INBOUND_MEDIA,
   inlineInboundMedia,
   withInboundMedia,
   type DocumentReader,
   type InboundMedia,
-} from "./attachments";
+} from "./attachments.js";
 export {
   RELAY_CALL_EVENT_TYPES,
   callEventSchema,
@@ -17,8 +17,8 @@ export {
   isLiveRelayCallStatus,
   type RelayCall,
   type RelayCallEvent,
-} from "./call-events";
-export { callHistoryMessage, callWindowMessages } from "./call-history";
+} from "./call-events.js";
+export { callHistoryMessage, callWindowMessages } from "./call-history.js";
 export {
   CARD_GUIDANCE,
   RelayCardRefused,
@@ -27,29 +27,29 @@ export {
   cardSchema,
   withCardReplies,
   type CardInput,
-} from "./cards";
+} from "./cards.js";
 export {
   isUnansweredOutgoingCall,
   relayCallIdempotencyKey,
   startRelayCall,
   unansweredCallContext,
   unansweredCallTurnId,
-} from "./call-start";
-export { RELAY_CHAT_CONTEXT_EVENT_TYPES, chatEventContext } from "./chat-events";
+} from "./call-start.js";
+export { RELAY_CHAT_CONTEXT_EVENT_TYPES, chatEventContext } from "./chat-events.js";
 export {
   changeGroup,
   findAgents,
   findAgentsInputSchema,
   groupInputSchema,
   shareContactCard,
-} from "./chat-tools";
-export { capHistoryTokens, withoutPastThoughtSignatures } from "./history";
+} from "./chat-tools.js";
+export { capHistoryTokens, withoutPastThoughtSignatures } from "./history.js";
 export {
   RELAY_LOCATION_EVENT_TYPES,
   readRelayLocation,
   requestRelayLocation,
   withLocationShares,
-} from "./location";
+} from "./location.js";
 export {
   PAYMENT_CATEGORIES,
   PAYMENT_CHAT_METADATA_KEY,
@@ -61,7 +61,7 @@ export {
   paymentEventContext,
   paymentRequestInputSchema,
   type PaymentCategory,
-} from "./payment";
+} from "./payment.js";
 export {
   RELAY_REACTION_DEBOUNCE_SECONDS,
   RELAY_REACTION_EVENT_TYPES,
@@ -69,15 +69,15 @@ export {
   personReaction,
   reactionContext,
   type PersonReaction,
-} from "./reactions";
-export { replyContext } from "./replies";
-export { withSelectionReplies } from "./selection";
+} from "./reactions.js";
+export { replyContext } from "./replies.js";
+export { withSelectionReplies } from "./selection.js";
 export {
   relayTurnMetadata,
   storedMessage,
   storedProviderMetadata,
   withoutMessengerEvent,
-} from "./stored-history";
+} from "./stored-history.js";
 export {
   newRelayInstanceId,
   relayChatTimingLine,
@@ -86,11 +86,11 @@ export {
   timedRelayModel,
   type RelayChatTiming,
   type RelayChatTimingPhase,
-} from "./timing";
+} from "./timing.js";
 export {
   abortableDelay,
   compositionDelayMs,
   createRelayClient,
   startRelayTypingLifecycle,
   type RelayClientEnv,
-} from "./typing";
+} from "./typing.js";

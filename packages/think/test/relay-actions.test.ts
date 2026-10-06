@@ -1,7 +1,18 @@
 import { encodeRelayThreadId } from "@relaymessenger/chat-sdk-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RELAY_ACTION_NAMES, relayActions, type RelayActionsAgent } from "../src/actions";
+import type { StepResult, ToolSet } from "ai";
+
+import {
+  RELAY_ACTION_NAMES,
+  RelayReplyRefused,
+  RelayTurnRequired,
+  createRelayTurnSettled,
+  relayActions,
+  relayTurnFromMessenger,
+  relayTurnSettled,
+  type RelayActionsAgent,
+} from "../src/actions";
 
 // @cloudflare/think loads cloudflare:workers, which exists only in a Worker.
 // action() wraps its config; these tests call the config's execute.
@@ -14,16 +25,20 @@ const PAYMENT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec14";
 interface Wired {
   config: {
     description: string;
+    timeoutMs?: number;
+    idempotencyKey?: (args: { input: unknown; ctx: unknown }) => string;
     inputSchema: { parse(value: unknown): unknown };
     execute(input: unknown, context: { signal?: AbortSignal }): Promise<unknown>;
   };
 }
 
 const ENV = { RELAY_AGENT_TOKEN: "relay-test-token", RELAY_API_ORIGIN: "https://api.example.test" };
+const OPTIONS = { env: ENV, ctx: { waitUntil: () => {} } };
 
-function agent(): RelayActionsAgent {
+function agent(kind = "direct-message"): RelayActionsAgent {
   return {
     getMessengerContext: () => ({
+      kind,
       thread: { providerThreadId: encodeRelayThreadId({ chatId: CHAT_ID }) },
       message: { id: `relay:${MESSAGE_ID}`, providerMessageId: MESSAGE_ID },
     }),
@@ -43,7 +58,7 @@ function relayServer(respond: (url: string, method: string) => Response) {
 }
 
 async function run(name: string, input: unknown = {}): Promise<unknown> {
-  const wired = relayActions(ENV, agent())[name] as unknown as Wired;
+  const wired = relayActions(agent(), OPTIONS)[name] as unknown as Wired;
   return await wired.config.execute(wired.config.inputSchema.parse(input), {});
 }
 
@@ -53,19 +68,19 @@ afterEach(() => {
 
 describe("relayActions", () => {
   it("offers every Relay Action in one call", () => {
-    expect(Object.keys(relayActions(ENV, agent())).sort()).toEqual([...RELAY_ACTION_NAMES].sort());
+    expect(Object.keys(relayActions(agent(), OPTIONS)).sort()).toEqual([...RELAY_ACTION_NAMES].sort());
   });
 
   it("leaves out the Actions the agent disables, and keeps the rest", () => {
-    const actions = relayActions(ENV, agent(), { disable: ["start_call", "group"] });
+    const actions = relayActions(agent(), { ...OPTIONS, disable: ["start_call", "group"] });
     expect(actions.start_call).toBeUndefined();
     expect(actions.group).toBeUndefined();
     expect(Object.keys(actions)).toHaveLength(RELAY_ACTION_NAMES.length - 2);
   });
 
   it("leaves the agent's own tools to a spread beside them", () => {
-    const own = { lookup_order: relayActions(ENV, agent()).stay_silent! };
-    expect(Object.keys({ ...relayActions(ENV, agent()), ...own })).toContain("lookup_order");
+    const own = { lookup_order: relayActions(agent(), OPTIONS).stay_silent! };
+    expect(Object.keys({ ...relayActions(agent(), OPTIONS), ...own })).toContain("lookup_order");
   });
 
   it("offers image and voice_memo only when the agent gives its own media models", () => {
@@ -80,11 +95,11 @@ describe("relayActions", () => {
         }
       });
     };
-    expect(kinds(relayActions(ENV, agent()))).toEqual([]);
-    expect(kinds(relayActions(ENV, agent(), {
+    expect(kinds(relayActions(agent(), OPTIONS))).toEqual([]);
+    expect(kinds(relayActions(agent(), { ...OPTIONS,
       media: { image: async () => ({ bytes: new Uint8Array(1), contentType: "image/png" }) },
     }))).toEqual(["image"]);
-    expect((relayActions(ENV, agent()).send as unknown as Wired).config.description).not.toContain("voice_memo");
+    expect((relayActions(agent(), OPTIONS).send as unknown as Wired).config.description).not.toContain("voice_memo");
   });
 
   it("reads the turn's Chat and Message from Think's messenger context", async () => {
@@ -158,5 +173,111 @@ describe("relayActions", () => {
     const calls = relayServer(() => Response.json({}));
     await expect(run("stay_silent")).resolves.toEqual({ status: "silent" });
     expect(calls).toHaveLength(0);
+  });
+
+  it("wires Think's ledger: each Action's idempotency key, and send never times out", () => {
+    const actions = relayActions(agent(), OPTIONS);
+    const keys = Object.fromEntries(Object.entries(actions).map(([name, wired]) => {
+      const key = (wired as unknown as Wired).config.idempotencyKey;
+      return [name, key ? key({ input: {}, ctx: {} }) : null];
+    }));
+    expect(keys).toEqual({
+      send: `message:${MESSAGE_ID}`,
+      react: `message:${MESSAGE_ID}`,
+      stay_silent: `message:${MESSAGE_ID}`,
+      request_location: `location_request:${MESSAGE_ID}`,
+      start_call: `call:${MESSAGE_ID}`,
+      group: `group:${MESSAGE_ID}`,
+      share_contact_card: `contact_card:${MESSAGE_ID}`,
+      read_location: null,
+      find_agents: null,
+      payment_request: null,
+    });
+    // Think 0.17 starts a framework timeout only when timeoutMs > 0; the voice
+    // memo's send must never lose its ledger row to one.
+    expect((actions.send as unknown as Wired).config.timeoutMs).toBe(0);
+  });
+
+  it("removes Google Search citation markers from send's words when the agent searches", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, webSearch: true }).send as unknown as Wired;
+    await wired.config.execute(wired.config.inputSchema.parse({ kind: "text", text: "Fares fell [1.2] in May [1]." }), {});
+    expect(JSON.parse(calls[0]!.body!).message.parts).toEqual([{ type: "text", value: "Fares fell in May [1]." }]);
+  });
+
+  it("lets the agent extend an Action's description", () => {
+    const actions = relayActions(agent(), {
+      ...OPTIONS,
+      describe: (name, description) => name === "start_call" ? `${description} Or set a follow-up.` : description,
+    });
+    expect((actions.start_call as unknown as Wired).config.description).toMatch(/for later\. .* Or set a follow-up\.$/su);
+    expect((actions.react as unknown as Wired).config.description).not.toContain("follow-up");
+  });
+
+  it("hands a voice memo's unfinished send to the agent's ctx.waitUntil", async () => {
+    const handed: Promise<unknown>[] = [];
+    relayServer((url) => url.endsWith("/v1/attachments")
+      ? Response.json({
+        attachment_id: "01993d50-ef7b-7b37-886b-23fd80c7ec13",
+        upload_url: "https://upload.example/voice",
+        download_url: "https://api.example.test/attachment",
+        http_method: "PUT",
+        expires_at: "2026-09-01T12:00:00Z",
+        required_headers: { "content-type": "audio/x-wav" },
+      })
+      : Response.json({ voice_memo: { id: "sent" } }));
+    const wired = relayActions(agent(), {
+      env: ENV,
+      ctx: { waitUntil: (promise) => handed.push(promise) },
+      compose: async () => undefined,
+      media: { voiceMemo: async () => ({ bytes: new Uint8Array(48), contentType: "audio/x-wav", durationMs: 1 }) },
+    }).send as unknown as Wired;
+    await expect(wired.config.execute({ kind: "voice_memo", text: "hi" }, {})).resolves.toMatchObject({
+      status: "terminal_ambiguous",
+    });
+    expect(handed).toHaveLength(1);
+    await Promise.all(handed);
+  });
+});
+
+describe("the turn outside a messenger", () => {
+  it("asks for a turn option, by name, when Think has no messenger context", async () => {
+    const wired = relayActions({ getMessengerContext: () => undefined }, OPTIONS).send as unknown as Wired;
+    await expect(wired.config.execute({ kind: "text", text: "hi" }, {})).rejects.toThrow(RelayTurnRequired);
+    await expect(wired.config.execute({ kind: "text", text: "hi" }, {})).rejects.toThrow("`turn` option");
+  });
+
+  it("takes the agent's own turn for an event turn, which answers no Message", async () => {
+    relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions({ getMessengerContext: () => undefined }, {
+      ...OPTIONS,
+      turn: () => ({ chatId: CHAT_ID, eventId: "call-event" }),
+    }).send as unknown as Wired;
+    await expect(wired.config.execute({ kind: "text", text: "hi", reply: true }, {})).rejects.toThrow(RelayReplyRefused);
+    await expect(wired.config.execute({ kind: "text", text: "hi" }, {})).resolves.toMatchObject({ status: "sent" });
+  });
+
+  it("quote-replies only on a person's Message, not on a tap or a delivery event", () => {
+    const context = (kind: string) => ({
+      kind,
+      thread: { providerThreadId: encodeRelayThreadId({ chatId: CHAT_ID }) },
+      message: { providerMessageId: MESSAGE_ID },
+    });
+    expect(relayTurnFromMessenger(context("direct-message")).replyTo).toEqual({ messageId: MESSAGE_ID, partIndex: 0 });
+    expect(relayTurnFromMessenger(context("action")).replyTo).toBeUndefined();
+    expect(relayTurnFromMessenger(context("delivery-event")).replyTo).toBeUndefined();
+  });
+});
+
+describe("createRelayTurnSettled", () => {
+  const step = (toolName: string) => ({
+    steps: [{ toolCalls: [{ toolName, toolCallId: "1" }], toolResults: [] }] as unknown as StepResult<ToolSet>[],
+  });
+
+  it("ends the turn on the agent's own visible send, and goes on after its other tools", () => {
+    const settled = createRelayTurnSettled({ visibleSends: ["send_video"] });
+    expect(settled(step("send_video"))).toBe(true);
+    expect(settled(step("lookup_order"))).toBe(false);
+    expect(relayTurnSettled(step("send_video"))).toBe(false);
   });
 });
