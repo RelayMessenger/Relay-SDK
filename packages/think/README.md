@@ -32,7 +32,7 @@ import { relayActions } from "@relaymessenger/think/actions";
 
 export class MyAgent extends Think<Env> {
   override getActions() {
-    return { ...relayActions(this), ...myOwnTools };
+    return { ...relayActions(this.env, this), ...myOwnTools };
   }
 }
 ```
@@ -41,18 +41,18 @@ The Actions are `send`, `react`, `request_location`, `read_location`,
 `start_call`, `find_agents`, `payment_request`, `group`,
 `share_contact_card` and `stay_silent`. They call Relay with
 `RELAY_AGENT_TOKEN` and `RELAY_API_ORIGIN` from your Worker's `env`, and read
-the Chat and Message of each turn from Think's messenger context.
+the Chat and Message of each turn from your agent's messenger context.
 
 Leave Actions out by name:
 
 ```ts
-relayActions(this, { disable: ["start_call", "group"] });
+relayActions(this.env, this, { disable: ["start_call", "group"] });
 ```
 
 `send` offers `image` and `voice_memo` only when you give it your own models:
 
 ```ts
-relayActions(this, {
+relayActions(this.env, this, {
   media: {
     image: async (prompt, signal) => ({ bytes, contentType: "image/png" }),
     voiceMemo: async (text, style, signal) => ({ bytes, contentType: "audio/x-wav", durationMs }),

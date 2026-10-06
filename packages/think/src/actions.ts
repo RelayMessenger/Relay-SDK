@@ -986,12 +986,10 @@ export interface RelayMessengerContext {
   message?: { id?: string; providerMessageId?: string };
 }
 
-/** The agent relayActions reads: a Cloudflare Think agent passes itself. */
+/** The agent relayActions reads the turn from: a Cloudflare Think agent passes itself. */
 export interface RelayActionsAgent {
-  /** RELAY_AGENT_TOKEN and RELAY_API_ORIGIN, from the agent's own Worker. */
-  env: RelayClientEnv;
   /** Think's own; the default turn reads the Chat and Message from it. */
-  getMessengerContext?(): RelayMessengerContext | undefined;
+  getMessengerContext(): RelayMessengerContext | undefined;
 }
 
 /** Everything optional: the hooks an agent overrides, and the Actions it leaves out. */
@@ -1011,12 +1009,13 @@ export function relayTurnFromMessenger(context: RelayMessengerContext | undefine
 }
 
 /**
- * Every Relay Action, for Think's getActions(). Spread the agent's own tools
- * beside them:
+ * Every Relay Action, for Think's getActions(). `env` gives RELAY_AGENT_TOKEN
+ * and RELAY_API_ORIGIN. Spread the agent's own tools beside them:
  *
- *     getActions() { return { ...relayActions(this), ...myTools }; }
+ *     getActions() { return { ...relayActions(this.env, this), ...myTools }; }
  */
 export function relayActions(
+  env: RelayClientEnv,
   agent: RelayActionsAgent,
   options: RelayActionsOptions = {},
 ): Record<string, Action> {
@@ -1031,9 +1030,9 @@ export function relayActions(
     },
     runChosenAction: (_actionName, operation) => operation(),
     ...hooks,
-    env: agent.env,
+    env,
     activities,
-    turn: hooks.turn ?? (() => relayTurnFromMessenger(agent.getMessengerContext?.())),
+    turn: hooks.turn ?? (() => relayTurnFromMessenger(agent.getMessengerContext())),
   };
   const all = createRelayActions(deps);
   for (const name of disable) delete all[name];
