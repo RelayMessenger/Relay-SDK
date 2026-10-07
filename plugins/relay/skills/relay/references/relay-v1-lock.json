@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "locked_on": "2026-10-02",
+  "locked_on": "2026-10-07",
   "api": {
     "repository": "https://github.com/RelayMessenger/Relay-Server",
     "commit": "6f50fcb69d1ce6dde8bf0fb0e12bd2ef379f0b09",
@@ -20,14 +20,14 @@
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
-    "commit": "79517a1c9fcb1c82b474cd72ba8bc10197ff363f",
+    "commit": "4076374bb2ea53dddc5804d4e942ca10af7e7359",
     "package_path": "packages/sdk/package.json",
-    "package_sha256": "9d5ae725fc4f9195681da434d18470053e69ea1d380e8ce1c0de39be71e845ca",
+    "package_sha256": "34a15a050f475bee467f3b8241e3769ef7e6dc1dce671f3ebc0f8f392370e608",
     "package": "@relaymessenger/sdk",
-    "version": "0.3.1-staging.1",
-    "dist_tag": "staging",
-    "publication_status": "Published and registry-verified on the staging dist-tag.",
-    "integrity": "sha512-wqg+3Cio8rxbRrqagknXKf7MChGwVEhQQJxXwSbl4H9gH42OkzhsAIZHBeCbsid+fB6uVZv5cF+JX5lghYxe2A=="
+    "version": "0.5.3",
+    "dist_tag": "latest",
+    "publication_status": "Published and registry-verified on the latest dist-tag; the release tag sdk-v0.5.3 marks the commit.",
+    "integrity": "sha512-3du5+8VQlwV5lMgdlQ3pINIo2g+mM+rcjG7B1jxQOaORvBl78kM0jTpfF1xODP4qhNyq9RLZ0ClxM3f01r81SA=="
   },
   "docs_mcp": {
     "url": "https://docs.relayapp.im/mcp",
