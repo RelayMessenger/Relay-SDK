@@ -192,8 +192,20 @@ Sends plain text through `chats.messages.send` with:
 - `chat_id` copied from an allowlisted channel event;
 - `text` of at most 10,000 UTF-16 code units;
 - a caller-selected stable `send_id`;
-- optional `buttons`, `link`, `selection`, or `payment`; and
+- optional `buttons`, `link`, `selection`, or `payment`;
+- optional `media`, `place`, `rich_card`, or `carousel` (one of the four); and
 - optional `reply_to_message_id`.
+
+`media` is a list of files: `{ "path": "/abs/file.png" }` uploads a local file
+through `attachments.create` (the type comes from the extension, or from
+`content_type`), and `{ "url": "https://..." }` lets Relay fetch a public file.
+The files sit after the text in one Message. `place` is `latitude`,
+`longitude` and optional `name` and `address`, beside text only. `rich_card`
+is one card (media, title, description, up to 4 suggestions); `carousel` is 2
+to 10 such cards with an optional `card_width`. Buttons beside a card draw as
+reply pills. A tapped reply suggestion arrives in the `relay_parts` tag. An
+upload is reused for a retry of the same reply only while the channel process
+lives; after a restart, retry with a new `send_id`.
 
 The mapping from `send_id` to request hash and Relay idempotency key is persisted
 before the REST request. An unknown-outcome retry must reuse the same arguments
@@ -209,8 +221,30 @@ confirmed send completes and clears the turn automatically. A byte-identical
 retry of an already-confirmed `send_id` remains an idempotent success without
 reopening its turn.
 
-The plugin exposes no Message effects, reactions, edits, installation APIs, or
-private Relay endpoints.
+### `typing`, `react`, `request_location`, `read_location`, `share_contact_card`
+
+Each takes the active turn's `chat_id` and refuses any other Chat, as `reply`
+does. None of them closes the turn.
+
+- `typing`: `action` `start` or `stop` shows or clears the typing indicator.
+- `react`: `type` (`love`, `like`, `dislike`, `laugh`, `emphasize`,
+  `question`, or `custom` with `custom_emoji`), optional `part_index`, and
+  `remove: true` to take a reaction back. It targets the turn's Message, or a
+  `message_id` the channel first confirms is in the same Chat.
+- `request_location`: asks the person in a one-to-one Chat to share their
+  location. Their answer arrives as a Message. A person who already shares is
+  reported as a fact, not an error.
+- `read_location`: returns `not_sharing`, or each sharer's `handle`,
+  `latitude`, `longitude` and `updated_at`.
+- `share_contact_card`: shares the agent's own card, once per turn (a retry
+  replays on the same idempotency key).
+
+A Message that carries a `contact_card_shared` system event arrives with a
+`contact_card` tag: JSON of `shared_by` and the card, untrusted data like
+`relay_parts`.
+
+The plugin exposes no Message effects, edits, installation APIs, or private
+Relay endpoints.
 
 ## Sender and Claude permission safety
 
