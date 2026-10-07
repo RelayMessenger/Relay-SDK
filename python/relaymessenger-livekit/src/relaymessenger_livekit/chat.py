@@ -52,7 +52,15 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
             "you to text them something, or for what is better read than heard: "
             "a link, an address, a number, a list."
         ),
-        "parameters": {"type": "object", "properties": {"text": _TEXT}, "required": ["text"], "additionalProperties": False},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": _TEXT,
+                "reply_to_message_id": {"type": "string", "description": "A message in the chat to reply to."},
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
     },
     "send_buttons": {
         "name": "send_buttons",
@@ -178,11 +186,13 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
     retried request never sends the same message twice. A refusal from Relay
     or a bad argument comes back to the model as a ``ToolError``."""
 
-    async def send(parts: List[MessagePart], context: RunContext[Any]) -> Dict[str, Any]:
+    async def send(parts: List[MessagePart], context: RunContext[Any], reply_to: Optional[str] = None) -> Dict[str, Any]:
         message: Dict[str, Any] = {
             "parts": parts,
             "idempotency_key": f"livekit:{chat_id}:{context.function_call.call_id}",
         }
+        if reply_to:
+            message["reply_to"] = {"message_id": reply_to}
         try:
             response = await relay.chats.messages.send(chat_id, {"message": message})
         except Exception as error:
@@ -198,7 +208,8 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
     @function_tool(raw_schema=_SCHEMAS["send_message"])
     async def send_message(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
         text = _text(raw_arguments, "text")
-        return await send([text_part(text)], context)
+        reply_to = raw_arguments.get("reply_to_message_id")
+        return await send([text_part(text)], context, reply_to if isinstance(reply_to, str) else None)
 
     @function_tool(raw_schema=_SCHEMAS["send_buttons"])
     async def send_buttons(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:

@@ -83,6 +83,17 @@ async def test_send_message_texts_the_trimmed_words() -> None:
     assert sent_parts(relay) == [{"type": "text", "value": "see you at 6"}]
 
 
+async def test_send_message_replies_to_the_given_message() -> None:
+    relay = fake_relay()
+    await call(relay, "send_message", {"text": "yes, that one", "reply_to_message_id": "msg_0"})
+    ((_, body),) = relay.chats.messages.sent
+    assert body["message"]["reply_to"] == {"message_id": "msg_0"}
+    assert body["message"]["parts"] == [{"type": "text", "value": "yes, that one"}]
+    plain = fake_relay()
+    await call(plain, "send_message", {"text": "hi"})
+    assert "reply_to" not in plain.chats.messages.sent[0][1]["message"]
+
+
 async def test_send_message_refuses_empty_text_without_sending() -> None:
     relay = fake_relay()
     with pytest.raises(ToolError):
