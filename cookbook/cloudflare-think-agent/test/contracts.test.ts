@@ -60,7 +60,7 @@ describe("locked runtime contracts", () => {
   });
 
   it("pins the coordinated Think and Relay packages or proves explicit local candidate archives", async () => {
-    expect(packageVersion("@cloudflare/think")).toBe("0.19.0");
+    expect(packageVersion("@cloudflare/think")).toBe("0.20.1");
     if (thinkCandidateMode()) {
       await verifyThinkCandidates();
     } else {
