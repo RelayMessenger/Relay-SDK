@@ -10,13 +10,13 @@ import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.
 
 const RELAY_SERVER_SHA =
   "6f50fcb69d1ce6dde8bf0fb0e12bd2ef379f0b09";
-// Relay-SDK commit whose staging release published the adapter below.
+// Relay-SDK commit whose release published the adapter below (tag chat-sdk-v0.3.13).
 const RELAY_CHAT_SDK_SHA =
-  "62b320548d5ba5edf2a9445efdab32122f0257b7";
+  "ea4a4bc1792f7260f98184f6bd9bcdea7746aa1e";
 const RELAY_OPENAPI_SHA256 =
   "79bd85b0150ef45ea4bbe5f498507dd86d784e7fbf6c3b299a5a81db091aacdd";
 const RELAY_ADAPTER_INTEGRITY =
-  "sha512-7m/2HDv7pi6C99PxEdwmkcRgUyeUGrjNpb2qZLjQDrUimYHQyWSjzExr2ljEXF4/q+77PlOU4DQ+ZOGjujFdKg==";
+  "sha512-fCstCmGGZ15VZtZWpfrXc7nN+KGRVAYlBVY9NF4w806Zxssgbm7v1LYl3542hTeg7mnt8PkRzTVZGq5XMTTABA==";
 
 function packageVersion(name: string): string {
   let directory = process.cwd();
@@ -65,8 +65,8 @@ describe("locked runtime contracts", () => {
       await verifyThinkCandidates();
     } else {
       expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-        .toBe("0.3.7");
-      expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.6");
+        .toBe("0.3.13");
+      expect(packageVersion("@relaymessenger/sdk")).toBe("0.5.3");
     }
   });
 
@@ -90,8 +90,8 @@ describe("locked runtime contracts", () => {
     expect(adapter).toMatchObject({
       integrity: RELAY_ADAPTER_INTEGRITY,
       resolved:
-        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.7.tgz",
-      version: "0.3.7",
+        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.13.tgz",
+      version: "0.3.13",
     });
   });
 
