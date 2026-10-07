@@ -54,6 +54,36 @@ pump paces the wire. `flush()` closes the segment and reports
 audio that has not reached the wire and reports the segment as interrupted at
 the position that actually played.
 
+## Text during a Call
+
+Every Call belongs to a chat (`call.chat_id`). `relayChatTools(relay, chatId)`
+gives the agent LiveKit `llm.tool`s that send to that chat while it talks, with
+the same parts Relay's text agents send: `send_message`, `send_buttons`,
+`send_selection`, `send_place`, `request_location`, `read_location` and
+`send_link`. Each tool checks its arguments with the SDK's own part builders,
+so a bad argument comes back to the model as an `llm.ToolError` instead of a
+400 from the API.
+
+`relayChatContext(relay, chatId, limit)` reads the chat's newest `limit`
+Messages (20 by default) into an `llm.ChatContext`, oldest first: the agent's
+own as `assistant`, the person's as `user`. A place, a location share or a
+selection answer becomes data the model can read. Pass it as the Agent's
+`chatCtx` so the call starts where the texting stopped.
+
+```ts
+import { voice } from "@livekit/agents";
+import { relayChatContext, relayChatTools } from "@relaymessenger/livekit";
+
+const agent = new voice.Agent({
+  instructions: "You are a concierge. Text the person anything they should keep.",
+  chatCtx: await relayChatContext(relay, call.chat_id),
+  tools: relayChatTools(relay, call.chat_id),
+});
+```
+
+To use only some of them, pick the keys you want:
+`const { send_message, send_place } = relayChatTools(relay, call.chat_id)`.
+
 ## Video
 
 The person's camera arrives as `@livekit/rtc-node` `VideoFrame`s (I420) on
