@@ -73,7 +73,7 @@ export const relayClientTools: readonly ElevenLabsClientTool[] = [
   tool(
     "send_message",
     "Text the person in this call's Relay chat. Use it for anything they should keep: an address, a number, a list, a summary.",
-    { text: text("The message text.") },
+    { text: text("The message text."), reply_to_message_id: text("A message in the chat to reply to.") },
     ["text"],
   ),
   tool(
@@ -176,8 +176,10 @@ const textPart = (args: Args): MessagePart[] => {
   return value?.trim() ? [{ type: "text", value }] : [];
 };
 
-const send = async (relay: Relay, chatId: string, parts: MessagePart[]): Promise<string> => {
-  const sent = await relay.chats.messages.send(chatId, { message: { parts } });
+const send = async (relay: Relay, chatId: string, parts: MessagePart[], replyTo?: string): Promise<string> => {
+  const sent = await relay.chats.messages.send(chatId, {
+    message: { parts, ...(replyTo ? { reply_to: { message_id: replyTo } } : {}) },
+  });
   return JSON.stringify({ sent: true, message_id: sent.message.id });
 };
 
@@ -194,7 +196,12 @@ export const runRelayTool = async (
 ): Promise<string> => {
   switch (name) {
     case "send_message":
-      return send(relay, chatId, [{ type: "text", value: requiredString(args, "text") }]);
+      return send(
+        relay,
+        chatId,
+        [{ type: "text", value: requiredString(args, "text") }],
+        optionalString(args, "reply_to_message_id")?.trim() || undefined,
+      );
     case "send_buttons": {
       const buttons = buttonsPart(args.buttons);
       if (typeof buttons === "string") throw new RelayToolArgumentError(buttons);

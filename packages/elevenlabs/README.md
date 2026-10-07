@@ -89,7 +89,7 @@ const call = await ElevenLabsCall.connect({
 
 | Tool | What it sends in the chat |
 | --- | --- |
-| `send_message` | A text Message. |
+| `send_message` | A text Message; `reply_to_message_id` sends it as a reply. |
 | `send_buttons` | 1 to 5 buttons under optional text. A tap comes back as the person's reply. |
 | `send_selection` | A list to pick from (`title`, `options`), under optional text. |
 | `send_place` | A map pin (`latitude`, `longitude`, optional `name` and `address`). |

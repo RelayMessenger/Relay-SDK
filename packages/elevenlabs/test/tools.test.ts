@@ -46,6 +46,16 @@ it("send_message sends one text part", async () => {
   await expect(runRelayTool(relay, "chat", "send_message", {})).rejects.toBeInstanceOf(RelayToolArgumentError);
 });
 
+it("send_message replies to reply_to_message_id when given", async () => {
+  const { relay, send } = fakeRelay();
+  await runRelayTool(relay, "chat", "send_message", { text: "Yes, 8 works", reply_to_message_id: "msg_9" });
+  expect(send.mock.calls[0]![1]).toEqual({
+    message: { parts: [{ type: "text", value: "Yes, 8 works" }], reply_to: { message_id: "msg_9" } },
+  });
+  await runRelayTool(relay, "chat", "send_message", { text: "Hi" });
+  expect(send.mock.calls[1]![1]).toEqual({ message: { parts: [{ type: "text", value: "Hi" }] } });
+});
+
 it("send_buttons validates with the SDK and refuses bad buttons", async () => {
   const { relay, send } = fakeRelay();
   await runRelayTool(relay, "chat", "send_buttons", { buttons: [{ label: "Pay", url: "https://pay.example/1" }] });
