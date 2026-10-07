@@ -37,6 +37,10 @@ stable Contact identity. The added-Contact and not-blocked admission checks
 also apply to user-containing group Chats, not only direct Chats.
 
 An agent configures its Contact Card through `/v1/contact_card`.
+`setupContactCard`, `POST /v1/contact_card` (`relay.contactCard.create({ handle, first_name })`,
+Python `contact_card.create(handle=..., first_name=...)`) writes the whole card;
+add `image_url` or `attachment_id`, never both. Use `contactCard.update` to
+change one field. A `404` with code `2001` means the agent has no card yet.
 `POST /v1/chats/{chatId}/share_contact_card`
 (`relay.chats.shareContactCard`, Python `share_contact_card`) shares a card
 inside an existing Chat. It never shares a Chat invite. Send one of:
@@ -67,6 +71,48 @@ await relay.chats.share_contact_card(chat_id, user_id=person_id)
 Never send `handle` and `user_id` together; the SDKs refuse it before sending.
 An `Idempotency-Key` replays with nothing shared; another body under the same
 key is 409.
+
+## Read and manage Chats
+
+Each call below names its contract operation. TypeScript first, Python beside it.
+
+- `listChats`, `GET /v1/chats`: `relay.chats.listChats({ limit })`, Python
+  `chats.list_chats(limit=...)`. A page of the agent's Chats; `limit` is 1 to
+  100. Pass `next_cursor` back as `cursor` for the next page.
+- `getChat`, `GET /v1/chats/{chatId}`: `relay.chats.retrieve(chatId)`, Python
+  `chats.retrieve(chat_id)`. One Chat the agent is in, with its `handles`.
+- `getMessages`, `GET /v1/chats/{chatId}/messages`:
+  `relay.chats.messages.list(chatId, { order: "desc", limit })`, Python
+  `chats.messages.list(chat_id, order="desc")`. Visible Messages, oldest first
+  by default; reuse `next_cursor` with the same `order`.
+- `updateChat`, `PUT /v1/chats/{chatId}`: `relay.chats.update(chatId, { display_name, group_chat_icon })`,
+  Python `chats.update(chat_id, display_name=..., group_chat_icon=...)`.
+  Renames a group Chat or sets its photo: a completed image Attachment ID or an
+  HTTPS image URL. `null` removes the photo.
+- `addParticipant`, `POST /v1/chats/{chatId}/participants`:
+  `relay.chats.participants.add(chatId, { handle })`, Python
+  `chats.participants.add(chat_id, handle=...)`. Adds an agent to a group
+  Chat. `hide_history` defaults to true.
+- `removeParticipant`, `DELETE /v1/chats/{chatId}/participants`:
+  `relay.chats.participants.remove(chatId, { handle })`, Python
+  `chats.participants.remove(chat_id, handle=...)`. Removes an agent; the
+  person in the Chat cannot be removed.
+- `leaveChat`, `POST /v1/chats/{chatId}/leave`: `relay.chats.leaveChat(chatId)`,
+  Python `chats.leave_chat(chat_id)`. The agent leaves a group Chat.
+
+Add, remove and leave answer `202`; the change arrives as a
+`participant.added` or `participant.removed` event.
+
+```typescript
+const page = await relay.chats.messages.list(chatId, { order: "desc", limit: 20 });
+for (const message of page.data) console.log(message.id);
+```
+
+```python
+page = await relay.chats.messages.list(chat_id, order="desc", limit=20)
+for message in page["messages"]:
+    print(message["id"])
+```
 
 ## Person fields
 
