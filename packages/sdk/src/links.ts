@@ -3,6 +3,7 @@ import { splitButtons } from "./buttons.js";
 import { splitPayment } from "./payment.js";
 import { splitSelection } from "./selection.js";
 import { splitForm } from "./form.js";
+import { splitCardBlocks } from "./card-blocks.js";
 import type { ButtonsPart, LinkPart, MessagePart, PaymentRequestCreateParams, TextPart } from "./types.js";
 
 /**
@@ -84,7 +85,9 @@ export interface AnswerMessages {
 }
 
 /**
- * The Messages a text-only agent's answer becomes: a payment, buttons or
+ * The Messages a text-only agent's answer becomes: a rich_card, carousel or
+ * place block is lifted out first (the card rides with the last words, the
+ * place is its own Message after them), then a payment, buttons or
  * selection block is lifted out, then each link on its own line becomes its
  * own Message. Buttons and selection accompany the last Message of words; a
  * payment never does — it must be the only part of its Message, so the words
@@ -103,6 +106,25 @@ export const answerMessages = (answer: string): AnswerMessages => {
     if (only) return { messages: [[ratingRequestPart()]] };
     return { messages: [[{ type: "text", value: answer }]],
       error: "A rating_request fence contains only {} and is the whole answer." };
+  }
+  // A card, a carousel or a place is lifted first; what remains is read as
+  // before. The place goes out as its own Message after the words.
+  const carded = splitCardBlocks(answer);
+  if (carded.error) return { messages: splitLinks(answer).map((segment) => [segment]), error: carded.error };
+  if (carded.card || carded.place) {
+    const rest = answerMessages(carded.text);
+    if (carded.card) {
+      const target = rest.messages.findLast((parts) => parts[0]?.type === "text" && parts[0].value.trim());
+      if (target) {
+        // Buttons under the words stay with the card, drawn as pills under it.
+        const buttons = target.findIndex((part) => part.type === "buttons");
+        target.splice(buttons < 0 ? target.length : buttons, 0, carded.card);
+      } else {
+        rest.messages.push([carded.card]);
+      }
+    }
+    if (carded.place) rest.messages.push([carded.place]);
+    return rest;
   }
   const formed = splitForm(answer);
   if (formed.error) return { messages: splitLinks(answer).map((segment) => [segment]), error: formed.error };

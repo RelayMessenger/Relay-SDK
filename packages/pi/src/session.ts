@@ -28,7 +28,11 @@ export interface SessionChannelOptions {
   readonly isIdle: () => boolean;
 }
 
-/** The line sent when a run ends with no words, so every Message is answered. */
+/**
+ * The line sent when a run fails before it has words, so the person is not
+ * left waiting. A run that ends with no words on its own is Pi staying
+ * silent, and sends nothing.
+ */
 export const NO_ANSWER = "Sorry, something went wrong on my side.";
 
 /** The image types a model takes as image content; any other file is named in words. */
@@ -69,14 +73,18 @@ export const sessionContent = async (data: MessageWebhookData, media: SessionMed
   return [{ type: "text", text: piPrompt(words) }, ...images];
 };
 
-/** The words of the last assistant message in a finished run, or undefined. */
+/**
+ * What a finished run sends: the words of its last assistant message,
+ * `NO_ANSWER` when that message ended in an error with no words, or undefined
+ * for a run that chose to say nothing.
+ */
 export const lastAnswer = (messages: readonly unknown[]): string | undefined => {
   for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as { role?: string; content?: unknown } | undefined;
+    const message = messages[index] as { role?: string; content?: unknown; stopReason?: string } | undefined;
     if (message?.role !== "assistant") continue;
     const blocks = Array.isArray(message.content) ? message.content as { type?: string; text?: string }[] : [];
     const text = blocks.flatMap((block) => block?.type === "text" && block.text ? [block.text] : []).join("").trim();
-    return text || undefined;
+    return text || (message.stopReason === "error" ? NO_ANSWER : undefined);
   }
   return undefined;
 };
@@ -98,8 +106,7 @@ interface Turn { readonly data: MessageWebhookData; readonly key: string; readon
  * in its own Pi process: each Message is one user message to that session,
  * and the session's answer goes back to the chat it came from once the run
  * has settled (after retries and queued follow-ups). Messages wait their turn,
- * so each gets its own answer, and one that ends with no words still gets
- * `NO_ANSWER`.
+ * so each gets its own answer; a run that ends with no words sends nothing.
  */
 export class SessionChannel {
   readonly #pi: SessionPi;
@@ -143,6 +150,10 @@ export class SessionChannel {
     this.#inflight.set(event.event_id, handoff);
     try { await handoff; } finally { this.#inflight.delete(event.event_id); }
   }
+  /** The chat whose Message the session is answering now, for the Relay tools. */
+  get chatId(): string | undefined {
+    return this.#pending?.data.chat.id;
+  }
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
     if (this.#pending) this.#ended = messages;
@@ -151,10 +162,10 @@ export class SessionChannel {
   async settled(): Promise<void> {
     const turn = this.#pending;
     this.#pending = undefined;
-    const answer = lastAnswer(this.#ended) ?? NO_ANSWER;
+    const answer = lastAnswer(this.#ended);
     this.#ended = [];
     try {
-      if (turn) await sendAnswer(this.#relay, turn.data, turn.key, answer);
+      if (turn && answer) await sendAnswer(this.#relay, turn.data, turn.key, answer);
     } catch (error) {
       console.error(`Relay: the answer was not sent: ${error instanceof Error ? error.message : String(error)}`);
     } finally {

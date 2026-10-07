@@ -85,7 +85,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/index.ts",
       "source_sha256": "10779947a299636b36b91a638a4434aeb99bbcafdbf5f9ad495e45ddb71213d0",
-      "destination_sha256": "067fb777974a8a50d547955b7266b9314d2033a503ff40feaebac4dd2489f7c0",
+      "destination_sha256": "9b6fa4d745362d13d75b609b97383ed2d13b79dbfec733751fee178f378f547b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -910,7 +910,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "README.md",
       "source_sha256": "37378dff5e8813fa293b810e73bdae667c9b92610992b7b2917fad0a4a58dda2",
-      "destination_sha256": "6035a6f1f25920418904eef1b731039b0674d84b4f7e82119ee1c46cbbdf3637",
+      "destination_sha256": "323015d0bee4f4e5126fc7001add256f5a0fcce57eafb580c05adf3c4b34db28",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -954,10 +954,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "index.ts",
       "source_sha256": "8d3fa5354f63a49be52f89461ad642ebe2f500fd6b696271e3f29d9314a7d4e3",
-      "destination_sha256": "8d3fa5354f63a49be52f89461ad642ebe2f500fd6b696271e3f29d9314a7d4e3",
+      "destination_sha256": "2ce586c64e05f267e3c744780d7203c42bcc347ff99f04d54dfe34a4a0c6559c",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/openclaw.plugin.json",
@@ -965,10 +965,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "openclaw.plugin.json",
       "source_sha256": "4f4eebb64346454d3e692c7c8aa502648e6212798fef201cc3074512e349e57d",
-      "destination_sha256": "4f4eebb64346454d3e692c7c8aa502648e6212798fef201cc3074512e349e57d",
+      "destination_sha256": "2d7824a2b114b389d9162cb9a82330cdd04d930fef7027bd8bdfe67670a1b5ba",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/package.json",
@@ -1086,7 +1086,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/channel.ts",
       "source_sha256": "8bee333306d155d5cb407a6560d8cd01aeceea835400626afe942114478760ab",
-      "destination_sha256": "02edff8cacc3b63f0340767d37a8d9ab8f8b237697ff312d39bede5114ce4444",
+      "destination_sha256": "ed5376342caae5efeed0f20119430b466f2b6488101df4d8e11634a1fb619be2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1108,7 +1108,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/dispatch.ts",
       "source_sha256": "a9cad49b31b8987a6adf3c0803502d4c90242fd5962b6047b3ad2c7ecdd25b9b",
-      "destination_sha256": "ccf47aad53e72ee0832ad54763d3c7728324eb44233dfbeba20eabe9a977ec8f",
+      "destination_sha256": "18da3bb7752a7ff315baa2f6119e03c88cbfcfe942bf49089db4125760e8cfc1",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1218,7 +1218,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/outbound.ts",
       "source_sha256": "7995415df73140b342cb96b64896e85784ddc229567cddcf9efd1e09f33c1c41",
-      "destination_sha256": "5d916bf96f9664ad2d7dfc20e8db3bfd4ec45c327e4b481fbbd916d450428162",
+      "destination_sha256": "314d158370c5ffeb1bf453930f30154bad04fa20deff7824b66426f382353862",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

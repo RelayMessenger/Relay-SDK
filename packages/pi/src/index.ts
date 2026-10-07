@@ -12,6 +12,13 @@ import Relay, {
   SELECTION_GUIDANCE,
   SELECTION_BLOCK_INSTRUCTION,
   LINK_LINE_INSTRUCTION,
+  FORM_BLOCK_INSTRUCTION,
+  FORM_GUIDANCE,
+  RATING_REQUEST_BLOCK_INSTRUCTION,
+  RATING_REQUEST_GUIDANCE,
+  CARD_BLOCK_INSTRUCTION,
+  CARD_GUIDANCE,
+  PLACE_BLOCK_INSTRUCTION,
   answerMessages as splitAnswer,
   createPaymentPart,
   RelayAPIError,
@@ -98,9 +105,22 @@ export const piDialog = (record: RpcRecord): Omit<PiDialog, "signal"> | undefine
 
 /** The dialog methods that wait for an answer (Pi docs/rpc.md). */
 const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+/** The variable naming the chat a Pi was started for, read by the extension's Relay tools. */
+export const RELAY_CHAT_ID_ENV = "RELAY_PI_CHAT_ID";
+/**
+ * The environment of the Pi started for one chat: this process's, plus the
+ * chat, the token and the API origin, so the extension's Relay tools act on
+ * that chat.
+ */
+export const piEnv = (options: Pick<PiChannelOptions, "agentToken" | "baseURL">, chatId: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => ({
+  ...base,
+  [RELAY_CHAT_ID_ENV]: chatId,
+  RELAY_AGENT_TOKEN: options.agentToken,
+  ...(options.baseURL ? { RELAY_BASE_URL: options.baseURL } : {}),
+});
 class ChildPiProcess implements PiProcess {
   readonly #child: ChildProcessWithoutNullStreams;
-  constructor(command: string, args: readonly string[]) { this.#child = spawn(command, [...args], { stdio: ["pipe", "pipe", "pipe"] }); this.#child.stderr.resume(); }
+  constructor(command: string, args: readonly string[], env: NodeJS.ProcessEnv) { this.#child = spawn(command, [...args], { stdio: ["pipe", "pipe", "pipe"], env }); this.#child.stderr.resume(); }
   get stdin() { return this.#child.stdin; }
   get stdout() { return createInterface({ input: this.#child.stdout }); }
   kill = () => { this.#child.kill(); };
@@ -135,7 +155,14 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
  * rules every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE}`;
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. To stay silent, end with no text: nothing is sent. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${FORM_BLOCK_INSTRUCTION} ${FORM_GUIDANCE} ${CARD_BLOCK_INSTRUCTION} ${CARD_GUIDANCE} ${PLACE_BLOCK_INSTRUCTION} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}${RELAY_TOOLS_LINE}`;
+
+/**
+ * The Relay tools the Pi extension registers when Relay starts it for a chat
+ * (`relay_request_location`, `relay_read_location`, `relay_send_media`).
+ */
+export const RELAY_TOOLS_LINE =
+  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. relay_send_media sends a file from this machine as its own Message.";
 
 /**
  * The messages an answer becomes: each link written alone on a line as its
@@ -243,7 +270,7 @@ export class PiChannel {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
     this.#options = options;
     this.#relay = options.relay ?? new Relay({ apiKey: options.agentToken, ...(options.baseURL ? { baseURL: options.baseURL } : {}) });
-    this.#spawnPi = options.spawnPi ?? ((command, args) => new ChildPiProcess(command, args));
+    this.#spawnPi = options.spawnPi ?? ((command, args, chatId) => new ChildPiProcess(command, args, piEnv(options, chatId)));
   }
   async run(signal?: AbortSignal): Promise<void> {
     this.#abortListener = () => this.stop();
@@ -281,7 +308,8 @@ export class PiChannel {
     if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
     const response = await session.command("get_last_assistant_text", {}, timeout, signal);
     const answer = response.data?.text?.trim();
-    if (!answer) throw new Error("Pi returned no final text answer");
+    // No words is Pi's choice to stay silent: nothing is sent.
+    if (!answer) return;
     await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
   }
 }

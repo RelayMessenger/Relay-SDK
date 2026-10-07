@@ -28,9 +28,12 @@ import {
   classifyUnknownRelaySend,
   createRelaySdkClient,
   deriveRelayIdempotencyKey,
+  loadRelayMedia,
   RELAY_TEXT_CHUNK_LIMIT,
+  sendRelayMedia,
   sendRelayText,
 } from "./outbound.js";
+import { relayMessageActions } from "./actions.js";
 import type {
   RelayCoreConfig,
   ResolvedRelayAccount,
@@ -153,6 +156,7 @@ export const relayMessageAdapter = defineChannelMessageAdapter({
     automaticUnknownSendReconciliation: true,
     capabilities: {
       text: true,
+      media: true,
       replyTo: true,
       messageSendingHooks: true,
       reconcileUnknownSend: true,
@@ -170,6 +174,31 @@ export const relayMessageAdapter = defineChannelMessageAdapter({
         relay: createRelaySdkClient(account),
         chatId: ctx.to,
         text: ctx.text,
+        replyToId: ctx.replyToId,
+        idempotencyKey: deriveRelayIdempotencyKey({
+          deliveryQueueId: ctx.deliveryQueueId,
+          deliveryPartIndex: ctx.deliveryPartIndex,
+        }),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+        ...(ctx.onPlatformSendDispatch
+          ? { onPlatformSendDispatch: ctx.onPlatformSendDispatch }
+          : {}),
+      });
+      return {
+        messageId: response.message.id,
+        receipt: receipt([response], ctx.replyToId),
+      };
+    },
+    media: async (ctx) => {
+      const account = requireAccount(
+        ctx.cfg as RelayCoreConfig,
+        ctx.accountId,
+      );
+      const response = await sendRelayMedia({
+        relay: createRelaySdkClient(account),
+        chatId: ctx.to,
+        text: ctx.text,
+        file: await loadRelayMedia(ctx),
         replyToId: ctx.replyToId,
         idempotencyKey: deriveRelayIdempotencyKey({
           deliveryQueueId: ctx.deliveryQueueId,
@@ -217,8 +246,8 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
         chatTypes: ["direct", "group"],
         reply: true,
         threads: false,
-        media: false,
-        reactions: false,
+        media: true,
+        reactions: true,
         edit: false,
         unsend: false,
         effects: false,
@@ -295,6 +324,7 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
         },
       },
       message: relayMessageAdapter,
+      actions: relayMessageActions,
     },
     security: {
       dm: {
@@ -333,6 +363,28 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
               (ctx as { log?: { warn?: (message: string) => void } }).log?.warn?.(
                 `relay: component block left as text: ${error}`,
               ),
+            ...(ctx.onPlatformSendDispatch
+              ? { onPlatformSendDispatch: ctx.onPlatformSendDispatch }
+              : {}),
+          });
+          return { messageId: response.message.id };
+        },
+        sendMedia: async (ctx) => {
+          const account = requireAccount(
+            ctx.cfg as RelayCoreConfig,
+            ctx.accountId,
+          );
+          if (!ctx.mediaUrl) throw new Error("relay: a media send needs mediaUrl");
+          const response = await sendRelayMedia({
+            relay: createRelaySdkClient(account),
+            chatId: ctx.to,
+            text: ctx.text,
+            file: await loadRelayMedia({ ...ctx, mediaUrl: ctx.mediaUrl }),
+            replyToId: ctx.replyToId,
+            idempotencyKey: deriveRelayIdempotencyKey({
+              deliveryQueueId: ctx.deliveryQueueId,
+              deliveryPartIndex: ctx.deliveryPartIndex,
+            }),
             ...(ctx.onPlatformSendDispatch
               ? { onPlatformSendDispatch: ctx.onPlatformSendDispatch }
               : {}),

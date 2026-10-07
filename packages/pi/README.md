@@ -1,7 +1,8 @@
 # @relaymessenger/pi
 
 Relay channel for Pi. It consumes Relay's acknowledged Agent WebSocket, runs
-each inbound Message through Pi RPC mode, and sends one final text reply.
+each inbound Message through Pi RPC mode, and sends Pi's final answer, or
+nothing when Pi ends with no words.
 
 `relay connect pi` configures and runs this path for you. For a direct
 integration, pass `agentToken`, optionally `baseURL` and `piCommand`, then use
@@ -43,7 +44,25 @@ never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes 
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
 files named. Messages wait their turn, and the session's last words go back
 to the chat the Message came from once Pi reports `agent_settled`. A run that
-ends with no words sends `Sorry, something went wrong on my side.`
+ends with no words stays silent and sends nothing; a run that fails with no
+words sends `Sorry, something went wrong on my side.`
+
+## Parts, silence and tools
+
+Pi's final text carries Relay's parts as fenced blocks, read by the SDK's
+`answerMessages`, and every prompt teaches them: `buttons`, `selection`,
+`form`, `rich_card`, `carousel` (2 to 10 cards), `place`, `payment` and
+`rating_request`, plus a URL alone on a line for a link card. A final answer
+with no words is Pi choosing to stay silent: nothing is sent, in the channel
+and in the session alike.
+
+The extension registers three tools for the chat Pi is answering (Pi
+`registerTool`): `relay_request_location` asks the person to share their
+location, `relay_read_location` reads where everyone sharing is now, and
+`relay_send_media` uploads a file from the machine and sends it as its own
+Message. `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
+`RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
+session mode they act on the chat whose Message is being answered.
 
 ## Selection
 
