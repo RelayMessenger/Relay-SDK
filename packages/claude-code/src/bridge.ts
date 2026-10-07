@@ -158,7 +158,13 @@ export function classifyRelayEvent(params: {
   if (!isRecord(event.data)) return { kind: "refuse", reason: "Message event data is not an object" };
   const data = event.data;
   const chat = isRecord(data.chat) ? data.chat : null;
-  const sender = isRecord(data.sender_handle) ? data.sender_handle : null;
+  if (data.is_from_me === true) {
+    return { kind: "ignore", reason: "message.received is this agent's own Message" };
+  }
+  // `from_handle` matches the REST Message object; `sender_handle` is the
+  // deprecated field that servers before 2026-10-04 send instead.
+  const senderField = data.from_handle ?? data.sender_handle;
+  const sender = isRecord(senderField) ? senderField : null;
   const chatId = typeof chat?.id === "string" ? chat.id : "";
   const messageId = typeof data.id === "string" ? data.id : "";
   const senderId = typeof sender?.id === "string" ? sender.id : "";

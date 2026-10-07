@@ -69,7 +69,8 @@ function event(
       id: MESSAGE_ID,
       idempotency_key: null,
       direction: "inbound",
-      sender_handle: from,
+      from_handle: from,
+      is_from_me: false,
       parts: [{
         type: "text",
         value: text,
@@ -81,7 +82,9 @@ function event(
       read_at: null,
       reply_to: options.replyTo ? { message_id: options.replyTo } : null,
     },
-  };
+    // The current server shape: `from_handle` only, no deprecated `sender_handle`,
+    // which the SDK type still lists as required.
+  } as RelayWebhookEvent;
 }
 
 const redactor = createRedactor("rly_secret_abcdefghijklmnop");
@@ -136,6 +139,31 @@ describe("Relay v1 Message mapping", () => {
       + '"began_at":"2026-10-03T19:00:00.000Z","ends_at":null,"ended_at":null}');
     expect(deliver([{ type: "text", value: "meet here", reactions: null }, pin]).content)
       .toBe(`meet here\n\n${placeLine}`);
+  });
+
+  it("reads the sender from an older event that carries only sender_handle", () => {
+    const base = event();
+    const { from_handle: _current, ...rest } = base.data as Record<string, unknown>;
+    const action = classifyRelayEvent({
+      event: { ...base, data: { ...rest, sender_handle: sender } } as RelayWebhookEvent,
+      sequence: "7",
+      allowedSenders: parseAllowedSenders(USER_ID),
+      redactor,
+    });
+    if (action.kind !== "delivery") throw new Error(`expected a delivery, got ${action.kind}`);
+    expect(action.delivery.senderId).toBe(USER_ID);
+    expect(action.delivery.senderHandle).toBe("@owner");
+  });
+
+  it("ignores a Message the agent sent itself", () => {
+    const base = event();
+    const action = classifyRelayEvent({
+      event: { ...base, data: { ...base.data, is_from_me: true } } as RelayWebhookEvent,
+      sequence: "7",
+      allowedSenders: parseAllowedSenders(USER_ID),
+      redactor,
+    });
+    expect(action.kind).toBe("ignore");
   });
 
   it("gates sender identity before content interpretation", () => {

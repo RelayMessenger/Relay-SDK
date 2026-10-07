@@ -23179,7 +23179,11 @@ function classifyRelayEvent(params) {
   if (!isRecord3(event.data)) return { kind: "refuse", reason: "Message event data is not an object" };
   const data = event.data;
   const chat = isRecord3(data.chat) ? data.chat : null;
-  const sender = isRecord3(data.sender_handle) ? data.sender_handle : null;
+  if (data.is_from_me === true) {
+    return { kind: "ignore", reason: "message.received is this agent's own Message" };
+  }
+  const senderField = data.from_handle ?? data.sender_handle;
+  const sender = isRecord3(senderField) ? senderField : null;
   const chatId = typeof chat?.id === "string" ? chat.id : "";
   const messageId = typeof data.id === "string" ? data.id : "";
   const senderId = typeof sender?.id === "string" ? sender.id : "";
