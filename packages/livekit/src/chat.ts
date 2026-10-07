@@ -59,8 +59,9 @@ const optionalText = (value: unknown): string =>
 /**
  * Relay chat tools for a LiveKit Agents voice agent: text the person in the
  * Call's chat during the Call, with the same parts Relay's text agents send.
- * The keys are the model-visible tool names; pass the record as an Agent's
- * `tools`, alone or spread beside your own.
+ * Named function tools in the array form LiveKit's docs prefer
+ * (https://docs.livekit.io/agents/logic/tools/definition/); pass them as an
+ * Agent's `tools`, alone or spread beside your own.
  */
 export function relayChatTools(relay: RelayChatClient, chatId: string) {
   const send = async (parts: MessagePart[]): Promise<RelaySentResult> => {
@@ -68,8 +69,9 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
     return { status: "sent", message_id: response.message.id };
   };
 
-  return {
-    send_message: llm.tool({
+  return [
+    llm.tool({
+      name: "send_message",
       description: "Send a text message to the person in this Relay chat. Use it for anything they should keep "
         + "after the call: an address, a number, a list, a summary.",
       parameters: strict({ text: { type: "string", description: "The message text." } }, ["text"]),
@@ -80,7 +82,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    send_buttons: llm.tool({
+    llm.tool({
+      name: "send_buttons",
       description: BUTTONS_GUIDANCE,
       parameters: strict({
         text: { type: "string", description: "The question or step the buttons answer." },
@@ -100,7 +103,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    send_selection: llm.tool({
+    llm.tool({
+      name: "send_selection",
       description: SELECTION_GUIDANCE,
       parameters: strict({
         text: TEXT,
@@ -130,7 +134,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    send_place: llm.tool({
+    llm.tool({
+      name: "send_place",
       description: "Send a place as a map pin: a meeting point, a restaurant, an address you named. "
         + "The person can open it in their maps app.",
       parameters: strict({
@@ -156,7 +161,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    request_location: llm.tool({
+    llm.tool({
+      name: "request_location",
       description: "Ask the person in this one-to-one chat to share their location. Relay sends them a card "
         + "with a Share My Location button, and they choose how long to share. Then use read_location.",
       execute: async () => {
@@ -165,7 +171,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    read_location: llm.tool({
+    llm.tool({
+      name: "read_location",
       description: "Read where the person sharing their location with you in this chat is now: latitude, "
         + "longitude, and when that position arrived. Returns not_sharing when nobody is sharing.",
       execute: async (): Promise<RelayLocationReadResult> => {
@@ -183,7 +190,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       },
     }),
 
-    send_link: llm.tool({
+    llm.tool({
+      name: "send_link",
       description: "Send a web page as a link card with its title and image: an article, a listing, a product "
         + "page, a place's website. One link per message; never read a URL aloud instead.",
       parameters: strict({
@@ -195,7 +203,7 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
         return send([{ type: "link", value: url }]);
       },
     }),
-  };
+  ];
 }
 
 /** The words a Relay Message carries for the model, or undefined when it has none. */
@@ -228,7 +236,7 @@ export async function relayChatContext(
   limit = 20,
 ): Promise<llm.ChatContext> {
   const page = await relay.chats.messages.list(chatId, { order: "desc", limit });
-  const chatCtx = llm.ChatContext.empty();
+  const chatCtx = new llm.ChatContext();
   for (const message of [...page.data].reverse()) {
     if (message.is_system_message) continue;
     const content = messageContent(message);

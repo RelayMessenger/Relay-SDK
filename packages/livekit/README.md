@@ -57,12 +57,12 @@ the position that actually played.
 ## Text during a Call
 
 Every Call belongs to a chat (`call.chat_id`). `relayChatTools(relay, chatId)`
-gives the agent LiveKit `llm.tool`s that send to that chat while it talks, with
-the same parts Relay's text agents send: `send_message`, `send_buttons`,
-`send_selection`, `send_place`, `request_location`, `read_location` and
-`send_link`. Each tool checks its arguments with the SDK's own part builders,
-so a bad argument comes back to the model as an `llm.ToolError` instead of a
-400 from the API.
+returns an array of named LiveKit function tools (`llm.tool`) that send to that
+chat while the agent talks, with the same parts Relay's text agents send:
+`send_message`, `send_buttons`, `send_selection`, `send_place`,
+`request_location`, `read_location` and `send_link`. Each tool checks its
+arguments with the SDK's own part builders, so a bad argument comes back to
+the model as an `llm.ToolError` instead of a 400 from the API.
 
 `relayChatContext(relay, chatId, limit)` reads the chat's newest `limit`
 Messages (20 by default) into an `llm.ChatContext`, oldest first: the agent's
@@ -74,15 +74,15 @@ selection answer becomes data the model can read. Pass it as the Agent's
 import { voice } from "@livekit/agents";
 import { relayChatContext, relayChatTools } from "@relaymessenger/livekit";
 
-const agent = new voice.Agent({
+const agent = voice.Agent.create({
   instructions: "You are a concierge. Text the person anything they should keep.",
   chatCtx: await relayChatContext(relay, call.chat_id),
-  tools: relayChatTools(relay, call.chat_id),
+  tools: [...relayChatTools(relay, call.chat_id), ...yourTools],
 });
 ```
 
-To use only some of them, pick the keys you want:
-`const { send_message, send_place } = relayChatTools(relay, call.chat_id)`.
+To use only some of them, filter by name:
+`relayChatTools(relay, call.chat_id).filter((tool) => tool.name !== "request_location")`.
 
 ## Video
 
