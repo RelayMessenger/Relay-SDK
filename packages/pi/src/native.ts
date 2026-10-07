@@ -57,9 +57,11 @@ const attachSession = (pi: ExtensionAPI): void => {
   let channel: SessionChannel | undefined;
   let stop: AbortController | undefined;
   pi.on("session_start", async (_event, ctx) => {
-    // A print or JSON run ends with its prompt, and a pi-subagents helper is
-    // not the session the person talks to.
-    if (stop || (ctx.mode !== "rpc" && ctx.mode !== "tui") || process.env.PI_SUBAGENT_CHILD === "1") return;
+    // Only the RPC session an app drives: a terminal Pi on the same account
+    // would hold a second connection on the same token, a print or JSON run
+    // ends with its prompt, and a pi-subagents helper is not the session the
+    // person talks to.
+    if (stop || ctx.mode !== "rpc" || process.env.PI_SUBAGENT_CHILD === "1") return;
     const settings = await relaySettings();
     if (!sessionMode(settings)) return;
     const token = await agentToken(settings);

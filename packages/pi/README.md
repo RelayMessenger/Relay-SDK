@@ -37,8 +37,8 @@ that loads the extension instead, set `relay` in `~/.pi/agent/settings.json`:
 logged. `RELAY_SENDERS` (comma-separated) overrides `senders`; with neither,
 any one-to-one sender is taken. Group chats are skipped.
 
-The session starts on an interactive or RPC Pi, never a print run or a
-pi-subagents helper. Each Message becomes one user message
+The session starts only on a Pi in RPC mode (the session an app drives),
+never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes one user message
 (`pi.sendUserMessage`): photos as image content, voice notes as their
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
 files named. Messages wait their turn, and the session's last words go back
