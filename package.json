@@ -47,7 +47,8 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.0",
     "yaml": "^2.9.1",
-    "chat": "4.41.0"
+    "chat": "4.41.0",
+    "@modelcontextprotocol/client": "2.2.0"
   },
   "engines": {
     "node": ">=24.21.0"
@@ -70,6 +71,6 @@
   "overrides": {
     "undici@7.29.0": "7.29.1",
     "@modelcontextprotocol/sdk": "1.31.0",
-    "@modelcontextprotocol/client": "2.2.0"
+    "@modelcontextprotocol/client": "$@modelcontextprotocol/client"
   }
 }
