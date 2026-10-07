@@ -62,9 +62,12 @@ ElevenLabs sends `client_tool_call` over the conversation, the bridge runs the
 tool with the Relay SDK and answers `client_tool_result` (`is_error` when Relay
 refuses it).
 
-1. Add the tools to the ElevenLabs agent as client tools, with "Wait for
-   response" on. `relayClientTools` holds each one's name, description and
-   parameters; copy them into the agent's tools.
+1. Add the tools to the ElevenLabs agent as client tools. `relayClientTools`
+   holds each one's `tool_config` (name, description, parameters,
+   `expects_response: true`): create each with ElevenLabs'
+   [`POST /v1/convai/tools`](https://elevenlabs.io/docs/agents-platform/api-reference/tools/create)
+   and add the returned ids to the agent's `tool_ids`, or enter them in the
+   dashboard with "Wait for response" on.
 2. Pass `relayTools: true`. The bridge reads the Call's chat once, on the first
    tool call; pass `relayTools: { chatId }` if you already have it.
 

@@ -32,7 +32,11 @@ export interface ElevenLabsToolParameters {
   required: string[];
 }
 
-/** One client tool as the ElevenLabs agent's tool configuration takes it (`type: "client"`). */
+/**
+ * One client tool as ElevenLabs' Tools API takes it: the `tool_config` of
+ * `POST /v1/convai/tools` with `type: "client"`
+ * (https://elevenlabs.io/docs/agents-platform/api-reference/tools/create).
+ */
 export interface ElevenLabsClientTool {
   type: "client";
   name: RelayToolName;
@@ -60,9 +64,10 @@ const tool = (
 });
 
 /**
- * The seven Relay chat tools, in the shape the ElevenLabs agent's client tools
- * take. Add them to the agent (dashboard, or `conversation_config.agent.prompt.tools`)
- * with these exact names; `ElevenLabsCall` with `relayTools` answers them.
+ * The seven Relay chat tools as ElevenLabs client tools. Create each with
+ * `POST /v1/convai/tools` (`{ tool_config }`) and list the ids in the agent's
+ * `tool_ids`, or add them in the dashboard with these exact names (names are
+ * case-sensitive). `ElevenLabsCall` with `relayTools` answers them.
  */
 export const relayClientTools: readonly ElevenLabsClientTool[] = [
   tool(
