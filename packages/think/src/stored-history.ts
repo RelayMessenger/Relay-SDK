@@ -32,6 +32,21 @@ import type { LanguageModelMiddleware, UIMessage } from "ai";
  * `ChatOptions.metadata` → `metadata.turnMetadata`, which Think documents for
  * messenger entry points and restores on a recovered turn.
  *
+ * Where the facts come from, first match wins:
+ *
+ * 1. `relayMessage`: the `data` of the verified `message.received` webhook
+ *    (the Relay Message). Since @cloudflare/think 0.20 this is the only
+ *    source of `reply_to` and `thread`: Think hands the turn a serialized
+ *    messenger event that carries no raw platform payload (think
+ *    `messengerContextFromEvent` → `serializableMessengerEvent`, "raw platform
+ *    payloads ... are never stored").
+ * 2. `messenger.message.raw.message`: the same Message as the Relay Chat SDK
+ *    adapter's raw payload, which @cloudflare/think 0.19 still passed through.
+ * 3. The serialized messenger message itself (Think 0.20): its id, sent time,
+ *    author, and attachments, mapped back from the adapter's `parseMessage`
+ *    (author `isBot` is `kind === "agent"`; attachment `fetchMetadata.
+ *    attachmentId`, `name`, `mediaType`, `size`).
+ *
  * Everything else in the webhook is the messaging platform's delivery data
  * and is not kept: the Chat's owner Handle, avatars, delivery and read
  * times, idempotency key, A2UI client capabilities, and each attachment's
@@ -41,21 +56,33 @@ import type { LanguageModelMiddleware, UIMessage } from "ai";
  */
 export function relayTurnMetadata(
   messenger: unknown,
+  relayMessage?: unknown,
 ): Record<string, unknown> | undefined {
   const context = record(messenger);
   const message = record(context?.message);
   if (!message) return undefined;
-  const webhook = record(record(message.raw)?.message) ?? {};
+  const webhook = record(relayMessage) ??
+    record(record(message.raw)?.message) ?? {};
   const sender = record(webhook.sender_handle);
   const author = record(message.author) ?? {};
   const sentAt = webhook.sent_at ?? message.createdAt;
-  const attachments = (Array.isArray(webhook.parts) ? webhook.parts : [])
-    .map(record)
-    .filter((part) => part?.type === "media")
-    .map((part) => pick(part!, ["id", "filename", "mime_type", "size_bytes"]));
+  const attachments = Array.isArray(webhook.parts)
+    ? webhook.parts
+      .map(record)
+      .filter((part) => part?.type === "media")
+      .map((part) => pick(part!, ["id", "filename", "mime_type", "size_bytes"]))
+    : (Array.isArray(message.attachments) ? message.attachments : [])
+      .map(record)
+      .filter((attachment) => attachment !== undefined)
+      .map((attachment) => pick({
+        id: record(attachment!.fetchMetadata)?.attachmentId ?? attachment!.id,
+        filename: attachment!.name,
+        mime_type: attachment!.mediaType,
+        size_bytes: attachment!.size,
+      }, ["id", "filename", "mime_type", "size_bytes"]));
   return {
     message: {
-      id: message.id,
+      id: webhook.id ?? message.id,
       ...(sentAt === undefined
         ? {}
         : { sent_at: sentAt instanceof Date ? sentAt.toISOString() : sentAt }),
@@ -65,7 +92,10 @@ export function relayTurnMetadata(
           id: author.userId,
           handle: author.userName,
           display_name: author.fullName,
-        }, ["id", "handle", "display_name"]),
+          kind: typeof author.isBot === "boolean"
+            ? (author.isBot ? "agent" : "user")
+            : undefined,
+        }, ["id", "handle", "display_name", "kind"]),
       ...(record(webhook.reply_to)
         ? { reply_to: pick(record(webhook.reply_to)!, ["message_id", "part_index"]) }
         : {}),
