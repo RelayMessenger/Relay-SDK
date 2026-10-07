@@ -416,6 +416,9 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
       expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", ...extra }), JSON.stringify(checkReply.errors)).toBe(true);
     }
     expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", place: { latitude: 0 } })).toBe(false);
+    mcp.send({ jsonrpc: "2.0", id: 102, method: "tools/call", params: { name: "no_such_tool", arguments: {} } });
+    const unknown = await mcp.take(message => message.id === 102, "unknown tool");
+    expect((unknown as { error?: { code: number } }).error?.code).toBe(-32602);
     // The list the model sees is the schema the channel ships, list picker fields included.
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
       JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),

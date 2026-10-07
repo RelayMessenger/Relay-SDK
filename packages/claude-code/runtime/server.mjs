@@ -25235,6 +25235,9 @@ var TOOLS = {
   share_contact_card: (value) => channel.shareContactCard(value)
 };
 mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (!["begin_processing", "complete_processing", "reply"].includes(request.params.name) && !Object.hasOwn(TOOLS, request.params.name)) {
+    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
+  }
   try {
     if (request.params.name === "begin_processing") {
       return await channel.beginProcessing(request.params.arguments);
@@ -25245,12 +25248,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "reply") {
       return await channel.reply(request.params.arguments);
     }
-    const tool = Object.hasOwn(TOOLS, request.params.name) ? TOOLS[request.params.name] : void 0;
-    if (tool) return await tool(request.params.arguments);
-    return {
-      content: [{ type: "text", text: `unknown Relay channel tool ${request.params.name}` }],
-      isError: true
-    };
+    return await TOOLS[request.params.name](request.params.arguments);
   } catch (error2) {
     return {
       content: [{ type: "text", text: redactor.text(error2) }],

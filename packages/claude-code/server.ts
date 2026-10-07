@@ -4,7 +4,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
   ListToolsRequestSchema,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import Relay, {
   BUTTONS_GUIDANCE,
@@ -434,6 +436,10 @@ const TOOLS: Record<string, (argumentsValue: unknown) => Promise<unknown>> = {
 };
 
 mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+  // An unknown tool is a protocol error, not a tool result (MCP 2025-06-18, Tools, Error Handling).
+  if (!["begin_processing", "complete_processing", "reply"].includes(request.params.name) && !Object.hasOwn(TOOLS, request.params.name)) {
+    throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
+  }
   try {
     if (request.params.name === "begin_processing") {
       return await channel.beginProcessing(request.params.arguments);
@@ -444,12 +450,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "reply") {
       return await channel.reply(request.params.arguments);
     }
-    const tool = Object.hasOwn(TOOLS, request.params.name) ? TOOLS[request.params.name] : undefined;
-    if (tool) return await tool(request.params.arguments) as Awaited<ReturnType<typeof channel.reply>>;
-    return {
-      content: [{ type: "text" as const, text: `unknown Relay channel tool ${request.params.name}` }],
-      isError: true,
-    };
+    return await TOOLS[request.params.name]!(request.params.arguments) as Awaited<ReturnType<typeof channel.reply>>;
   } catch (error) {
     return {
       content: [{ type: "text" as const, text: redactor.text(error) }],
