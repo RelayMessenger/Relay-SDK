@@ -93,12 +93,19 @@ refused (`RelayReplyRefused`) and the model sends without one.
 
 ### End the turn
 
-Give Think `stopWhen: relayTurnSettled`: the turn ends once a Relay Action
-has done its one visible act, and goes on after a read or one of your own
-tools. When one of your own tools sends the person something, name it:
+The model decides how many Messages a turn sends: one, or several in a row,
+like a person texting. Each `send` call is its own Message, with its own
+idempotency key taken from Think's `toolCallId`, so a retry of the same call
+sends nothing new. Each Message gets its own composing pause.
+
+Give Think `stopWhen: relayTurnSettled`. The turn ends when the model calls no
+tool, calls `stay_silent`, or starts a call that rings; after a send, a
+reaction or a read the model goes on. Cap a runaway turn with
+`stepCountIs(RELAY_TURN_MAX_STEPS)`. To end the turn after one of your own
+tools, name it:
 
 ```ts
-stopWhen: createRelayTurnSettled({ visibleSends: ["send_video"] }),
+stopWhen: [createRelayTurnSettled({ visibleSends: ["hand_to_person"] }), stepCountIs(RELAY_TURN_MAX_STEPS)],
 ```
 
 ### Compose your own

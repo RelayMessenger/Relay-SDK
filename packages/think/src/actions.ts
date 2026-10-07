@@ -601,7 +601,7 @@ type SendResult = SentResult | VoiceTerminalResult;
 
 async function sendCardAction(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "rich_card" | "carousel" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -616,7 +616,7 @@ async function sendCardAction(
     const result = await relay.chats.messages.send(identity.chatId, {
       message: {
         parts: input.text ? [{ type: "text", value: input.text }, card] : [card],
-        idempotency_key: relayIdempotencyKey(identity.eventId),
+        idempotency_key: identity.sendKey,
       },
     }, requestOptions(signal));
     return { status: "sent", kind: input.kind, messageId: result.message.id };
@@ -632,6 +632,27 @@ const NO_ACTIVITY = { stop: async () => {} };
 
 function relayIdempotencyKey(eventId: string): string {
   return `relay-agent:${eventId}`;
+}
+
+/**
+ * A turn with the Relay idempotency key of one send call. A turn may send
+ * several Messages: each send call has its own key, the same on a retry of
+ * that call, so Relay sends a retried call's Message once.
+ */
+type KeyedTurn = RelayTurnIdentity & { sendKey: string };
+
+/**
+ * When the last Message of a turn went, so the next Message's composing pause
+ * counts from it, as a person types each text after sending the last. Keyed
+ * by Chat and turn; bounded, since only the running turns matter.
+ */
+const lastSends = new Map<string, number>();
+const LAST_SENDS_MAX = 512;
+
+function rememberSend(turnKey: string): void {
+  lastSends.delete(turnKey);
+  lastSends.set(turnKey, Date.now());
+  if (lastSends.size > LAST_SENDS_MAX) lastSends.delete(lastSends.keys().next().value!);
 }
 
 function requestOptions(signal?: AbortSignal): RequestOptions {
@@ -686,7 +707,7 @@ async function upload(
 
 async function sendText(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "text" }>,
   signal?: AbortSignal,
   timing?: (phase: RelayChatTimingPhase) => void,
@@ -709,7 +730,7 @@ async function sendText(
   const result = await relay.chats.messages.send(identity.chatId, {
     message: {
       parts,
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
       ...(input.reply && identity.replyTo
         ? { reply_to: { message_id: identity.replyTo.messageId, part_index: identity.replyTo.partIndex } }
         : {}),
@@ -727,7 +748,7 @@ async function sendText(
 async function sendPayment(
   relay: Relay,
   deps: RelayActionDependencies,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "payment" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -744,7 +765,7 @@ async function sendPayment(
       metadata: { [PAYMENT_CHAT_METADATA_KEY]: identity.chatId },
     }, {
       ...requestOptions(signal),
-      idempotencyKey: `${relayIdempotencyKey(identity.eventId)}:payment_request`,
+      idempotencyKey: `${identity.sendKey}:payment_request`,
     });
   } catch (error) {
     if (error instanceof RelayAPIError && error.status === 403) {
@@ -756,7 +777,7 @@ async function sendPayment(
   const result = await relay.chats.messages.send(identity.chatId, {
     message: {
       parts: [{ type: "payment", checkout_url: request.checkout_url }],
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
     },
   }, requestOptions(signal));
   return {
@@ -770,13 +791,13 @@ async function sendPayment(
 /** One Message of ready parts, under the turn's idempotency key. */
 async function sendParts(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   kind: SendInput["kind"],
   parts: MessagePart[],
   signal?: AbortSignal,
 ): Promise<SentResult> {
   const result = await relay.chats.messages.send(identity.chatId, {
-    message: { parts, idempotency_key: relayIdempotencyKey(identity.eventId) },
+    message: { parts, idempotency_key: identity.sendKey },
   }, requestOptions(signal));
   return { status: "sent", kind, messageId: result.message.id };
 }
@@ -784,7 +805,7 @@ async function sendParts(
 /** A place pin, alone or after the model's words; it goes at once, like a link. */
 async function sendPlace(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "place" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -800,21 +821,47 @@ async function sendPlace(
           ...(input.address ? { address: input.address } : {}),
         },
       ],
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
     },
   }, requestOptions(signal));
   return { status: "sent", kind: input.kind, messageId: result.message.id };
 }
 
+/**
+ * Sends one Message. `callKey` names this send call (Think's toolCallId): a
+ * second call in the same turn sends a second Message, and a retry of the same
+ * call sends nothing new. Without it, the turn has one send key.
+ */
 export async function executeRelaySend(
   deps: RelayActionDependencies,
   input: SendInput,
   signal?: AbortSignal,
+  callKey?: string,
 ): Promise<SendResult> {
-  const identity = deps.turn();
+  const turn = deps.turn();
+  const turnKey = `${turn.chatId}:${turn.eventId}`;
+  // The first Message's pause counts from the typing indicator; each later
+  // one from the Message before it.
+  const startedAt = lastSends.get(turnKey) ?? turn.composingSince ?? Date.now();
+  const result = await sendOnce(deps, turn, input, startedAt, signal, callKey);
+  rememberSend(turnKey);
+  return result;
+}
+
+async function sendOnce(
+  deps: RelayActionDependencies,
+  turn: RelayTurnIdentity,
+  input: SendInput,
+  startedAt: number,
+  signal?: AbortSignal,
+  callKey?: string,
+): Promise<SendResult> {
+  const identity: KeyedTurn = {
+    ...turn,
+    sendKey: relayIdempotencyKey(callKey === undefined ? turn.eventId : `${turn.eventId}:${callKey}`),
+  };
   deps.assertCurrentTurn(identity);
   const relay = createRelayClient(deps.env);
-  const startedAt = identity.composingSince ?? Date.now();
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
     // No words to type when the turn is only its buttons: the empty string
@@ -825,7 +872,7 @@ export async function executeRelaySend(
     return await sendText(relay, identity, input, signal, deps.timing);
   }
   if (input.kind === "link") {
-    const textKey = relayIdempotencyKey(identity.eventId);
+    const textKey = identity.sendKey;
     // A retried turn whose words already went sends only the link.
     if (input.text && !deps.sentParts?.has(textKey)) {
       await compose(input.text, identity.eventId, startedAt, signal);
@@ -844,8 +891,8 @@ export async function executeRelaySend(
       message: {
         parts: [{ type: "link", value: input.url }],
         idempotency_key: input.text
-          ? `${relayIdempotencyKey(identity.eventId)}:link`
-          : relayIdempotencyKey(identity.eventId),
+          ? `${identity.sendKey}:link`
+          : identity.sendKey,
       },
     }, requestOptions(signal));
     return { status: "sent", kind: input.kind, messageId: result.message.id };
@@ -929,7 +976,7 @@ export async function executeRelaySend(
       const result = await relay.chats.messages.send(identity.chatId, {
         message: {
           parts,
-          idempotency_key: relayIdempotencyKey(identity.eventId),
+          idempotency_key: identity.sendKey,
         },
       }, requestOptions(signal));
       return {
@@ -1062,61 +1109,42 @@ export type RelayActionName = (typeof RELAY_ACTION_NAMES)[number];
 /** Options for createRelayTurnSettled. */
 export interface RelayTurnSettledOptions {
   /**
-   * The agent's own tools that send the person something visible, such as its
-   * own send-a-video tool. Each ends the turn the way send does. Every other
-   * tool of the agent's own is a read whose result the model acts on.
+   * The agent's own tools that end the turn when called, such as a tool that
+   * hands the chat to a person. Every other tool, Relay's send included, lets
+   * the model go on and decide whether to send more.
    */
   visibleSends?: readonly string[];
 }
 
 /**
- * A turn is one visible act. It goes on to another step only while every tool
- * the model just called gave it something to act on: a location read, a
- * location request, a call or a payment Relay refused with a reason (to tell
- * the person, or not), or a card Relay refused (its reason, to fix and send
- * again). A tool that is not a Relay Action and not one of `visibleSends` is
- * the agent's own read, and its result is something to act on.
- * Everything else ends the turn; a ringing call is the turn's act.
+ * The model decides how many Messages a turn sends, as a person texting sends
+ * several in a row. The turn goes on after every send, reaction, read and tool,
+ * and ends when the model calls no tool, calls stay_silent, starts a ringing
+ * call, or calls one of `visibleSends`. RELAY_TURN_MAX_STEPS caps a runaway turn.
  */
 export function createRelayTurnSettled(options: RelayTurnSettledOptions = {}): StopCondition<ToolSet> {
   const visibleSends: ReadonlySet<string> = new Set(options.visibleSends ?? []);
   return ({ steps }) => {
     const step = steps.at(-1);
     if (!step || step.toolCalls.length === 0) return true;
-    return !step.toolCalls.every((call) => {
-      if (visibleSends.has(call.toolName)) return false;
-      if (!RELAY_ACTIONS.has(call.toolName)) return true;
-      // Reads give the model something to act on.
-      if (CONTINUING_ACTIONS.has(call.toolName)) return true;
-      const result = step.toolResults.find(({ toolCallId }) =>
-        toolCallId === call.toolCallId
-      );
-      if (call.toolName === "send") {
-        const refused = (result?.output as { error?: { name?: unknown } } | undefined)?.error?.name;
-        return refused === "RelayCardRefused" || refused === "RelayPaymentRefused" || refused === "RelayReplyRefused";
-      }
-      const status = (result?.output as { status?: unknown } | undefined)?.status;
-      if (call.toolName === "start_call") return status === "not_called";
-      if (call.toolName === "group" || call.toolName === "share_contact_card") return status === "not_done";
-      if (call.toolName !== "request_location") return false;
-      return status === "not_requested";
+    return step.toolCalls.some((call) => {
+      if (visibleSends.has(call.toolName) || call.toolName === "stay_silent") return true;
+      if (call.toolName !== "start_call") return false;
+      const result = step.toolResults.find(({ toolCallId }) => toolCallId === call.toolCallId);
+      return (result?.output as { status?: unknown } | undefined)?.status === "ringing";
     });
   };
 }
 
-/** createRelayTurnSettled with no tools of the agent's own that send. */
+/** createRelayTurnSettled with no tools of the agent's own that end the turn. */
 export const relayTurnSettled: StopCondition<ToolSet> = createRelayTurnSettled();
 
-const RELAY_ACTIONS: ReadonlySet<string> = new Set(RELAY_ACTION_NAMES);
-
-/** Actions whose result the model reads and acts on in the same turn. */
-const CONTINUING_ACTIONS: ReadonlySet<string> = new Set([
-  "read_location",
-  "find_agents",
-  "payment_request",
-]);
-
 export const RELAY_TURN_MAX_STEPS = 24;
+
+/** An Action ledger key for one call: the turn's, plus the call's id when Think gives one. */
+function callIdempotencyKey(prefix: string, eventId: string, toolCallId: string | undefined): string {
+  return toolCallId ? `${prefix}:${eventId}:${toolCallId}` : `${prefix}:${eventId}`;
+}
 
 /** Calls start now; scheduling a call later is the agent's own tool. */
 const START_CALL_NOW_ONLY =
@@ -1236,7 +1264,9 @@ export function createRelayActions(
   return {
     send: action({
       description: describe("send",
-        "Send one Relay Message. Use text for a normal Message"
+        "Send one Relay Message. Call send again to send another: like a person texting, you may send several "
+        + "short Messages in a row, one thought each, or just one. Your turn ends when you stop calling tools. "
+        + "Use text for a normal Message"
         + (deps.media?.image ? ", image to generate and send one image or meme" : "")
         + (deps.media?.voiceMemo ? ", voice_memo to speak a real voice memo with an optional delivery style" : "")
         + ". Choose the content and wording yourself. Text is plain chat text, not Markdown. "
@@ -1253,7 +1283,9 @@ export function createRelayActions(
         + "with no other field, to ask the person to rate you. "
         + RATING_REQUEST_GUIDANCE),
       inputSchema: relaySendInputSchema(sendKinds),
-      idempotencyKey: () => `message:${deps.turn().eventId}`,
+      // One key per send call (Think's toolCallId), so a turn sends as many
+      // Messages as the model calls send, and a retried call replays its result.
+      idempotencyKey: ({ ctx }) => callIdempotencyKey("message", deps.turn().eventId, ctx.toolCallId),
       // Think 0.17 creates a framework timeout only when timeoutMs > 0.
       // Pre-dispatch generation/upload still obeys the turn signal and its own
       // bounded request timeouts. The irreversible voice call must not lose its
@@ -1268,6 +1300,7 @@ export function createRelayActions(
               ? { ...input, text: withoutSearchMarkers(input.text) }
               : input,
             deps.signal(context.signal),
+            context.toolCallId,
           ),
         ),
     }),
@@ -1277,7 +1310,7 @@ export function createRelayActions(
         + "After a person's reaction, the current Message is the one they "
         + "reacted to."),
       inputSchema: reactionInputSchema,
-      idempotencyKey: () => `message:${deps.turn().eventId}`,
+      idempotencyKey: ({ ctx }) => callIdempotencyKey("reaction", deps.turn().eventId, ctx.toolCallId),
       execute: (input, context) =>
         deps.runChosenAction(
           "react",

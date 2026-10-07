@@ -28,7 +28,7 @@ interface Wired {
     timeoutMs?: number;
     idempotencyKey?: (args: { input: unknown; ctx: unknown }) => string;
     inputSchema: { parse(value: unknown): unknown };
-    execute(input: unknown, context: { signal?: AbortSignal }): Promise<unknown>;
+    execute(input: unknown, context: { signal?: AbortSignal; toolCallId?: string }): Promise<unknown>;
   };
 }
 
@@ -179,11 +179,12 @@ describe("relayActions", () => {
     const actions = relayActions(agent(), OPTIONS);
     const keys = Object.fromEntries(Object.entries(actions).map(([name, wired]) => {
       const key = (wired as unknown as Wired).config.idempotencyKey;
-      return [name, key ? key({ input: {}, ctx: {} }) : null];
+      return [name, key ? key({ input: {}, ctx: { toolCallId: "call-1" } }) : null];
     }));
     expect(keys).toEqual({
-      send: `message:${MESSAGE_ID}`,
-      react: `message:${MESSAGE_ID}`,
+      // One ledger row per send or react call, so a turn may make several.
+      send: `message:${MESSAGE_ID}:call-1`,
+      react: `reaction:${MESSAGE_ID}:call-1`,
       stay_silent: `message:${MESSAGE_ID}`,
       request_location: `location_request:${MESSAGE_ID}`,
       start_call: `call:${MESSAGE_ID}`,
@@ -196,6 +197,24 @@ describe("relayActions", () => {
     // Think 0.17 starts a framework timeout only when timeoutMs > 0; the voice
     // memo's send must never lose its ledger row to one.
     expect((actions.send as unknown as Wired).config.timeoutMs).toBe(0);
+  });
+
+  it("sends as many Messages as the model calls send, each under its own key; a retried call keeps its key", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, compose: async () => {} }).send as unknown as Wired;
+    const ledgerKey = (toolCallId: string) => wired.config.idempotencyKey!({ input: {}, ctx: { toolCallId } });
+    await wired.config.execute({ kind: "text", text: "on my way" }, { toolCallId: "call-1" });
+    await wired.config.execute({ kind: "text", text: "10 min" }, { toolCallId: "call-2" });
+    // Think retries a call under its toolCallId; Relay's key repeats with it.
+    await wired.config.execute({ kind: "text", text: "on my way" }, { toolCallId: "call-1" });
+    const keys = calls.map((call) => JSON.parse(call.body!).message.idempotency_key);
+    expect(keys).toEqual([
+      `relay-agent:${MESSAGE_ID}:call-1`,
+      `relay-agent:${MESSAGE_ID}:call-2`,
+      `relay-agent:${MESSAGE_ID}:call-1`,
+    ]);
+    expect(ledgerKey("call-1")).toBe(ledgerKey("call-1"));
+    expect(ledgerKey("call-1")).not.toBe(ledgerKey("call-2"));
   });
 
   it("removes Google Search citation markers from send's words when the agent searches", async () => {
@@ -279,5 +298,22 @@ describe("createRelayTurnSettled", () => {
     expect(settled(step("send_video"))).toBe(true);
     expect(settled(step("lookup_order"))).toBe(false);
     expect(relayTurnSettled(step("send_video"))).toBe(false);
+  });
+
+  it("goes on after a send or reaction, and ends on no tool, stay_silent, or a ringing call", () => {
+    const called = (toolName: string, output?: unknown) => ({
+      steps: [{
+        toolCalls: [{ toolName, toolCallId: "1" }],
+        toolResults: output === undefined ? [] : [{ toolCallId: "1", toolName, output }],
+      }] as unknown as StepResult<ToolSet>[],
+    });
+    expect(relayTurnSettled(called("send", { status: "sent", kind: "text" }))).toBe(false);
+    expect(relayTurnSettled(called("react", { status: "reacted", type: "love" }))).toBe(false);
+    expect(relayTurnSettled(called("stay_silent", { status: "silent" }))).toBe(true);
+    expect(relayTurnSettled(called("start_call", { status: "ringing", call_id: "c" }))).toBe(true);
+    expect(relayTurnSettled(called("start_call", { status: "not_called", reason: "busy" }))).toBe(false);
+    expect(relayTurnSettled({
+      steps: [{ toolCalls: [], toolResults: [] }] as unknown as StepResult<ToolSet>[],
+    })).toBe(true);
   });
 });
