@@ -511,3 +511,20 @@ it("sends only the rating request with its original idempotency key and refuses 
   expect(() => buildReplyMessages("words", "rating-key", undefined, undefined, undefined, undefined, undefined, undefined,
     { type: "rating_request" })).toThrow(/whole Message/);
 });
+
+it("forwards a shared contact card as a contact_card tag of data", () => {
+  const input = event("");
+  if (input.event_type !== "message.received") throw new Error("fixture");
+  input.data.parts = [{ type: "system", value: "Owner shared a contact", reactions: null }];
+  const card = { handle: "@chef", first_name: "Chef", last_name: null, image_url: null, is_active: true, kind: "agent" };
+  (input.data as unknown as Record<string, unknown>).system_event = {
+    type: "contact_card_shared", actor: { handle: "@owner" }, subject: null, value: null,
+    icon_attachment_id: null, contact_card: card, call: null,
+  };
+  const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(USER_ID), redactor: createRedactor("secret") });
+  if (action.kind !== "delivery") throw new Error("not delivered");
+  expect(JSON.parse(action.delivery.meta.contact_card!)).toEqual({ shared_by: "@owner", card });
+  const plain = classifyRelayEvent({ event: event("hi"), sequence: "2", allowedSenders: parseAllowedSenders(USER_ID), redactor: createRedactor("secret") });
+  if (plain.kind !== "delivery") throw new Error("not delivered");
+  expect(plain.delivery.meta.contact_card).toBeUndefined();
+});

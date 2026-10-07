@@ -402,6 +402,20 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     } };
     expect(checkReply(formArgs), JSON.stringify(checkReply.errors)).toBe(true);
     expect(checkReply({ ...formArgs, form: { ...formArgs.form, expires_at: "soon" } })).toBe(false);
+    expect(tools.map(tool => tool.name)).toEqual([
+      "begin_processing", "complete_processing", "reply",
+      "typing", "react", "request_location", "read_location", "share_contact_card",
+    ]);
+    const card = { title: "Room A", suggestions: [{ type: "reply", label: "Book", id: "book-a" }] };
+    for (const extra of [
+      { media: [{ path: "/tmp/menu.png" }, { url: "https://cdn.example.com/a.jpg" }] },
+      { place: { latitude: 42.28, longitude: -83.74, name: "Diag" } },
+      { rich_card: card },
+      { carousel: { card_width: "small", cards: [card, { description: "Room B" }] } },
+    ]) {
+      expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", ...extra }), JSON.stringify(checkReply.errors)).toBe(true);
+    }
+    expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", place: { latitude: 0 } })).toBe(false);
     // The list the model sees is the schema the channel ships, list picker fields included.
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
       JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),
