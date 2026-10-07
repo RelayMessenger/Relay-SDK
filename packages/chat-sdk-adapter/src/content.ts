@@ -149,6 +149,35 @@ export const RELAY_SUGGESTION_ID_MAX_LENGTH = 256;
 export const RELAY_CAROUSEL_MIN_CARDS = 2;
 export const RELAY_CAROUSEL_MAX_CARDS = 10;
 
+/**
+ * The reply id a Chat SDK Button travels as, in the codec the official
+ * WhatsApp and Telegram adapters use (`chat:` + `{"a": id, "v": value}`), so
+ * a tap comes back as the Button's `actionId` and `value` and reaches
+ * `chat.onAction`, as https://chat-sdk.dev/docs/actions documents.
+ */
+export const RELAY_ACTION_ID_PREFIX = "chat:";
+
+export function encodeRelayActionId(actionId: string, value?: string): string {
+  return `${RELAY_ACTION_ID_PREFIX}${JSON.stringify(value === undefined ? { a: actionId } : { a: actionId, v: value })}`;
+}
+
+/**
+ * The Button behind a reply id, or undefined for an id this adapter did not
+ * encode: a native Relay card's reply, which stays an ordinary message.
+ */
+export function decodeRelayActionId(
+  id: string,
+): { actionId: string; value?: string } | undefined {
+  if (!id.startsWith(RELAY_ACTION_ID_PREFIX)) return undefined;
+  try {
+    const decoded = JSON.parse(id.slice(RELAY_ACTION_ID_PREFIX.length)) as { a?: unknown; v?: unknown };
+    if (typeof decoded.a !== "string" || !decoded.a) return undefined;
+    return typeof decoded.v === "string" ? { actionId: decoded.a, value: decoded.v } : { actionId: decoded.a };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Relay counts card limits in Unicode code points, not UTF-16 units. */
 const codePoints = (value: string): number => [...value].length;
 
@@ -157,8 +186,9 @@ const codePoints = (value: string): number => [...value].length;
  *
  * The header image (or one Image child) becomes the card's picture, the title
  * its title, and the subtitle with every Text, Fields, Link and Section child
- * its description, as plain text. A Button becomes a reply suggestion whose
- * `id` is the Button's id, and a LinkButton an `open_url` suggestion. What a
+ * its description, as plain text. A Button becomes a reply suggestion carrying
+ * its id and value (`encodeRelayActionId`), and a LinkButton an `open_url`
+ * suggestion. What a
  * Relay card cannot draw (a select, a table, a chart, a second image, more
  * than four buttons, a label over 25 characters) leaves the card as text.
  */
@@ -194,7 +224,7 @@ function cardContent(card: CardElement): RelayCardContent | string {
           for (const action of child.children) {
             if (action.type === "button") {
               if (action.disabled || action.actionType === "modal") return `button ${action.id} is ${action.disabled ? "disabled" : "a modal button"}`;
-              suggestions.push({ type: "reply", label: action.label, id: action.id });
+              suggestions.push({ type: "reply", label: action.label, id: encodeRelayActionId(action.id, action.value) });
             } else if (action.type === "link-button") {
               suggestions.push({ type: "open_url", label: action.label, url: action.url });
             } else {
@@ -254,6 +284,7 @@ export function toRelayRichCard(card: CardElement): RelayRichCardPart | undefine
   if (typeof content === "string" || replyIds([content])) return undefined;
   return { type: "rich_card", ...content };
 }
+
 
 /**
  * A Relay `carousel` part from 2 to 10 Chat SDK Cards, swiped sideways.

@@ -40,6 +40,9 @@ export {
   RELAY_MAX_TEXT_PART_LENGTH,
   RELAY_SUGGESTION_ID_MAX_LENGTH,
   RELAY_SUGGESTION_LABEL_MAX_LENGTH,
+  decodeRelayActionId,
+  encodeRelayActionId,
+  RELAY_ACTION_ID_PREFIX,
   toRelayCarousel,
   toRelayRichCard,
 } from "./content.js";
