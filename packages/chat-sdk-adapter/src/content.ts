@@ -250,8 +250,14 @@ function cardContent(card: CardElement): RelayCardContent | string {
   for (const suggestion of suggestions) {
     const label = codePoints(suggestion.label);
     if (label < 1 || label > RELAY_SUGGESTION_LABEL_MAX_LENGTH) return `button label ${JSON.stringify(suggestion.label)}`;
-    if (suggestion.type === "reply" && (suggestion.id.length < 1 || codePoints(suggestion.id) > RELAY_SUGGESTION_ID_MAX_LENGTH)) {
-      return `button id ${JSON.stringify(suggestion.id)}`;
+    // The adapter guide (https://chat-sdk.dev/docs/contributing/building):
+    // an encoded action over the platform's limit throws, never truncates.
+    if (suggestion.type === "reply" && codePoints(suggestion.id) > RELAY_SUGGESTION_ID_MAX_LENGTH) {
+      throw new ValidationError(
+        "relay",
+        `Button ${JSON.stringify(decodeRelayActionId(suggestion.id)?.actionId ?? suggestion.id)} with its value is over Relay's `
+          + `${RELAY_SUGGESTION_ID_MAX_LENGTH}-character reply id limit; shorten the id or value`,
+      );
     }
   }
   if (!images[0] && !title && !description) return "no picture, title or text";

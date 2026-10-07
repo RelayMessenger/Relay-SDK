@@ -69,7 +69,8 @@ A tap on a `Button` reaches `chat.onAction` with the Button's `id` as
 card, as the Chat SDK actions guide documents. It does not reach message
 handlers, the same as the official WhatsApp adapter's reply buttons. The
 Button travels as a Relay reply id in the codec the WhatsApp and Telegram
-adapters use (`chat:{"a":"<id>","v":"<value>"}`, at most 256 characters).
+adapters use (`chat:{"a":"<id>","v":"<value>"}`); one over Relay's 256-character
+limit throws `ValidationError`, as the adapter guide requires.
 
 ```ts
 chat.onAction("confirm", async (event) => {

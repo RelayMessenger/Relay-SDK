@@ -88,6 +88,8 @@ describe("Chat SDK Cards as Relay cards", () => {
     expect(toRelayRichCard(Card({ title: "Label", children: [Actions([Button({ id: "x", label: "x".repeat(26) })])] }))).toBeUndefined();
     expect(toRelayRichCard(Card({ imageUrl: "https://a.example/1.png", children: [Image({ url: "https://a.example/2.png" })] }))).toBeUndefined();
     expect(toRelayRichCard(Card({ imageUrl: "http://a.example/1.png" }))).toBeUndefined();
+    expect(() => toRelayRichCard(Card({ title: "Long", children: [Actions([Button({ id: "x", label: "Go", value: "v".repeat(250) })])] })))
+      .toThrow(ValidationError);
     expect(toRelayRichCard(Card({ title: "Twice", children: [Actions([Button({ id: "x", label: "A" }), Button({ id: "x", label: "B" })])] }))).toBeUndefined();
   });
 
