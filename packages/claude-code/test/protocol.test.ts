@@ -55,7 +55,8 @@ function inboundEvent(
       id: messageId,
       idempotency_key: null,
       direction: "inbound",
-      sender_handle: {
+      is_from_me: false,
+      from_handle: {
         id: USER_ID,
         handle: "@owner",
         kind: sender.kind,
@@ -117,7 +118,7 @@ async function startRelayMock(params: {
           id: CHAT_ID,
           display_name: null,
           group_chat_icon: null,
-          handles: [inboundEvent().data.sender_handle],
+          handles: [inboundEvent().data.from_handle],
           is_group: false,
           created_at: "2026-09-01T00:00:00.000Z",
           updated_at: "2026-09-01T00:00:01.000Z",
@@ -136,8 +137,8 @@ async function startRelayMock(params: {
         messages: [{
           id: data.id,
           chat_id: CHAT_ID,
-          from: data.sender_handle.handle,
-          from_handle: data.sender_handle,
+          from: data.from_handle.handle,
+          from_handle: data.from_handle,
           parts: params.fullSyncSelection ? [
             { type: "text", value: "• Research", reactions: null },
             { type: "selection_response", selected_values: ["research"] },
