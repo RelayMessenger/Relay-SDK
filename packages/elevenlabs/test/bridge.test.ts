@@ -3,7 +3,7 @@ import { Decoder } from "@evan/opus";
 import type { MediaStreamTrack, RtpPacket } from "werift";
 import type { CallRoom, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
 import { VISEMES, createWeriftWebRTCFactory, type RelayAudioSourceLike, type RelayPeerConnectionLike, type RelayWebRTCFactory } from "@relaymessenger/sdk/calls";
-import { ElevenLabsCall, getSignedUrl, type ElevenLabsSocket } from "../src/index.js";
+import { ElevenLabsCall, getSignedUrl, type ElevenLabsCallOptions, type ElevenLabsSocket } from "../src/index.js";
 
 /** Call room stand-in: records frames, answers the publish offer, emits what tests push. */
 class FakeRoom {
@@ -157,7 +157,7 @@ const personReceives = (room: FakeRoom): void => room.emit("roomState", {
   ],
 });
 
-const start = async (options: { rive?: false } = {}, source?: RelayAudioSourceLike, subscribed = true) => {
+const start = async (options: Partial<ElevenLabsCallOptions> = {}, source?: RelayAudioSourceLike, subscribed = true) => {
   const room = new FakeRoom();
   const webRTC = new FakeWebRTC(source);
   const connecting = ElevenLabsCall.connect({
@@ -631,4 +631,89 @@ it("plays the agent's last words out before ending the call when ElevenLabs clos
   await call.closed;
   expect(source.written.reduce((n, w) => n + w.samples.length, 0)).toBe(1_600);
   expect(room.sent.at(-1)).toEqual({ type: "end" });
+});
+
+/** A Relay client stand-in: records chat sends; the Call belongs to chat_from_call. */
+const fakeRelay = () => {
+  const sends: Array<{ chatId: string; body: unknown }> = [];
+  const relay = {
+    calls: { retrieve: vi.fn(async () => ({ call: { chat_id: "chat_from_call" } })) },
+    chats: {
+      messages: {
+        send: vi.fn(async (chatId: string, body: unknown) => {
+          sends.push({ chatId, body });
+          return { chat_id: chatId, message: { id: `msg_${sends.length}` } };
+        }),
+      },
+      location: {
+        request: vi.fn(async () => { throw new Error("409: the person is already sharing"); }),
+      },
+    },
+  };
+  return { relay: relay as unknown as Relay, sends, raw: relay };
+};
+
+const toolCall = (name: string, parameters: Record<string, unknown>, id = "tc_1", expects_response = true) => ({
+  type: "client_tool_call",
+  client_tool_call: { tool_name: name, tool_call_id: id, parameters, event_id: 3, expects_response },
+});
+
+it("answers a Relay client tool in the Call's chat with client_tool_result", async () => {
+  const { relay, sends, raw } = fakeRelay();
+  const events: string[] = [];
+  const { call, socket } = await start({ relay, relayTools: true, onEvent: (event) => events.push(event.type) });
+  socket.server(toolCall("send_buttons", { text: "Which day?", buttons: [{ label: "Friday" }, { label: "Saturday" }] }));
+  await flush();
+  expect(raw.calls.retrieve).toHaveBeenCalledWith("01995bc0-0000-7000-8000-000000000001");
+  expect(sends).toEqual([{
+    chatId: "chat_from_call",
+    body: { message: { parts: [
+      { type: "text", value: "Which day?" },
+      { type: "buttons", items: [{ label: "Friday" }, { label: "Saturday" }] },
+    ] } },
+  }]);
+  expect(socket.sent.at(-1)).toEqual({
+    type: "client_tool_result", tool_call_id: "tc_1", result: JSON.stringify({ sent: true, message_id: "msg_1" }), is_error: false,
+  });
+  expect(events).toContain("client_tool_call");
+  call.close();
+});
+
+it("answers is_error when Relay refuses, and uses a given chatId without a lookup", async () => {
+  const { relay, raw } = fakeRelay();
+  const { call, socket } = await start({ relay, relayTools: { chatId: "chat_given" } });
+  socket.server(toolCall("request_location", {}, "tc_9"));
+  await flush();
+  expect(raw.calls.retrieve).not.toHaveBeenCalled();
+  expect(raw.chats.location.request).toHaveBeenCalledWith("chat_given");
+  expect(socket.sent.at(-1)).toEqual({
+    type: "client_tool_result", tool_call_id: "tc_9", result: "409: the person is already sharing", is_error: true,
+  });
+  call.close();
+});
+
+it("leaves unknown client tools, and every tool without relayTools, to onEvent", async () => {
+  for (const options of [{ relayTools: true as const, name: "book_table" }, { name: "send_message" }]) {
+    const { relay, raw } = fakeRelay();
+    const events: string[] = [];
+    const { call, socket } = await start({ relay, ...(options.relayTools ? { relayTools: true } : {}), onEvent: (event) => events.push(event.type) });
+    const before = socket.sent.length;
+    socket.server(toolCall(options.name, { text: "hi" }));
+    await flush();
+    expect(raw.chats.messages.send).not.toHaveBeenCalled();
+    expect(socket.sent.slice(before).some((message) => message.type === "client_tool_result")).toBe(false);
+    expect(events.filter((type) => type === "client_tool_call")).toHaveLength(1);
+    call.close();
+  }
+});
+
+it("runs a tool but sends no result when expects_response is false", async () => {
+  const { relay, sends } = fakeRelay();
+  const { call, socket } = await start({ relay, relayTools: true });
+  const before = socket.sent.length;
+  socket.server(toolCall("send_message", { text: "On my way" }, "tc_2", false));
+  await flush();
+  expect(sends).toHaveLength(1);
+  expect(socket.sent.slice(before).some((message) => message.type === "client_tool_result")).toBe(false);
+  call.close();
 });

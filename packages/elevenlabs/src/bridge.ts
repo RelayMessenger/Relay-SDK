@@ -10,6 +10,7 @@ import {
   type RelayRive,
   type RelayWebRTCFactory,
 } from "@relaymessenger/sdk/calls";
+import { isRelayToolName, runRelayTool } from "./tools.js";
 
 /** ElevenLabs' API origin; the Agents WebSocket lives under the same host as `wss://`. */
 export const ELEVENLABS_API = "https://api.elevenlabs.io";
@@ -97,6 +98,13 @@ export interface ElevenLabsCallOptions {
   inputSampleRate?: 8_000 | 16_000 | 24_000 | 48_000;
   /** Drive the agent's Rive file from the audio's alignment. Default on; false turns it off. */
   rive?: ElevenLabsRiveOptions | false;
+  /**
+   * Answer the agent's Relay client tools (`relayClientTools`: send_message,
+   * send_buttons, send_selection, send_place, request_location, read_location,
+   * send_link) in the Call's chat. `chatId` skips looking the chat up from the
+   * Call. Other client tools still reach only `onEvent`.
+   */
+  relayTools?: true | { chatId?: string };
   /** Every ElevenLabs server event, after the bridge handled it (transcripts, agent responses, tool calls). */
   onEvent?: (event: ElevenLabsEvent) => void;
   onWarning?: (message: string) => void;
@@ -192,6 +200,7 @@ export class ElevenLabsCall {
   readonly #startupAudio: RelayAudioFrame[] = [];
   #startupAudioMs = 0;
   #failStart: ((error: Error) => void) | undefined;
+  #chatId: Promise<string> | undefined;
   readonly #onAudio = (frame: RelayAudioFrame): void => this.#sendAudio(frame);
   readonly #onEnded = (): void => this.#stop(new Error("The Relay Call ended before the ElevenLabs session started."), false);
   readonly #onClose = (): void => this.#stop(new Error("The Relay Call room closed before the ElevenLabs session started."), false);
@@ -359,6 +368,9 @@ export class ElevenLabsCall {
         this.#interrupt();
         break;
       }
+      case "client_tool_call":
+        this.#runTool(message.client_tool_call as ClientToolCall | undefined);
+        break;
       case "ping": {
         const ping = message.ping_event as { event_id?: unknown } | undefined;
         this.#send({ type: "pong", event_id: ping?.event_id });
@@ -370,6 +382,35 @@ export class ElevenLabsCall {
     try {
       this.#options.onEvent?.(message);
     } catch { /* the application owns its listener */ }
+  }
+
+  /** A Relay tool the agent called: run it in the Call's chat and answer with `client_tool_result`. */
+  #runTool(call: ClientToolCall | undefined): void {
+    const tools = this.#options.relayTools;
+    if (!tools || !call || !isRelayToolName(call.tool_name) || typeof call.tool_call_id !== "string") return;
+    const id = call.tool_call_id;
+    const name = call.tool_name;
+    const args = call.parameters !== null && typeof call.parameters === "object" && !Array.isArray(call.parameters)
+      ? call.parameters as Record<string, unknown>
+      : {};
+    const reply = call.expects_response !== false;
+    void (async () => {
+      try {
+        const result = await runRelayTool(this.#options.relay, await this.#chat(tools), name, args);
+        if (reply) this.#send({ type: "client_tool_result", tool_call_id: id, result, is_error: false });
+      } catch (error) {
+        this.#options.onWarning?.(`Relay tool ${name} failed: ${(error as Error).message}`);
+        if (reply) this.#send({ type: "client_tool_result", tool_call_id: id, result: (error as Error).message, is_error: true });
+      }
+    })();
+  }
+
+  #chat(tools: true | { chatId?: string }): Promise<string> {
+    if (tools !== true && tools.chatId) return Promise.resolve(tools.chatId);
+    this.#chatId ??= this.#options.relay.calls.retrieve(this.#options.callId).then((response) => response.call.chat_id);
+    // A failed lookup is retried on the next tool call.
+    this.#chatId.catch(() => { this.#chatId = undefined; });
+    return this.#chatId;
   }
 
   /** The caller talked over the agent: drop what has not played (bridge.mts `source.clearQueue()`) and every change not yet sent. */
@@ -602,6 +643,13 @@ export class ElevenLabsCall {
     this.transport.close();
     this.#resolveClosed();
   }
+}
+
+interface ClientToolCall {
+  tool_name?: unknown;
+  tool_call_id?: unknown;
+  parameters?: unknown;
+  expects_response?: unknown;
 }
 
 interface AudioEvent {
