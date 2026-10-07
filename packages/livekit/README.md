@@ -62,7 +62,11 @@ chat while the agent talks, with the same parts Relay's text agents send:
 `send_message`, `send_buttons`, `send_selection`, `send_place`,
 `request_location`, `read_location` and `send_link`. Each tool checks its
 arguments with the SDK's own part builders, so a bad argument comes back to
-the model as an `llm.ToolError` instead of a 400 from the API.
+the model as an `llm.ToolError` instead of a 400 from the API. A sent message
+cannot be taken back, so every tool except `read_location` calls
+`ctx.disallowInterruptions()` first, and the person's speech does not cut it
+off. `send_message` takes an optional `reply_to_message_id` to answer a given
+message in the chat.
 
 `relayChatContext(relay, chatId, limit)` reads the chat's newest `limit`
 Messages (20 by default) into an `llm.ChatContext`, oldest first: the agent's

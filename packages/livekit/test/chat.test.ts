@@ -21,7 +21,10 @@ const fakeRelay = (messages: Message[] = [], features: unknown[] = []) => {
 };
 
 type ChatTool = ReturnType<typeof relayChatTools>[number];
-const opts = {} as Parameters<ChatTool["execute"]>[1];
+type ToolOptions = Parameters<ChatTool["execute"]>[1];
+/** The tool options LiveKit passes to `execute`, with a RunContext that records interruption locks. */
+const opts = (disallowInterruptions = vi.fn()): ToolOptions =>
+  ({ ctx: { disallowInterruptions } }) as unknown as ToolOptions;
 
 /** The tool the model calls by `name`, as LiveKit's ToolContext resolves it. */
 const tool = (relay: RelayChatClient, name: string): ChatTool => {
@@ -51,9 +54,51 @@ describe("relayChatTools", () => {
 
   it("send_message sends one text part", async () => {
     const { relay, send } = fakeRelay();
-    const result = await tool(relay, "send_message").execute({ text: "Gate 22" }, opts);
+    const result = await tool(relay, "send_message").execute({ text: "Gate 22" }, opts());
     expect(result).toEqual({ status: "sent", message_id: "msg-1" });
     expect(sentParts(send)).toEqual([{ type: "text", value: "Gate 22" }]);
+    expect(send.mock.calls[0]![1].message).not.toHaveProperty("reply_to");
+  });
+
+  it("send_message replies to reply_to_message_id", async () => {
+    const { relay, send } = fakeRelay();
+    await tool(relay, "send_message").execute({ text: "Yes", reply_to_message_id: "msg-0" }, opts());
+    expect(send.mock.calls[0]![1].message).toEqual({
+      parts: [{ type: "text", value: "Yes" }],
+      reply_to: { message_id: "msg-0" },
+    });
+  });
+
+  it("every tool that writes to the chat disallows interruptions first; read_location does not", async () => {
+    const { relay } = fakeRelay();
+    const calls: Record<string, Record<string, unknown>> = {
+      send_message: { text: "Hi" },
+      send_buttons: { text: "Ok?", buttons: [{ label: "Yes" }] },
+      send_selection: { title: "Pick", options: [{ id: "a", label: "A" }] },
+      send_place: { latitude: 1, longitude: 2 },
+      request_location: {},
+      send_link: { url: "https://example.com" },
+      read_location: {},
+    };
+    const locked: string[] = [];
+    for (const [name, args] of Object.entries(calls)) {
+      const disallow = vi.fn();
+      await tool(relay, name).execute(args as never, opts(disallow));
+      if (disallow.mock.calls.length > 0) locked.push(name);
+    }
+    expect(locked.sort()).toEqual([
+      "request_location", "send_buttons", "send_link", "send_message", "send_place", "send_selection",
+    ]);
+  });
+
+  it("disallows interruptions before the request, even when the arguments are refused", async () => {
+    const { relay, send } = fakeRelay();
+    const disallow = vi.fn(() => expect(send).not.toHaveBeenCalled());
+    await tool(relay, "send_message").execute({ text: "Hi" }, opts(disallow));
+    expect(disallow).toHaveBeenCalledTimes(1);
+    const refused = vi.fn();
+    await expect(tool(relay, "send_link").execute({ url: "nope" }, opts(refused))).rejects.toBeInstanceOf(llm.ToolError);
+    expect(refused).toHaveBeenCalledTimes(1);
   });
 
   it("send_buttons sends the question and a buttons part", async () => {
@@ -61,7 +106,7 @@ describe("relayChatTools", () => {
     await tool(relay, "send_buttons").execute({
       text: "Book it?",
       buttons: [{ label: "Yes" }, { label: "Pay", url: "https://example.com/pay" }],
-    }, opts);
+    }, opts());
     expect(sentParts(send)).toEqual([
       { type: "text", value: "Book it?" },
       { type: "buttons", items: [{ label: "Yes" }, { url: "https://example.com/pay", label: "Pay" }] },
@@ -71,7 +116,7 @@ describe("relayChatTools", () => {
   it("send_buttons refuses six buttons without sending", async () => {
     const { relay, send } = fakeRelay();
     const buttons = Array.from({ length: 6 }, (_, index) => ({ label: `B${index}` }));
-    await expect(tool(relay, "send_buttons").execute({ text: "Pick", buttons }, opts))
+    await expect(tool(relay, "send_buttons").execute({ text: "Pick", buttons }, opts()))
       .rejects.toBeInstanceOf(llm.ToolError);
     expect(send).not.toHaveBeenCalled();
   });
@@ -83,7 +128,7 @@ describe("relayChatTools", () => {
       title: "Pizza toppings",
       multiple: false,
       options: [{ id: "cheese", label: "Cheese" }, { id: "olive", label: "Olive", subtitle: "Black" }],
-    }, opts);
+    }, opts());
     expect(sentParts(send)).toEqual([
       { type: "text", value: "Pick toppings" },
       {
@@ -102,7 +147,7 @@ describe("relayChatTools", () => {
     const { relay, send } = fakeRelay();
     await expect(tool(relay, "send_selection").execute({
       title: "x".repeat(61), options: [{ id: "a", label: "A" }],
-    }, opts)).rejects.toBeInstanceOf(llm.ToolError);
+    }, opts())).rejects.toBeInstanceOf(llm.ToolError);
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -110,7 +155,7 @@ describe("relayChatTools", () => {
     const { relay, send } = fakeRelay();
     await tool(relay, "send_place").execute({
       latitude: 42.28, longitude: -83.74, name: "Diag", address: "Ann Arbor",
-    }, opts);
+    }, opts());
     expect(sentParts(send)).toEqual([
       { type: "place", latitude: 42.28, longitude: -83.74, name: "Diag", address: "Ann Arbor" },
     ]);
@@ -118,27 +163,27 @@ describe("relayChatTools", () => {
 
   it("send_place refuses a latitude out of range", async () => {
     const { relay, send } = fakeRelay();
-    await expect(tool(relay, "send_place").execute({ latitude: 91, longitude: 0 }, opts))
+    await expect(tool(relay, "send_place").execute({ latitude: 91, longitude: 0 }, opts()))
       .rejects.toBeInstanceOf(llm.ToolError);
     expect(send).not.toHaveBeenCalled();
   });
 
   it("request_location asks this chat", async () => {
     const { relay, request } = fakeRelay();
-    await expect(tool(relay, "request_location").execute({}, opts))
+    await expect(tool(relay, "request_location").execute({}, opts()))
       .resolves.toEqual({ status: "requested" });
     expect(request).toHaveBeenCalledWith(CHAT);
   });
 
   it("read_location returns not_sharing, then latitude and longitude in that order", async () => {
-    await expect(tool(fakeRelay().relay, "read_location").execute({}, opts))
+    await expect(tool(fakeRelay().relay, "read_location").execute({}, opts()))
       .resolves.toEqual({ status: "not_sharing" });
     const { relay, retrieve } = fakeRelay([], [{
       type: "Feature",
       geometry: { type: "Point", coordinates: [-83.74, 42.28] },
       properties: { handle: "+15555550100", updated_at: "2026-10-07T12:00:00Z" },
     }]);
-    await expect(tool(relay, "read_location").execute({}, opts)).resolves.toEqual({
+    await expect(tool(relay, "read_location").execute({}, opts())).resolves.toEqual({
       status: "sharing",
       locations: [{ handle: "+15555550100", latitude: 42.28, longitude: -83.74, updated_at: "2026-10-07T12:00:00Z" }],
     });
@@ -147,9 +192,9 @@ describe("relayChatTools", () => {
 
   it("send_link sends a link part and refuses a non-URL", async () => {
     const { relay, send } = fakeRelay();
-    await tool(relay, "send_link").execute({ url: "https://example.com/menu" }, opts);
+    await tool(relay, "send_link").execute({ url: "https://example.com/menu" }, opts());
     expect(sentParts(send)).toEqual([{ type: "link", value: "https://example.com/menu" }]);
-    await expect(tool(relay, "send_link").execute({ url: "example dot com" }, opts)).rejects.toBeInstanceOf(llm.ToolError);
+    await expect(tool(relay, "send_link").execute({ url: "example dot com" }, opts())).rejects.toBeInstanceOf(llm.ToolError);
   });
 });
 

@@ -61,11 +61,15 @@ const optionalText = (value: unknown): string =>
  * Call's chat during the Call, with the same parts Relay's text agents send.
  * Named function tools in the array form LiveKit's docs prefer
  * (https://docs.livekit.io/agents/logic/tools/definition/); pass them as an
- * Agent's `tools`, alone or spread beside your own.
+ * Agent's `tools`, alone or spread beside your own. Every tool that writes to
+ * the chat calls `ctx.disallowInterruptions()` first, as that page says for
+ * external actions that cannot be rolled back; `read_location` only reads.
  */
 export function relayChatTools(relay: RelayChatClient, chatId: string) {
-  const send = async (parts: MessagePart[]): Promise<RelaySentResult> => {
-    const response = await relay.chats.messages.send(chatId, { message: { parts } });
+  const send = async (parts: MessagePart[], replyTo?: string): Promise<RelaySentResult> => {
+    const response = await relay.chats.messages.send(chatId, {
+      message: { parts, ...(replyTo ? { reply_to: { message_id: replyTo } } : {}) },
+    });
     return { status: "sent", message_id: response.message.id };
   };
 
@@ -74,11 +78,15 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       name: "send_message",
       description: "Send a text message to the person in this Relay chat. Use it for anything they should keep "
         + "after the call: an address, a number, a list, a summary.",
-      parameters: strict({ text: { type: "string", description: "The message text." } }, ["text"]),
-      execute: async (args: { text: string }) => {
+      parameters: strict({
+        text: { type: "string", description: "The message text." },
+        reply_to_message_id: { type: "string", description: "A message in the chat to reply to." },
+      }, ["text"]),
+      execute: async (args: { text: string; reply_to_message_id?: string }, { ctx }) => {
+        ctx.disallowInterruptions();
         const text = optionalText(args.text);
         if (!text) fail("text is empty");
-        return send([{ type: "text", value: text }]);
+        return send([{ type: "text", value: text }], args.reply_to_message_id);
       },
     }),
 
@@ -96,7 +104,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
           }, ["label"]),
         },
       }, ["text", "buttons"]),
-      execute: async (args: { text: string; buttons: unknown }) => {
+      execute: async (args: { text: string; buttons: unknown }, { ctx }) => {
+        ctx.disallowInterruptions();
         const part = buttonsPart(args.buttons);
         if (typeof part === "string") return fail(part);
         return send(partsWithButtons(optionalText(args.text), part));
@@ -122,7 +131,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       }, ["title", "options"]),
       execute: async (args: {
         text?: string; title: string; multiple?: boolean; options: unknown;
-      }) => {
+      }, { ctx }) => {
+        ctx.disallowInterruptions();
         const part = selectionPart({
           type: "selection",
           title: args.title,
@@ -146,7 +156,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       }, ["latitude", "longitude"]),
       execute: async (args: {
         latitude: number; longitude: number; name?: string; address?: string;
-      }) => {
+      }, { ctx }) => {
+        ctx.disallowInterruptions();
         const { latitude, longitude } = args;
         if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) fail("latitude must be -90 to 90");
         if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) fail("longitude must be -180 to 180");
@@ -165,7 +176,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       name: "request_location",
       description: "Ask the person in this one-to-one chat to share their location. Relay sends them a card "
         + "with a Share My Location button, and they choose how long to share. Then use read_location.",
-      execute: async () => {
+      execute: async (_args, { ctx }) => {
+        ctx.disallowInterruptions();
         await relay.chats.location.request(chatId);
         return { status: "requested" as const };
       },
@@ -197,7 +209,8 @@ export function relayChatTools(relay: RelayChatClient, chatId: string) {
       parameters: strict({
         url: { type: "string", description: `An absolute http(s) URL, at most ${LINK_URL_MAX_LENGTH} characters.` },
       }, ["url"]),
-      execute: async (args: { url: string }) => {
+      execute: async (args: { url: string }, { ctx }) => {
+        ctx.disallowInterruptions();
         const url = typeof args.url === "string" ? standaloneLink(args.url) : undefined;
         if (!url) return fail("url is not an absolute http(s) URL");
         return send([{ type: "link", value: url }]);
