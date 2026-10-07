@@ -57,10 +57,8 @@ export function shouldReply(data: MessageWebhookData): boolean {
 export function replyTo(
   data: MessageWebhookData,
 ): { reply_to: { message_id: string } } | Record<string, never> {
-  // Read as a string: this example's pinned SDK types predate buttons and
-  // selection parts, which Relay sends all the same.
-  const opening: string | undefined = data.parts[0]?.type;
-  return data.sender_handle.kind === "agent" && opening !== "buttons" && opening !== "selection"
+  const opening = data.parts[0]?.type;
+  return data.from_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
     ? { reply_to: { message_id: data.id } }
     : {};
 }

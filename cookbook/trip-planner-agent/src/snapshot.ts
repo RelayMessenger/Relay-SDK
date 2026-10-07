@@ -46,7 +46,7 @@ export async function loadRememberedThreads(
       seen.add(message.id);
       if (message.is_from_me || message.is_system_message) continue;
       if (!message.from_handle) continue;
-      const text = messageText(message.parts ?? []);
+      const text = messageText(message.parts ?? [], message.reply_to);
       if (!text) continue;
       remembered.push({
         author: authorName(message.from_handle),
