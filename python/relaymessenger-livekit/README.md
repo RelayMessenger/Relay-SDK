@@ -71,6 +71,36 @@ connection is replaced, `await call.transport.reconnect()` keeps the existing
 media peer and replays the same audio publication so Relay can return its
 cached answer.
 
+## Text the person during the call
+
+Every Relay Call happens in a Chat, and `call.created` carries its `chat_id`.
+`relay_chat_tools()` gives the model LiveKit tools that act in that Chat as
+the agent, so in a call it can do what it does in text: `send_message`,
+`send_buttons`, `send_selection`, `send_place`, `request_location`,
+`read_location` and `send_link`. `load_chat_context()` reads the Chat's recent
+Messages into a LiveKit `ChatContext`, so the call starts where the Chat left
+off. Both are optional.
+
+```python
+from relaymessenger import Relay
+from relaymessenger_livekit import load_chat_context, relay_chat_tools
+
+relay = Relay(os.environ["RELAY_AGENT_TOKEN"])
+chat_ctx = await load_chat_context(relay, chat_id, limit=20)
+await session.start(Agent(
+    instructions="You are a helpful voice agent.",
+    chat_ctx=chat_ctx,
+    tools=relay_chat_tools(relay, chat_id),
+))
+```
+
+The tools build their parts with the SDK's own helpers, so a part Relay would
+refuse (six buttons, a duplicate selection value, a latitude of 91) comes back
+to the model as a `ToolError` and nothing is sent. Each send's idempotency key
+is the Chat and LiveKit's tool call id, so a retried request never texts the
+person twice. A selection's answer and a shared location come back to the
+agent as Messages in the Chat, the same as in text.
+
 ## Live video: the agent sees the camera
 
 `call.attach(session)` also sets `session.input.video` to a `RelayVideoInput`

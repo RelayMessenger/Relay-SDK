@@ -21,6 +21,7 @@ from .agents import (
     RelayLiveKitCall,
     RelayVideoInput,
 )
+from .chat import CHAT_TOOL_NAMES, load_chat_context, relay_chat_tools
 from .rive import RelayRive
 from .transport import (
     RelayAudioFrame,
@@ -42,6 +43,9 @@ from .video import (
 )
 
 __all__ = [
+    "CHAT_TOOL_NAMES",
+    "load_chat_context",
+    "relay_chat_tools",
     "RelayRive",
     "CallRoom",
     "CallRoomCloseEvent",
