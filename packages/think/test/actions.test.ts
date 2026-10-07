@@ -84,7 +84,7 @@ describe("Relay send Action", () => {
     const schema = toJSONSchema(sendInputSchema);
     expect(schema.type).toBe("object");
     expect(schema.properties?.kind).toMatchObject({
-      enum: ["text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel"],
+      enum: ["text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel", "form", "rating_request", "media"],
     });
     expect(schema.oneOf).toBeUndefined();
     expect(schema.anyOf).toBeUndefined();

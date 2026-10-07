@@ -4,12 +4,18 @@ import type Relay from "@relaymessenger/sdk";
 import {
   BUTTONS_GUIDANCE,
   type ChatSendVoicememoResponse,
+  FORM_GUIDANCE,
+  type FormPart,
   type MessagePart,
   type PaymentRequest,
   type RequestOptions,
   RelayAPIError,
+  RATING_REQUEST_GUIDANCE,
   SELECTION_GUIDANCE,
+  formPart,
+  partsWithForm,
   partsWithSelection,
+  ratingRequestPart,
   selectionPart,
 } from "@relaymessenger/sdk";
 import type { StopCondition, ToolSet } from "ai";
@@ -135,6 +141,23 @@ export type SendInput =
     cards: CardInput[];
     card_width?: "small" | "medium";
     text?: string;
+  }
+  | {
+    kind: "form";
+    /** Relay's form part without its type; the SDK's formPart validates it. */
+    form: Omit<FormPart, "type">;
+    text?: string;
+  }
+  | {
+    /** Relay's rating_request part: the whole Message, with no other fields. */
+    kind: "rating_request";
+    text?: never;
+  }
+  | {
+    kind: "media";
+    /** A public https file; Relay fetches it and stores it as an attachment. */
+    url: string;
+    text?: string;
   };
 
 const CARD_KINDS = new Set(["rich_card", "carousel"]);
@@ -150,9 +173,52 @@ const sendButtonSchema = z.object({
   url: z.string().max(2_048).regex(/^https?:\/\//u).optional(),
 }).strict();
 
+// Relay's form part (@relaymessenger/sdk FormPart) as one object schema with
+// no unions, for the same Vertex reason as the send root. Every field rule is
+// the SDK's own validator (formPart), run in the send refinement below.
+const formOptionSchema = z.object({
+  value: z.string().min(1).max(100),
+  label: z.string().trim().min(1).max(30),
+}).strict();
+const formFieldSchema = z.object({
+  id: z.string().min(1).max(100),
+  type: z.enum(["text", "select", "picker", "date"]),
+  label: z.string().trim().min(1).max(40),
+  placeholder: z.string().optional(),
+  required: z.boolean().optional(),
+  multiline: z.boolean().optional().describe("text fields only."),
+  max_length: z.number().int().min(1).optional().describe("text fields only: the longest answer."),
+  keyboard: z.enum(["default", "email", "phone", "number", "url"]).optional().describe("text fields only."),
+  multiple: z.boolean().optional().describe("select fields only: allow several choices."),
+  options: z.array(formOptionSchema).min(1).max(200).optional().describe(
+    "select (1 to 20) and picker (1 to 200) fields only.",
+  ),
+  min_date: z.string().optional().describe("date fields only: YYYY-MM-DD."),
+  max_date: z.string().optional().describe("date fields only: YYYY-MM-DD."),
+}).strict();
+const sendFormSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  pages: z.array(z.object({
+    id: z.string().min(1).max(19),
+    title: z.string().trim().min(1).max(80),
+    fields: z.array(formFieldSchema).min(1).max(50),
+  }).strict()).min(1),
+  show_summary: z.boolean().optional(),
+  splash: z.object({
+    title: z.string().optional(),
+    text: z.string().optional(),
+    button_title: z.string().trim().min(1).max(35),
+  }).strict().optional(),
+  received_message: z.object({
+    title: z.string().trim().min(1).max(512),
+    subtitle: z.string().optional(),
+  }).strict().optional(),
+}).strict();
+
 /** Every kind of Message the send Action can carry. */
 export const RELAY_SEND_KINDS = [
   "text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel",
+  "form", "rating_request", "media",
 ] as const;
 export type RelaySendKind = (typeof RELAY_SEND_KINDS)[number];
 
@@ -174,9 +240,14 @@ export function relaySendInputSchema(
   // The server's link part: one absolute URL of at most 2,048 characters,
   // alone in its Message. With text, the words go first as their own Message.
   url: z.string().trim().max(2_048).regex(/^https?:\/\/\S+$/u).optional().describe(
-    "With kind link only: one absolute http or https URL the person will look at or read, sent as its own Message and "
+    "With kind link: one absolute http or https URL the person will look at or read, sent as its own Message and "
     + "drawn as a card with the page's title and image. Give text to say something first; it goes as its own Message "
-    + "before the card. A page the person acts on is a url button under a text Message instead.",
+    + "before the card. A page the person acts on is a url button under a text Message instead. "
+    + "With kind media: the public https address of a file (a photo, video, audio or document) to send as the "
+    + "file itself; Relay downloads it. Give text to send words with it.",
+  ),
+  form: sendFormSchema.optional().describe(
+    "With kind form only: the form the person fills in, with optional text shown above its card. " + FORM_GUIDANCE,
   ),
   buttons: z.array(sendButtonSchema).min(1).max(5).optional().describe(
     "With kind text only: 1 to 5 buttons drawn under the Message. Each has a label of 1 to 80 characters; "
@@ -260,8 +331,12 @@ export function relaySendInputSchema(
 }).strict().superRefine((value, context) => {
   const required = value.kind === "image"
     ? "prompt"
-    : value.kind === "link"
+    : value.kind === "link" || value.kind === "media"
     ? "url"
+    : value.kind === "form"
+    ? "form"
+    : value.kind === "rating_request"
+    ? undefined
     : value.kind === "place"
     ? "latitude"
     : value.kind === "payment"
@@ -273,7 +348,9 @@ export function relaySendInputSchema(
   // the words when the whole turn is the choice. A payment has several required
   // fields at once, checked below instead of through this single-field rule.
   // A coordinate of 0 is a real place, so place checks presence, not truth.
-  const missing = value.kind === "place" ? value.latitude === undefined : !value[required];
+  const missing = required === undefined
+    ? false
+    : value.kind === "place" ? value.latitude === undefined : !value[required];
   if (
     value.kind !== "payment"
     && missing
@@ -281,11 +358,19 @@ export function relaySendInputSchema(
   ) {
     context.addIssue({
       code: "custom",
-      path: [required],
+      path: [required!],
       message: value.kind === "text"
         ? "text is required for text, unless buttons or a selection are sent on their own"
         : `${required} is required for ${value.kind}`,
     });
+  }
+  if (value.kind === "media" && value.url !== undefined && !value.url.startsWith("https://")) {
+    context.addIssue({ code: "custom", path: ["url"], message: "url must be an https address for media" });
+  }
+  if (value.kind === "form" && value.form !== undefined) {
+    // One source of truth for the form rules: the SDK's own validator.
+    const checked = formPart({ type: "form", ...value.form });
+    if (typeof checked === "string") context.addIssue({ code: "custom", path: ["form"], message: checked });
   }
   if (value.kind === "place" && value.longitude === undefined) {
     context.addIssue({ code: "custom", path: ["longitude"], message: "longitude is required for place" });
@@ -354,7 +439,7 @@ export function relaySendInputSchema(
   for (const field of [
     "text", "prompt", "caption", "style", "activity", "activity_emoji", "buttons", "selection", "url",
     "description", "category", "mode", "amount", "currency", "price_id", "image_url",
-    "cards", "card_width",
+    "cards", "card_width", "form",
     "reply", "silent", "latitude", "longitude", "name", "address",
   ] as const) {
     const allowed = field === required
@@ -365,7 +450,7 @@ export function relaySendInputSchema(
       || ((value.kind === "image" || value.kind === "voice_memo") && field === "activity")
       || ((value.kind === "image" || value.kind === "voice_memo")
         && field === "activity_emoji" && value.activity !== undefined)
-      || (value.kind === "link" && field === "text")
+      || ((value.kind === "link" || value.kind === "media" || value.kind === "form") && field === "text")
       || (value.kind === "payment" && paymentFields.has(field))
       || cardFields.has(field);
     if (!allowed && value[field] !== undefined) {
@@ -682,6 +767,20 @@ async function sendPayment(
   };
 }
 
+/** One Message of ready parts, under the turn's idempotency key. */
+async function sendParts(
+  relay: Relay,
+  identity: RelayTurnIdentity,
+  kind: SendInput["kind"],
+  parts: MessagePart[],
+  signal?: AbortSignal,
+): Promise<SentResult> {
+  const result = await relay.chats.messages.send(identity.chatId, {
+    message: { parts, idempotency_key: relayIdempotencyKey(identity.eventId) },
+  }, requestOptions(signal));
+  return { status: "sent", kind, messageId: result.message.id };
+}
+
 /** A place pin, alone or after the model's words; it goes at once, like a link. */
 async function sendPlace(
   relay: Relay,
@@ -766,6 +865,25 @@ export async function executeRelaySend(
   if (input.kind === "rich_card" || input.kind === "carousel") {
     // A card, like a payment, goes at once.
     return await sendCardAction(relay, identity, input, signal);
+  }
+  if (input.kind === "rating_request") {
+    // Relay writes the request's words; it goes at once, alone, as a card does.
+    return await sendParts(relay, identity, input.kind, [ratingRequestPart()], signal);
+  }
+  if (input.kind === "form" || input.kind === "media") {
+    // Words beside a form or a file are typed first; the part itself, like a
+    // card or a pasted link, needs no typing time of its own.
+    if (input.text) {
+      await compose(input.text, identity.eventId, startedAt, signal);
+      deps.assertCurrentTurn(identity);
+    }
+    const parts: MessagePart[] = input.kind === "form"
+      ? partsWithForm(input.text, { type: "form", ...input.form })
+      : [
+        ...(input.text ? [{ type: "text" as const, value: input.text }] : []),
+        { type: "media" as const, url: input.url },
+      ];
+    return await sendParts(relay, identity, input.kind, parts, signal);
   }
   const assertCurrent = () => {
     signal?.throwIfAborted();
@@ -1129,7 +1247,11 @@ export function createRelayActions(
         + "card the person looks at; see the url field for when. Use payment to "
         + "ask the person to pay, drawn as its own card with a Pay button. Use "
         + "rich_card to show one card with a picture, title, description and "
-        + "suggestions, or carousel to show 2 to 10 of them side by side."),
+        + "suggestions, or carousel to show 2 to 10 of them side by side. Use "
+        + "form to collect several answers at once; see the form field. Use "
+        + "media to send a file from a public https url. Use rating_request, "
+        + "with no other field, to ask the person to rate you. "
+        + RATING_REQUEST_GUIDANCE),
       inputSchema: relaySendInputSchema(sendKinds),
       idempotencyKey: () => `message:${deps.turn().eventId}`,
       // Think 0.17 creates a framework timeout only when timeoutMs > 0.
