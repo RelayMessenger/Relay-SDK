@@ -871,6 +871,7 @@ describe("Relay webhook handling", () => {
         parts: Array.from({ length: 100 }, () => ({
           type: "text" as const,
           value,
+          reactions: null,
         })),
       }) as unknown as Record<string, unknown>,
     );
@@ -1470,6 +1471,7 @@ describe("direct and group routing", () => {
           mention_range: [0, AGENT_HANDLE.handle.length],
           type: "text",
           value: "Relay Agent please help",
+          reactions: null,
         },
       ],
     });
@@ -1507,6 +1509,7 @@ describe("direct and group routing", () => {
           mention_range: [0, AGENT_HANDLE.handle.length],
           type: "text",
           value: "Relay Agent please help",
+          reactions: null,
         },
       ],
     });
@@ -1530,7 +1533,7 @@ describe("direct and group routing", () => {
         is_group: true,
         owner_handle: AGENT_HANDLE,
       },
-      parts: [{ type: "text", value: "hello everyone" }],
+      parts: [{ type: "text", value: "hello everyone", reactions: null }],
     });
     await chat.webhooks.relay(
       await signedRequest(
@@ -1981,13 +1984,13 @@ it("forwards selection response metadata through raw while rendering only the re
   const message = adapter.parseMessage({
     chatId: IDS.chat, createdAt: "2026-09-19T00:00:00.000Z", eventType: "message.received",
     message: webhookMessage({
-      parts: [{ type: "text", value: "• Research\n• Design" }, { type: "selection_response", selected_values: ["research", "design"] }],
+      parts: [{ type: "text", value: "• Research\n• Design", reactions: null }, { type: "selection_response", selected_values: ["research", "design"], selected_ids: ["research", "design"] }],
       reply_to: { message_id: IDS.reply, part_index: 1 },
     }),
   });
   expect(message.text).toBe("• Research\n• Design");
   const response = message.raw.message?.parts?.find(part => part.type === "selection_response");
-  expect(response).toEqual({ type: "selection_response", selected_values: ["research", "design"] });
+  expect(response).toEqual({ type: "selection_response", selected_values: ["research", "design"], selected_ids: ["research", "design"] });
   expect(message.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 1 });
 });
 
@@ -1995,7 +1998,7 @@ it("keeps rich parts and explicit targets in both signed ingress and REST histor
   const { adapter, chat } = receiptHarness();
   await adapter.initialize(chat);
   const data = webhookMessage({
-    parts: [{ type: "text", value: "• Research" }, { type: "selection_response", selected_values: ["research"] }],
+    parts: [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"], selected_ids: ["research"] }],
     reply_to: { message_id: IDS.reply, part_index: 1 },
   });
   await adapter.handleWebhook(await signedRequest(envelope("message.received", data as unknown as Record<string, unknown>)));
@@ -2207,7 +2210,7 @@ describe("a swipe-reply's target", () => {
         envelope(
           "message.received",
           webhookMessage({
-            parts: [{ type: "text", value: "what did you mean by this?" }],
+            parts: [{ type: "text", value: "what did you mean by this?", reactions: null }],
             reply_to: replyTo,
           }) as unknown as Record<string, unknown>,
         ),

@@ -115,7 +115,7 @@ export function parseWebhookMessageEvent(
   data: Record<string, unknown>,
 ): RelayWebhookMessageEvent {
   const chatId = messageEventChatId({
-    chat: isRecord(data.chat) ? data.chat as RelayWebhookMessageEvent["chat"] : undefined,
+    chat: isRecord(data.chat) ? data.chat as unknown as RelayWebhookMessageEvent["chat"] : undefined,
     chat_id: data.chat_id as string | undefined,
   });
   if (
