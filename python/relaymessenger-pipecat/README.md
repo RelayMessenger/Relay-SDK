@@ -62,6 +62,35 @@ so a greeting is heard from its first word. `on_first_participant_joined`
 fires once the caller's audio reaches the agent. `transport.end()` ends the
 Call for both sides.
 
+## Text the person during a Call
+
+`relay_chat_tools` gives the bot's LLM tools for the Call's chat, through
+Pipecat's function calling: `send_message`, `send_buttons`, `send_selection`,
+`send_place`, `request_location`, `read_location` and `send_link`. Each tool
+sends with the Relay SDK and its part helpers, as the agent. A failed send goes
+back to the model as `{"status": "failed", "error": ...}`, so the bot can say so.
+`load_chat_context` reads the chat's recent messages as LLM context messages,
+so the bot knows the chat before it speaks.
+
+```python
+import os
+
+from pipecat.processors.aggregators.llm_context import LLMContext
+from relaymessenger import Relay
+from relaymessenger_pipecat import load_chat_context, relay_chat_tools
+
+relay = Relay(api_key=os.environ["RELAY_AGENT_TOKEN"])
+call = await relay.calls.retrieve(call_id)
+chat_id = call["call"]["chat_id"]
+
+chat_tools = relay_chat_tools(relay, chat_id)
+chat_tools.register(llm)  # llm is your Pipecat LLM service
+context = LLMContext(
+    messages=[{"role": "system", "content": "..."}, *await load_chat_context(relay, chat_id)],
+    tools=chat_tools.tools,
+)
+```
+
 ## Send and receive video
 
 Set `video_in_enabled=True` to receive the caller's camera as
