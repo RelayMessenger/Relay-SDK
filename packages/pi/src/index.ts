@@ -105,22 +105,29 @@ class ChildPiProcess implements PiProcess {
   get stdout() { return createInterface({ input: this.#child.stdout }); }
   kill = () => { this.#child.kill(); };
 }
+/**
+ * The words of one inbound Message as Pi reads them: its text and links, then
+ * the data of a pin or location share, then what a selection answers. Empty
+ * for a Message with none, such as a photo alone.
+ */
+export const wordsOf = (data: MessageWebhookData): string => {
+  // A pin and a location share have no words; their data follows the words.
+  const text = [
+    data.parts
+      .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
+      .join("\n").trim(),
+    locationContext(data.parts),
+  ].filter(Boolean).join("\n\n");
+  const context = selectionReplyContext(selectionReply(data.parts, data.reply_to), {
+    parts: data.parts, ...(data.reply_to ? { reply_to: data.reply_to } : {}),
+  });
+  return [text, context].filter(Boolean).join("\n\n");
+};
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
   // A sender with no Handle is skipped.
   if (!event.data.sender_handle) return null;
-  // A pin and a location share have no words; their data follows the words.
-  const text = [
-    event.data.parts
-      .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
-      .join("\n").trim(),
-    locationContext(event.data.parts),
-  ].filter(Boolean).join("\n\n");
-  const context = selectionReplyContext(selectionReply(event.data.parts, event.data.reply_to), {
-    parts: event.data.parts, ...(event.data.reply_to ? { reply_to: event.data.reply_to } : {}),
-  });
-  if (!text && !context) return null;
-  return [text, context].filter(Boolean).join("\n\n");
+  return wordsOf(event.data) || null;
 };
 /**
  * The prompt pi is given for one message: the words, then how to answer.
@@ -269,45 +276,56 @@ export class PiChannel {
     let session = this.#sessions.get(data.chat.id);
     if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
-    // A swipe-reply names the Message it answers, as Telegram hands a bot
-    // `reply_to_message`; Relay sends only the pointer, so it is read once. A
-    // read that fails names the target by id instead.
-    const replied = data.reply_to?.message_id ? data.reply_to : undefined;
-    const replyLine = replied
-      ? replyTargetContext(replied, await (async () => this.#relay.messages.retrieve(replied.message_id))().catch(() => undefined))
-      : "";
+    const replyLine = await repliedContext(this.#relay, data);
     await session.command("prompt", { message: piPrompt([message, replyLine].filter(Boolean).join("\n\n")) }, timeout, signal);
     if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
     const response = await session.command("get_last_assistant_text", {}, timeout, signal);
     const answer = response.data?.text?.trim();
     if (!answer) throw new Error("Pi returned no final text answer");
-    const messages = answerMessages(answer);
-    if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
-    // An answer to another agent replies to its Message, as a bot's reply
-    // names the message it answers (Telegram `reply_parameters.message_id`), so
-    // an agent that sent several knows which one it answers. A person's
-    // Message is not named, so the chat looks as it always has. An agent may
-    // not reply to buttons or a selection, and a reply names part 0.
-    // Turns in one chat already run one after another, so an agent's two
-    // messages each get their own answer.
-    const opening = data.parts[0]?.type;
-    const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
-      ? { reply_to: { message_id: data.id } }
-      : {};
-    for (const [index, message] of messages.entries()) {
-      const key = `pi-${event.event_id}-${index}`;
-      let parts = message.parts;
-      if (message.payment) {
-        try {
-          parts = [await createPaymentPart(this.#relay, message.payment, key)];
-        } catch (error) {
-          if (!(error instanceof RelayAPIError) || error.retryable) throw error;
-          console.error(`Relay: the payment in pi's answer was not sent: ${error.message}`);
-          continue;
-        }
-      }
-      await this.#relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: key, ...(index === 0 ? replyTo : {}) } });
-    }
+    await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
   }
 }
+/**
+ * The Message a swipe-reply answers, as one line of data. Relay sends only the
+ * pointer, as Telegram hands a bot `reply_to_message`, so it is read once; a
+ * read that fails names the target by id instead. Empty for no reply.
+ */
+export const repliedContext = async (relay: Relay, data: MessageWebhookData): Promise<string> => {
+  const replied = data.reply_to?.message_id ? data.reply_to : undefined;
+  if (!replied) return "";
+  return replyTargetContext(replied, await (async () => relay.messages.retrieve(replied.message_id))().catch(() => undefined));
+};
+/**
+ * Sends Pi's answer to the chat the Message came from, as the Messages
+ * `answerMessages` makes of it, each on `${key}-${index}`.
+ */
+export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: string, answer: string): Promise<void> => {
+  const messages = answerMessages(answer);
+  if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
+  // An answer to another agent replies to its Message, as a bot's reply
+  // names the message it answers (Telegram `reply_parameters.message_id`), so
+  // an agent that sent several knows which one it answers. A person's
+  // Message is not named, so the chat looks as it always has. An agent may
+  // not reply to buttons or a selection, and a reply names part 0.
+  // Turns in one chat already run one after another, so an agent's two
+  // messages each get their own answer.
+  const opening = data.parts[0]?.type;
+  const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
+    ? { reply_to: { message_id: data.id } }
+    : {};
+  for (const [index, message] of messages.entries()) {
+    const messageKey = `${key}-${index}`;
+    let parts = message.parts;
+    if (message.payment) {
+      try {
+        parts = [await createPaymentPart(relay, message.payment, messageKey)];
+      } catch (error) {
+        if (!(error instanceof RelayAPIError) || error.retryable) throw error;
+        console.error(`Relay: the payment in pi's answer was not sent: ${error.message}`);
+        continue;
+      }
+    }
+    await relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: messageKey, ...(index === 0 ? replyTo : {}) } });
+  }
+};
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);

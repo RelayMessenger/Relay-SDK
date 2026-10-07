@@ -16,6 +16,35 @@ pi install npm:@relaymessenger/pi
 Set `RELAY_AGENT_TOKEN` before using `/relay-connect`. Set
 `RELAY_BASE_URL` when the Agent belongs to a non-default API environment.
 
+## Inside your own Pi session
+
+By default each chat gets its own Pi. To bring Messages into the Pi session
+that loads the extension instead, set `relay` in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "relay": {
+    "mode": "session",
+    "agentTokenCommand": ["secret-tool", "lookup", "service", "relay", "username", "agent"],
+    "senders": ["alice"],
+    "transcribeCpp": { "module": "~/voice/node_modules/transcribe-cpp", "model": "~/models/parakeet.gguf" }
+  }
+}
+```
+
+`RELAY_PI_MODE=session` does the same as `mode`. The token is
+`RELAY_AGENT_TOKEN`, else whatever `agentTokenCommand` prints; it is never
+logged. `RELAY_SENDERS` (comma-separated) overrides `senders`; with neither,
+any one-to-one sender is taken. Group chats are skipped.
+
+The session starts on an interactive or RPC Pi, never a print run or a
+pi-subagents helper. Each Message becomes one user message
+(`pi.sendUserMessage`): photos as image content, voice notes as their
+transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
+files named. Messages wait their turn, and the session's last words go back
+to the chat the Message came from once Pi reports `agent_settled`. A run that
+ends with no words sends `Sorry, something went wrong on my side.`
+
 ## Selection
 
 End the final Pi answer with a `selection` JSON fence holding the question as
