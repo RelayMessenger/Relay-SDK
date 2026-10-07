@@ -12,9 +12,17 @@ import {
   toPlainText,
   type AdapterPostableMessage,
   type Attachment,
+  type CardChild,
+  type CardElement,
   type FileUpload,
 } from "chat";
-import type { RelayOutgoingPart } from "./types.js";
+import type {
+  RelayCardContent,
+  RelayCarouselPart,
+  RelayOutgoingPart,
+  RelayRichCardPart,
+  RelayRichCardSuggestion,
+} from "./types.js";
 
 /**
  * Allocate a Relay Attachment and put the bytes behind it, returning the ID a
@@ -132,6 +140,152 @@ export function contentTypeFor(
     ?? RELAY_FALLBACK_CONTENT_TYPE;
 }
 
+/** Relay's card limits (Relay-Server `rich-cards.ts`, `@relaymessenger/sdk` RICH_CARD_*). */
+export const RELAY_CARD_TITLE_MAX_LENGTH = 200;
+export const RELAY_CARD_DESCRIPTION_MAX_LENGTH = 2_000;
+export const RELAY_CARD_MAX_SUGGESTIONS = 4;
+export const RELAY_SUGGESTION_LABEL_MAX_LENGTH = 25;
+export const RELAY_SUGGESTION_ID_MAX_LENGTH = 256;
+export const RELAY_CAROUSEL_MIN_CARDS = 2;
+export const RELAY_CAROUSEL_MAX_CARDS = 10;
+
+/** Relay counts card limits in Unicode code points, not UTF-16 units. */
+const codePoints = (value: string): number => [...value].length;
+
+/**
+ * A Chat SDK Card as one Relay card, or the reason it cannot be one.
+ *
+ * The header image (or one Image child) becomes the card's picture, the title
+ * its title, and the subtitle with every Text, Fields, Link and Section child
+ * its description, as plain text. A Button becomes a reply suggestion whose
+ * `id` is the Button's id, and a LinkButton an `open_url` suggestion. What a
+ * Relay card cannot draw (a select, a table, a chart, a second image, more
+ * than four buttons, a label over 25 characters) leaves the card as text.
+ */
+function cardContent(card: CardElement): RelayCardContent | string {
+  const images: string[] = card.imageUrl ? [card.imageUrl] : [];
+  const lines: string[] = card.subtitle?.trim() ? [card.subtitle.trim()] : [];
+  const suggestions: RelayRichCardSuggestion[] = [];
+  const visit = (children: readonly CardChild[]): string | undefined => {
+    for (const child of children) {
+      switch (child.type) {
+        case "text": {
+          const value = markdownToPlainText(child.content).trim();
+          if (value) lines.push(value);
+          break;
+        }
+        case "image":
+          images.push(child.url);
+          break;
+        case "divider":
+          break;
+        case "fields":
+          for (const field of child.children) lines.push(`${field.label}: ${field.value}`);
+          break;
+        case "link":
+          lines.push(`${child.label}: ${child.url}`);
+          break;
+        case "section": {
+          const problem = visit(child.children);
+          if (problem) return problem;
+          break;
+        }
+        case "actions":
+          for (const action of child.children) {
+            if (action.type === "button") {
+              if (action.disabled || action.actionType === "modal") return `button ${action.id} is ${action.disabled ? "disabled" : "a modal button"}`;
+              suggestions.push({ type: "reply", label: action.label, id: action.id });
+            } else if (action.type === "link-button") {
+              suggestions.push({ type: "open_url", label: action.label, url: action.url });
+            } else {
+              return `a ${action.type} element`;
+            }
+          }
+          break;
+        default:
+          return `a ${child.type} element`;
+      }
+    }
+    return undefined;
+  };
+  const problem = visit(card.children);
+  if (problem) return problem;
+  if (images.length > 1) return "more than one image";
+  if (images[0] && !images[0].startsWith("https://")) return "an image that is not a public https URL";
+  const title = card.title?.trim();
+  const description = lines.join("\n");
+  if (title && codePoints(title) > RELAY_CARD_TITLE_MAX_LENGTH) return "a title over 200 characters";
+  if (codePoints(description) > RELAY_CARD_DESCRIPTION_MAX_LENGTH) return "text over 2,000 characters";
+  if (suggestions.length > RELAY_CARD_MAX_SUGGESTIONS) return "more than four buttons";
+  for (const suggestion of suggestions) {
+    const label = codePoints(suggestion.label);
+    if (label < 1 || label > RELAY_SUGGESTION_LABEL_MAX_LENGTH) return `button label ${JSON.stringify(suggestion.label)}`;
+    if (suggestion.type === "reply" && (suggestion.id.length < 1 || codePoints(suggestion.id) > RELAY_SUGGESTION_ID_MAX_LENGTH)) {
+      return `button id ${JSON.stringify(suggestion.id)}`;
+    }
+  }
+  if (!images[0] && !title && !description) return "no picture, title or text";
+  return {
+    ...(images[0] ? { media: { type: "image" as const, url: images[0] } } : {}),
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(suggestions.length ? { suggestions } : {}),
+  };
+}
+
+function replyIds(cards: readonly RelayCardContent[]): string | undefined {
+  const seen = new Set<string>();
+  for (const card of cards) {
+    for (const suggestion of card.suggestions ?? []) {
+      if (suggestion.type !== "reply") continue;
+      if (seen.has(suggestion.id)) return suggestion.id;
+      seen.add(suggestion.id);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The Relay `rich_card` part for a Chat SDK Card, or undefined when the card
+ * holds something a Relay card cannot draw; such a card is sent as text.
+ */
+export function toRelayRichCard(card: CardElement): RelayRichCardPart | undefined {
+  const content = cardContent(card);
+  if (typeof content === "string" || replyIds([content])) return undefined;
+  return { type: "rich_card", ...content };
+}
+
+/**
+ * A Relay `carousel` part from 2 to 10 Chat SDK Cards, swiped sideways.
+ * Throws when a card cannot be a Relay card or two buttons share an id, since
+ * a carousel has no text form to fall back to. Send it with
+ * `adapter.postMessageParts(threadId, [part])`.
+ */
+export function toRelayCarousel(
+  cards: readonly CardElement[],
+  options: { cardWidth?: RelayCarouselPart["card_width"] } = {},
+): RelayCarouselPart {
+  if (cards.length < RELAY_CAROUSEL_MIN_CARDS || cards.length > RELAY_CAROUSEL_MAX_CARDS) {
+    throw new ValidationError("relay", `A Relay carousel holds ${RELAY_CAROUSEL_MIN_CARDS} to ${RELAY_CAROUSEL_MAX_CARDS} cards, not ${cards.length}`);
+  }
+  const contents = cards.map((card, index) => {
+    const content = cardContent(card);
+    if (typeof content === "string") {
+      throw new ValidationError("relay", `Card ${index + 1} cannot be a Relay card: it has ${content}`);
+    }
+    return content;
+  });
+  const duplicate = replyIds(contents);
+  if (duplicate !== undefined) {
+    throw new ValidationError("relay", `Button id ${JSON.stringify(duplicate)} is on more than one card; a carousel needs unique ids`);
+  }
+  return {
+    type: "carousel",
+    ...(options.cardWidth ? { card_width: options.cardWidth } : {}),
+    cards: contents,
+  };
+}
+
 export function postableText(message: AdapterPostableMessage): string {
   if (typeof message === "string") return message;
   const card = extractCard(message);
@@ -144,7 +298,7 @@ export function postableText(message: AdapterPostableMessage): string {
     if (!rendered.trim()) {
       throw new ValidationError(
         "relay",
-        "Relay has no interactive card surface; provide fallbackText",
+        "This card holds something a Relay card cannot draw and has no text; provide fallbackText",
       );
     }
     return markdownToPlainText(rendered);
@@ -163,7 +317,9 @@ export function postableText(message: AdapterPostableMessage): string {
 export function hasPostableContent(
   message: AdapterPostableMessage,
 ): boolean {
+  const card = typeof message === "string" ? null : extractCard(message);
   return (
+    (card ? toRelayRichCard(card) !== undefined : false) ||
     postableText(message).length > 0 ||
     extractPostableAttachments(message).length > 0 ||
     extractFiles(message).length > 0
@@ -310,7 +466,9 @@ export async function buildRelayParts(
   message: AdapterPostableMessage,
   upload: RelayMediaUploader,
 ): Promise<RelayOutgoingPart[]> {
-  const text = postableText(message);
+  const card = typeof message === "string" ? null : extractCard(message);
+  const richCard = card ? toRelayRichCard(card) : undefined;
+  const text = richCard ? "" : postableText(message);
   const link = standaloneLinkText(text);
   if (
     link !== undefined
@@ -319,7 +477,7 @@ export async function buildRelayParts(
   ) {
     return [{ type: "link", value: link }];
   }
-  const parts = textParts(text);
+  const parts: RelayOutgoingPart[] = richCard ? [richCard] : textParts(text);
   for (const attachment of extractPostableAttachments(message)) {
     parts.push(await attachmentPart(attachment, upload));
   }
