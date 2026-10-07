@@ -14,3 +14,13 @@ export {
   type ElevenLabsSocketConstructor,
   type SignedUrlOptions,
 } from "./bridge.js";
+export {
+  RELAY_TOOL_NAMES,
+  RelayToolArgumentError,
+  relayChatContext,
+  relayClientTools,
+  runRelayTool,
+  type ElevenLabsClientTool,
+  type ElevenLabsToolParameters,
+  type RelayToolName,
+} from "./tools.js";
