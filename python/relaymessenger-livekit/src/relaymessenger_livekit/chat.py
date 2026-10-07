@@ -45,6 +45,7 @@ _NO_ARGUMENTS: Dict[str, Any] = {"type": "object", "properties": {}, "additional
 
 _SCHEMAS: Dict[str, Dict[str, Any]] = {
     "send_message": {
+        "type": "function",
         "name": "send_message",
         "description": (
             "Texts the person in your text chat with them, during this call. They "
@@ -63,6 +64,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
     },
     "send_buttons": {
+        "type": "function",
         "name": "send_buttons",
         "description": (
             "Texts the person a question with 1 to 5 buttons under it. A tap on a "
@@ -93,6 +95,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
     },
     "send_selection": {
+        "type": "function",
         "name": "send_selection",
         "description": (
             "Texts the person a list of 1 to 25 options they check in a sheet and "
@@ -127,6 +130,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
     },
     "send_place": {
+        "type": "function",
         "name": "send_place",
         "description": "Texts the person a place on a map they can open in their maps app.",
         "parameters": {
@@ -142,6 +146,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
     },
     "request_location": {
+        "type": "function",
         "name": "request_location",
         "description": (
             "Asks the person to share their location. Relay texts them a card with "
@@ -151,6 +156,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         "parameters": _NO_ARGUMENTS,
     },
     "read_location": {
+        "type": "function",
         "name": "read_location",
         "description": (
             "Reads where the person sharing their location with you is now: "
@@ -160,6 +166,7 @@ _SCHEMAS: Dict[str, Dict[str, Any]] = {
         "parameters": _NO_ARGUMENTS,
     },
     "send_link": {
+        "type": "function",
         "name": "send_link",
         "description": "Texts the person a link, shown as a preview card.",
         "parameters": {
@@ -181,6 +188,10 @@ def _text(arguments: Mapping[str, Any], key: str) -> str:
 
 def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, Any]]:
     """LiveKit tools that act in the call's chat as the agent.
+
+    A text, once sent, cannot be taken back, so every tool except
+    ``read_location`` disallows interruptions first, as LiveKit's docs ask of
+    tools with external actions that can't be rolled back.
 
     Each send's idempotency key is the chat and LiveKit's tool call id, so a
     retried request never sends the same message twice. A refusal from Relay
@@ -207,12 +218,14 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
 
     @function_tool(raw_schema=_SCHEMAS["send_message"])
     async def send_message(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         text = _text(raw_arguments, "text")
         reply_to = raw_arguments.get("reply_to_message_id")
         return await send([text_part(text)], context, reply_to if isinstance(reply_to, str) else None)
 
     @function_tool(raw_schema=_SCHEMAS["send_buttons"])
     async def send_buttons(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         text = _text(raw_arguments, "text")
         items = raw_arguments.get("buttons")
         if not isinstance(items, list):
@@ -221,6 +234,7 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
 
     @function_tool(raw_schema=_SCHEMAS["send_selection"])
     async def send_selection(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         title = _text(raw_arguments, "title")
         options = raw_arguments.get("options")
         if not isinstance(options, list):
@@ -240,6 +254,7 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
 
     @function_tool(raw_schema=_SCHEMAS["send_place"])
     async def send_place(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         latitude, longitude = raw_arguments.get("latitude"), raw_arguments.get("longitude")
         if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
             raise ToolError("latitude and longitude are numbers")
@@ -252,13 +267,15 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> List[RawFunctionTool[Any, An
 
     @function_tool(raw_schema=_SCHEMAS["send_link"])
     async def send_link(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         url = _text(raw_arguments, "url")
         if not url.startswith(("http://", "https://")):
             raise ToolError("url is an http(s) URL")
         return await send([link_part(url)], context)
 
     @function_tool(raw_schema=_SCHEMAS["request_location"])
-    async def request_location(raw_arguments: Dict[str, object]) -> Dict[str, Any]:
+    async def request_location(raw_arguments: Dict[str, object], context: RunContext[Any]) -> Dict[str, Any]:
+        context.disallow_interruptions()
         try:
             await relay.chats.location.request(chat_id)
         except Exception as error:

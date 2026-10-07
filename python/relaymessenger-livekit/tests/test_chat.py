@@ -49,14 +49,14 @@ def fake_relay(page: List[Dict[str, Any]] | None = None, features: List[Dict[str
 
 def run_context(call_id: str = "call_7") -> RunContext[Any]:
     call = FunctionCall(call_id=call_id, arguments="{}", name="tool")
-    return RunContext(session=SimpleNamespace(_global_run_state=None), speech_handle=SimpleNamespace(num_steps=1), function_call=call)  # type: ignore[arg-type]
+    return RunContext(session=SimpleNamespace(_global_run_state=None), speech_handle=SimpleNamespace(num_steps=1, allow_interruptions=True), function_call=call)  # type: ignore[arg-type]
 
 
-async def call(relay: Any, name: str, arguments: Dict[str, Any]) -> Any:
+async def call(relay: Any, name: str, arguments: Dict[str, Any], context: RunContext[Any] | None = None) -> Any:
     """Calls the tool the way LiveKit's tool executor does: JSON arguments in,
     RunContext injected by type."""
     tool = {t.info.name: t for t in relay_chat_tools(relay, "chat_1")}[name]
-    args, kwargs = prepare_function_arguments(fnc=tool, json_arguments=json.dumps(arguments), call_ctx=run_context())
+    args, kwargs = prepare_function_arguments(fnc=tool, json_arguments=json.dumps(arguments), call_ctx=context or run_context())
     return await tool(*args, **kwargs)
 
 
@@ -75,6 +75,23 @@ def test_the_seven_tools_are_raw_livekit_tools_an_agent_takes() -> None:
     )
     agent = Agent(instructions="x", tools=tools)
     assert {tool.info.name for tool in agent.tools} == set(CHAT_TOOL_NAMES)  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(("name", "arguments", "interruptible"), [
+    ("send_message", {"text": "hi"}, False),
+    ("send_buttons", {"text": "Ok?", "buttons": [{"label": "Yes"}]}, False),
+    ("send_selection", {"title": "T", "options": [{"value": "a", "label": "A"}]}, False),
+    ("send_place", {"latitude": 1, "longitude": 2}, False),
+    ("send_link", {"url": "https://relayapp.im"}, False),
+    ("request_location", {}, False),
+    ("read_location", {}, True),
+])
+async def test_tools_that_act_disallow_interruptions_and_read_location_does_not(
+    name: str, arguments: Dict[str, Any], interruptible: bool,
+) -> None:
+    context = run_context()
+    await call(fake_relay(), name, arguments, context)
+    assert context.speech_handle.allow_interruptions is interruptible
 
 
 async def test_send_message_texts_the_trimmed_words() -> None:
