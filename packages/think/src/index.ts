@@ -36,6 +36,7 @@ export {
   unansweredCallTurnId,
 } from "./call-start.js";
 export { RELAY_CHAT_CONTEXT_EVENT_TYPES, chatEventContext } from "./chat-events.js";
+export { RELAY_MESSENGER_DELIVERY } from "./delivery.js";
 export { contactCardContext, withContactCards } from "./contact-cards.js";
 export { formReplyContext, withFormReplies } from "./forms.js";
 export {

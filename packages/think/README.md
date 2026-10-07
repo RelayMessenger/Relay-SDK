@@ -94,9 +94,21 @@ refused (`RelayReplyRefused`) and the model sends without one.
 ### End the turn
 
 The model decides how many Messages a turn sends: one, or several in a row,
-like a person texting. Each `send` call is its own Message, with its own
-idempotency key taken from Think's `toolCallId`, so a retry of the same call
-sends nothing new. Each Message gets its own composing pause.
+like a person texting. Each `send` call is its own Message, keyed by its
+place in the turn: the first send is `message:<eventId>:1`, the next `:2`.
+When Think runs the turn again after a restart, the count starts again at 1,
+so a send that already went is not sent twice. Each Message gets its own
+composing pause.
+
+Only `send` makes Messages. Think posts the model's plain reply text to the
+chat unless the messenger's delivery policy stops it, so give Relay's
+messenger `RELAY_MESSENGER_DELIVERY`:
+
+```ts
+import { RELAY_MESSENGER_DELIVERY } from "@relaymessenger/think";
+
+chatSdkMessenger({ adapter, provider: "relay", delivery: RELAY_MESSENGER_DELIVERY, /* ... */ });
+```
 
 Give Think `stopWhen: relayTurnSettled`. The turn ends when the model calls no
 tool, calls `stay_silent`, or starts a call that rings; after a send, a

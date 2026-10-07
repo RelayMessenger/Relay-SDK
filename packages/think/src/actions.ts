@@ -828,9 +828,9 @@ async function sendPlace(
 }
 
 /**
- * Sends one Message. `callKey` names this send call (Think's toolCallId): a
- * second call in the same turn sends a second Message, and a retry of the same
- * call sends nothing new. Without it, the turn has one send key.
+ * Sends one Message. `callKey` names this send call by its position in the
+ * turn (relayCallNumber): a second call sends a second Message, and a retry
+ * of the same position sends nothing new. Without it, the turn has one send key.
  */
 export async function executeRelaySend(
   deps: RelayActionDependencies,
@@ -1141,9 +1141,46 @@ export const relayTurnSettled: StopCondition<ToolSet> = createRelayTurnSettled()
 
 export const RELAY_TURN_MAX_STEPS = 24;
 
-/** An Action ledger key for one call: the turn's, plus the call's id when Think gives one. */
-function callIdempotencyKey(prefix: string, eventId: string, toolCallId: string | undefined): string {
-  return toolCallId ? `${prefix}:${eventId}:${toolCallId}` : `${prefix}:${eventId}`;
+/** One turn attempt's count of calls to one Action, and the number each call got. */
+interface CallCount {
+  attempt: string;
+  next: number;
+  calls: Map<string, number>;
+}
+
+const callCounts = new Map<string, CallCount>();
+const CALL_COUNTS_MAX = 512;
+
+/**
+ * The 1-based position of this call among the turn's calls to `action`:
+ * the first send of a turn is 1, the next 2. Cloudflare's Think Actions page
+ * asks for a key that "survives recovery retries ... and not a value that
+ * changes per attempt", which a toolCallId is not. A position is: when Think
+ * runs a turn again for the same event (a new requestId), the count starts
+ * again at 1, so the re-issued first send gets the ledger row of the first
+ * send and is not sent twice. Within one attempt a call keeps its number, so
+ * its key function and its execute agree. It is assigned before any await.
+ */
+export function relayCallNumber(
+  action: string,
+  turn: { chatId: string; eventId: string },
+  ctx: { requestId?: string; toolCallId?: string },
+): number {
+  const key = `${action}:${turn.chatId}:${turn.eventId}`;
+  const attempt = ctx.requestId ?? "";
+  let count = callCounts.get(key);
+  if (!count || count.attempt !== attempt) {
+    count = { attempt, next: 0, calls: new Map() };
+  }
+  callCounts.delete(key);
+  callCounts.set(key, count);
+  if (callCounts.size > CALL_COUNTS_MAX) callCounts.delete(callCounts.keys().next().value!);
+  const callId = ctx.toolCallId ?? "";
+  const known = callId ? count.calls.get(callId) : undefined;
+  if (known !== undefined) return known;
+  count.next += 1;
+  if (callId) count.calls.set(callId, count.next);
+  return count.next;
 }
 
 /** Calls start now; scheduling a call later is the agent's own tool. */
@@ -1285,14 +1322,19 @@ export function createRelayActions(
       inputSchema: relaySendInputSchema(sendKinds),
       // One key per send call (Think's toolCallId), so a turn sends as many
       // Messages as the model calls send, and a retried call replays its result.
-      idempotencyKey: ({ ctx }) => callIdempotencyKey("message", deps.turn().eventId, ctx.toolCallId),
+      idempotencyKey: ({ ctx }) => {
+        const turn = deps.turn();
+        return `message:${turn.eventId}:${relayCallNumber("send", turn, ctx)}`;
+      },
       // Think 0.17 creates a framework timeout only when timeoutMs > 0.
       // Pre-dispatch generation/upload still obeys the turn signal and its own
       // bounded request timeouts. The irreversible voice call must not lose its
       // native Action ledger row to a framework timeout race.
       timeoutMs: 0,
-      execute: (input, context) =>
-        deps.runChosenAction(
+      execute: async (input, context) => {
+        // The same number the key function gave this call, read before any await.
+        const number = relayCallNumber("send", deps.turn(), context);
+        return deps.runChosenAction(
           "send",
           () => executeRelaySend(
             deps,
@@ -1300,9 +1342,10 @@ export function createRelayActions(
               ? { ...input, text: withoutSearchMarkers(input.text) }
               : input,
             deps.signal(context.signal),
-            context.toolCallId,
+            String(number),
           ),
-        ),
+        );
+      },
     }),
     react: action({
       description: describe("react",
@@ -1310,7 +1353,10 @@ export function createRelayActions(
         + "After a person's reaction, the current Message is the one they "
         + "reacted to."),
       inputSchema: reactionInputSchema,
-      idempotencyKey: ({ ctx }) => callIdempotencyKey("reaction", deps.turn().eventId, ctx.toolCallId),
+      idempotencyKey: ({ ctx }) => {
+        const turn = deps.turn();
+        return `reaction:${turn.eventId}:${relayCallNumber("react", turn, ctx)}`;
+      },
       execute: (input, context) =>
         deps.runChosenAction(
           "react",
