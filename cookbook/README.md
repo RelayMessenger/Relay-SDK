@@ -29,6 +29,7 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [ElevenLabs voice agent](elevenlabs-voice-agent/) | Answer a Call with Grok as the brain and an ElevenLabs voice, on Pipecat. |
 | [Grok Voice agent](grok-voice-agent/) | Answer a Call with xAI's Grok Voice Agent API, on Pipecat. |
 | [ElevenLabs Agents on a Call](elevenlabs-agents-call/) | Put an ElevenLabs Agent on a Call through its WebSocket API. |
+| [Clone agent with retrieval](clone-agent-rag/) | Speak as a real person from their public words: embed them with Workers AI, search them in Vectorize, cite the source. |
 
 ## Run a recipe on its own
 
