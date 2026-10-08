@@ -102,25 +102,45 @@ not also run session mode on the same Agent Token.
 
 ## Parts, silence and tools
 
+Relay describes itself once, in the system prompt, the way Hermes and
+OpenClaw give each platform a short hint: what renders in a Relay chat, that
+the final answer is sent to the chat, and that the `message` tool can text,
+react or send a file, images included, at any time. `runPiChannel` passes it
+with `--append-system-prompt`; session mode adds it as a `relay` section from
+`before_agent_start` while Relay is attached. Each Message reaches Pi as its
+own words only: the text, the Message it replies to, and its Relay message id.
+The pi-channels adapter adds no hint: pi-channels answers in its own
+subprocesses, started with `--no-extensions`.
+
 Pi's final text carries Relay's parts as fenced blocks, read by the SDK's
-`answerMessages`, and every prompt teaches them: `buttons`, `selection`,
+`answerMessages`, and the hint teaches them: `buttons`, `selection`,
 `form`, `rich_card`, `carousel` (2 to 10 cards), `place`, `payment` and
 `rating_request`, plus a URL alone on a line for a link card. A final answer
 with no words is Pi choosing to stay silent: nothing is sent, in the channel
 and in the session alike.
 
-The extension registers four tools for the chat Pi is answering (Pi
-`registerTool`): `relay_request_location` asks the person to share their
-location, `relay_read_location` reads where everyone sharing is now,
-`relay_send_media` uploads a file from the machine and sends it as its own
-Message (`reply_to` threads it to a Message by id), and `relay_react` reacts
+In session mode every assistant text of a run is sent, in order, each split
+at blank lines into its own Message (OpenClaw's `chunkMode: "newline"`); a
+fenced block stays with the words above it. A run that starts a background
+pi-subagents task remembers the Message it answered, and the task's result is
+sent as a reply to that Message.
+
+The extension registers the `message` tool for the chat Pi is answering (Pi
+`registerTool`, after OpenClaw's shared `message` tool): `action: "send"`
+texts the person now (`text`, optional `reply_to`), `action: "react"` reacts
 to a Message with an emoji (the six tapbacks, or any other emoji as a custom
-reaction), the Message being answered unless `message_id` names another.
+reaction), the Message being answered unless `message_id` names another, and
+`action: "file"` uploads a file from the machine and sends it as its own
+Message. A run that texts with `message` sends no final text, so nothing is
+sent twice. `relay_request_location` asks the person to share their location
+and `relay_read_location` reads where everyone sharing is now.
+`relay_send_media` and `relay_react` stay registered for one release as
+aliases of `message` file and react.
 `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
 `RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
 session mode they act on the chat whose Message is being answered.
 
-Each prompt ends with `[Relay message id: <id>]`. An answer that contains
+Each Message ends with `[Relay message id: <id>]`. An answer that contains
 `[[reply_to_current]]` is sent as a reply to that Message, and one with
 `[[reply_to:<id>]]` as a reply to the Message named; the tag is removed from
 the words (the reply tags of OpenClaw's rich output protocol). Pi's typing

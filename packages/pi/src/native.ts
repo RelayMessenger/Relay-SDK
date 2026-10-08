@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import Relay from "@relaymessenger/sdk";
-import { RELAY_CHAT_ID_ENV, runPiChannel } from "./index.js";
+import { RELAY_CHAT_ID_ENV, RELAY_HINT_SECTION, relayHint, runPiChannel } from "./index.js";
 import { relayTools } from "./tools.js";
 import { registerRelayAdapter, relayChannelAdapter, RELAY_ADAPTER } from "./pi-channels.js";
 import { SessionChannel } from "./session.js";
@@ -111,6 +111,7 @@ const attachSession = (pi: ExtensionAPI): void => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
     });
   });
+  pi.on("before_agent_start", async (event) => { if (channel) addRelayHint(event.systemPromptOptions); });
   pi.on("agent_end", async (event) => { channel?.ended(event.messages); });
   pi.on("agent_settled", async () => { await channel?.settled(); });
   pi.on("session_shutdown", async () => {
@@ -145,6 +146,15 @@ const attachPiChannels = (pi: ExtensionAPI): void => {
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
     }), RELAY_ADAPTER);
   });
+};
+
+/**
+ * Puts the Relay hint in the system prompt as its own section, which Pi
+ * sends once and patches only when it changes (docs/extensions.md,
+ * before_agent_start).
+ */
+export const addRelayHint = (options: { sections: Record<string, string> }): void => {
+  options.sections[RELAY_HINT_SECTION] = relayHint();
 };
 
 /** The Relay tools, as Pi registers a tool (docs/extensions.md, registerTool). */

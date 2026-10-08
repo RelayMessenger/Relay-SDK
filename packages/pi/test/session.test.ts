@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { MessagePartResponse, MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { agentToken, relaySettings } from "../src/native.js";
-import { accepts, lastAnswer, NO_ANSWER, SessionChannel, sessionContent, type SessionContent } from "../src/session.js";
+import { accepts, bubbles, NO_ANSWER, runAnswers, SessionChannel, sessionContent, type SessionContent } from "../src/session.js";
 import { pcmFloats } from "../src/voice.js";
 
 const media = (id: string, mime: string, filename: string): MessagePartResponse => ({ type: "media", id, url: `https://files.test/${id}`, filename, mime_type: mime, size_bytes: 3, reactions: null }) as MessagePartResponse;
@@ -34,8 +34,8 @@ describe("session content", () => {
     const content = await sessionContent(event.data as MessageWebhookData, { download, transcribe });
     expect(content?.[1]).toEqual({ type: "image", data: Buffer.from("img").toString("base64"), mimeType: "image/png" });
     const words = (content?.[0] as { text: string }).text;
-    expect(words).toContain("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]");
-    expect(words).toContain("Relay sends that answer to the chat for you");
+    // The Message alone: the Relay hint is in the system prompt, not here.
+    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]");
     expect(transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "note.m4a");
   });
   it("names a voice note it cannot hear, and gives nothing for an empty Message", async () => {
@@ -54,9 +54,14 @@ describe("session content", () => {
     expect(accepts(makeEvent("a", [text("hi")], { handle: "Bob" }), ["@bob"])).toBe(true);
     expect(accepts(makeEvent("a", [text("hi")], { handle: "mallory" }), ["bob"])).toBe(false);
   });
-  it("reads the last assistant words of a run", () => {
-    expect(lastAnswer([assistant("first"), { role: "user", content: "x" }, assistant("last")])).toBe("last");
-    expect(lastAnswer([{ role: "assistant", content: [{ type: "toolCall" }] }])).toBeUndefined();
+  it("reads every assistant text of a run, in order", () => {
+    expect(runAnswers([assistant("first"), { role: "user", content: "x" }, assistant(""), assistant("last")])).toEqual(["first", "last"]);
+    expect(runAnswers([{ role: "assistant", content: [{ type: "toolCall" }] }])).toEqual([]);
+    expect(runAnswers([{ role: "assistant", content: [], stopReason: "error" }])).toEqual([NO_ANSWER]);
+  });
+  it("splits an answer at blank lines, keeping a fenced block whole under its words", () => {
+    expect(bubbles("**On it.**\n\nThe store opens at 9.\n\n\nSee you")).toEqual(["**On it.**", "The store opens at 9.", "See you"]);
+    expect(bubbles("Pick one\n\n```buttons\nA\n\nB\n```\n\nLater")).toEqual(["Pick one\n\n```buttons\nA\n\nB\n```", "Later"]);
   });
 });
 

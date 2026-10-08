@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { answerMessages, PiChannel, piPrompt, type PiApprovals, type PiDialog, type PiProcess } from "../src/index.js";
+import { answerMessages, PiChannel, relayHint, type PiApprovals, type PiDialog, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const makeEvent = (id: string, chat: string, kind: "user" | "agent" = "agent"): RelayWebhookEvent => ({
   event_type: "message.received", event_id: id, api_version: "v1", webhook_version: "2026-08-30", trace_id: "trace", agent_id: "agent",
@@ -60,12 +63,51 @@ describe("Pi channel", () => {
   });
 });
 
-describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "agent_end", "agent_settled", "session_shutdown", "resources_discover"]); }); });
+describe("the Relay hint", () => {
+  it("goes in the system prompt once, and each Message reaches Pi as its own words", async () => {
+    const { relay } = relayFor([makeEvent("a", "one", "user"), makeEvent("b", "one", "user")]);
+    const args: (readonly string[])[] = [];
+    const process = fakePi([...records("hi"), ...records("again").map((line) => line.replace('"id":"1"', '"id":"3"').replace('"id":"2"', '"id":"4"'))]);
+    await new PiChannel({ agentToken: "secret", relay, spawnPi: (_command, spawnArgs) => { args.push(spawnArgs); return process; } }).run();
+    expect(args).toEqual([["--mode", "rpc", "--append-system-prompt", relayHint()]]);
+    const prompts = vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line))).filter((command) => command.type === "prompt");
+    expect(prompts.map((command) => command.message)).toEqual(["hello\n\n[Relay message id: message-a]", "hello\n\n[Relay message id: message-b]"]);
+  });
+  it("describes sending files and images, and forbids no sending", () => {
+    expect(relayHint()).toContain("send a file from this machine, images included, at any time");
+    // The per-message wording an agent read as a ban on sending images.
+    expect(relayHint()).not.toMatch(/yourself/iu);
+  });
+  it("adds the hint as its own section once Relay is attached to the session, and not before", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "relay-pi-hint-"));
+    await writeFile(join(dir, "settings.json"), JSON.stringify({ relay: { mode: "session" } }));
+    vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+    vi.stubEnv("RELAY_AGENT_TOKEN", "secret");
+    // Nothing listens here, so the channel's connection fails and is logged.
+    vi.stubEnv("RELAY_BASE_URL", "http://127.0.0.1:9");
+    vi.stubEnv("RELAY_PI_CHAT_ID", "");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    native({ registerCommand: vi.fn(), registerTool: vi.fn(), events: { emit: vi.fn(), on: vi.fn() }, on: (name: string, handler: never) => { handlers.set(name, handler); } } as never);
+    const sections = async (): Promise<Record<string, string>> => { const value: Record<string, string> = {}; await handlers.get("before_agent_start")!({ systemPromptOptions: { sections: value } }); return value; };
+    try {
+      expect(await sections()).toEqual({});
+      await handlers.get("session_start")!({}, { mode: "rpc", isIdle: () => true });
+      expect(await sections()).toEqual({ relay: relayHint() });
+    } finally {
+      await handlers.get("session_shutdown")!({});
+      error.mockRestore();
+      vi.unstubAllEnvs();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "before_agent_start", "agent_end", "agent_settled", "session_shutdown", "resources_discover"]); }); });
 
 describe("buttons", () => {
   it("tells pi how to send buttons and when", () => {
-    const prompt = piPrompt("hello");
-    expect(prompt.startsWith("hello\n\n")).toBe(true);
+    const prompt = relayHint();
     expect(prompt).toContain("fenced code block tagged `buttons`");
     expect(prompt).toContain("If the person asks for buttons, send them.");
   });
@@ -87,7 +129,7 @@ describe("buttons", () => {
 
 describe("links", () => {
   it("tells pi how to send a link", () => {
-    expect(piPrompt("hello")).toContain("put its URL alone on its own line");
+    expect(relayHint()).toContain("put its URL alone on its own line");
   });
   it("sends a URL alone on a line as its own message and keeps the buttons under the words", () => {
     expect(answerMessages("Look:\nhttps://a.test/x\nBook it?\n\n```buttons\n[{\"label\": \"Yes\"}]\n```")).toEqual([
@@ -99,9 +141,9 @@ describe("links", () => {
 });
 
 it("teaches selection authoring and passes structured inbound values to Pi", async () => {
-  expect(piPrompt("send selections")).toContain("fenced code block tagged `selection`");
-  expect(piPrompt("send selections")).toContain("not label parsing");
-  expect(piPrompt("send selections")).toContain("literal '• '");
+  expect(relayHint()).toContain("fenced code block tagged `selection`");
+  expect(relayHint()).toContain("not label parsing");
+  expect(relayHint()).toContain("literal '• '");
   const event = makeEvent("selection", "chat");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"], selected_ids: ["research"] }];
@@ -133,13 +175,13 @@ it.each([
   await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
   const prompt = vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line)))
     .find((command) => command.type === "prompt");
-  expect(prompt?.message).toBe(piPrompt(`${message}\n\n[Relay message id: ${event.data.id}]`));
+  expect(prompt?.message).toBe(`${message}\n\n[Relay message id: ${event.data.id}]`);
   expect(send).toHaveBeenCalledTimes(1);
 });
 
 it("teaches payment authoring, creates the request on the card's key and sends the card after the words", async () => {
-  expect(piPrompt("hello")).toContain("fenced code block tagged `payment`");
-  expect(piPrompt("hello")).toContain("category donation: a charity or a fundraiser.");
+  expect(relayHint()).toContain("fenced code block tagged `payment`");
+  expect(relayHint()).toContain("category donation: a charity or a fundraiser.");
   const fields = { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" };
   const process = fakePi(records('Here is your order.\n```payment\n' + JSON.stringify(fields) + '\n```'));
   const { relay, send } = relayFor([makeEvent("payment", "chat")]);
