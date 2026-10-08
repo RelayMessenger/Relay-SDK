@@ -25,6 +25,7 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [Send an image](send-an-image/) | Upload one image and send it to a Chat. |
 | [Send a voice memo](send-a-voice-memo/) | Upload one audio file and send it as a voice memo. |
 | [Trip planner agent](trip-planner-agent/) | Plan a group trip in the Chat: answer when mentioned, remember the rest, and update the plan when a constraint changes. |
+| [Group chat agents](group-chat-agents/) | Run several agents in one group chat with a person: each hears every Message, may stay silent, and takes its turn in order. |
 | [Grok Imagine agent](grok-imagine-agent/) | Chat with Grok, send pictures and videos made with Grok Imagine, and set the agent's profile picture. |
 | [ElevenLabs voice agent](elevenlabs-voice-agent/) | Answer a Call with Grok as the brain and an ElevenLabs voice, on Pipecat. |
 | [Grok Voice agent](grok-voice-agent/) | Answer a Call with xAI's Grok Voice Agent API, on Pipecat. |
@@ -50,7 +51,8 @@ folders resolve the workspace SDK instead of the published one;
 `scripts/validate-cookbook-standalone.mjs` proves both on every push and
 explains the dependency range that makes it work. The Cloudflare Think recipe
 is the one exception: it pins exact package versions by contract and ships
-its own lockfile; see its README.
+its own lockfile; see its README. The Group chat agents recipe is a
+Cloudflare Worker too: `npm run deploy` takes the place of `npm start`.
 
 The Cloudflare Think recipe is now the canonical starter. It supersedes the
 old standalone starter and the smaller duplicate Think example, which are not

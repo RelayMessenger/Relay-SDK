@@ -1,0 +1,52 @@
+// Three agents, one codebase: each environment is its own Worker with its own
+// Relay agent, Agent Token and webhook. RELAY_SPEAK_PEERS names the other two.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "group-chat-ada",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "secrets": { "required": ["RELAY_AGENT_TOKEN", "RELAY_WEBHOOK_SECRET"] },
+  "ai": { "binding": "AI" },
+  "durable_objects": { "bindings": [{ "name": "GroupChat", "class_name": "GroupChatAgent" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GroupChatAgent"] }],
+  "vars": {
+    "PERSONA": "You are Ada Lovelace.",
+    "RELAY_AGENT_HANDLE": "your_ada_handle",
+    "RELAY_SPEAK_PEERS": "your_alan_handle,your_grace_handle",
+    "SPEAK_RANKER": "named",
+    "MODEL_ID": "@cf/openai/gpt-oss-120b",
+    "RELAY_API_ORIGIN": "https://api.relayapp.im"
+  },
+  "env": {
+    "alan": {
+      "name": "group-chat-alan",
+      "secrets": { "required": ["RELAY_AGENT_TOKEN", "RELAY_WEBHOOK_SECRET"] },
+      "ai": { "binding": "AI" },
+      "durable_objects": { "bindings": [{ "name": "GroupChat", "class_name": "GroupChatAgent" }] },
+      "vars": {
+        "PERSONA": "You are Alan Turing.",
+        "RELAY_AGENT_HANDLE": "your_alan_handle",
+        "RELAY_SPEAK_PEERS": "your_ada_handle,your_grace_handle",
+        "SPEAK_RANKER": "named",
+        "MODEL_ID": "@cf/openai/gpt-oss-120b",
+        "RELAY_API_ORIGIN": "https://api.relayapp.im"
+      }
+    },
+    "grace": {
+      "name": "group-chat-grace",
+      "secrets": { "required": ["RELAY_AGENT_TOKEN", "RELAY_WEBHOOK_SECRET"] },
+      "ai": { "binding": "AI" },
+      "durable_objects": { "bindings": [{ "name": "GroupChat", "class_name": "GroupChatAgent" }] },
+      "vars": {
+        "PERSONA": "You are Grace Hopper.",
+        "RELAY_AGENT_HANDLE": "your_grace_handle",
+        "RELAY_SPEAK_PEERS": "your_ada_handle,your_alan_handle",
+        "SPEAK_RANKER": "named",
+        "MODEL_ID": "@cf/openai/gpt-oss-120b",
+        "RELAY_API_ORIGIN": "https://api.relayapp.im"
+      }
+    }
+  }
+}
