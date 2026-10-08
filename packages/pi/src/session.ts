@@ -190,14 +190,19 @@ export class SessionChannel {
     this.#pending = undefined;
     this.#ended = [];
   }
-  async #download(part: MediaPartResponse): Promise<Buffer> {
-    let response = part.url ? await fetch(part.url).catch(() => undefined) : undefined;
-    // A media url lasts 60 minutes; GET /v1/attachments/{id} makes a fresh one.
-    if (!response?.ok && part.id) {
-      const fresh = (await this.#relay.attachments.retrieve(part.id)).download_url;
-      if (fresh) response = await fetch(fresh);
-    }
-    if (!response?.ok) throw new Error(`Relay attachment download failed (${response?.status ?? "no url"})`);
-    return Buffer.from(await response.arrayBuffer());
+  #download(part: MediaPartResponse): Promise<Buffer> {
+    return downloadMedia(this.#relay, part);
   }
 }
+
+/** The bytes behind a media part; an expired url is renewed once. */
+export const downloadMedia = async (relay: Relay, part: MediaPartResponse): Promise<Buffer> => {
+  let response = part.url ? await fetch(part.url).catch(() => undefined) : undefined;
+  // A media url lasts 60 minutes; GET /v1/attachments/{id} makes a fresh one.
+  if (!response?.ok && part.id) {
+    const fresh = (await relay.attachments.retrieve(part.id)).download_url;
+    if (fresh) response = await fetch(fresh);
+  }
+  if (!response?.ok) throw new Error(`Relay attachment download failed (${response?.status ?? "no url"})`);
+  return Buffer.from(await response.arrayBuffer());
+};

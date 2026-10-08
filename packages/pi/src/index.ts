@@ -328,8 +328,6 @@ export const repliedContext = async (relay: Relay, data: MessageWebhookData): Pr
  * `answerMessages` makes of it, each on `${key}-${index}`.
  */
 export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: string, answer: string): Promise<void> => {
-  const messages = answerMessages(answer);
-  if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
   // An answer to another agent replies to its Message, as a bot's reply
   // names the message it answers (Telegram `reply_parameters.message_id`), so
   // an agent that sent several knows which one it answers. A person's
@@ -338,9 +336,16 @@ export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: st
   // Turns in one chat already run one after another, so an agent's two
   // messages each get their own answer.
   const opening = data.parts[0]?.type;
-  const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
-    ? { reply_to: { message_id: data.id } }
-    : {};
+  const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection" ? data.id : undefined;
+  await sendToChat(relay, data.chat.id, key, answer, replyTo);
+};
+/**
+ * Sends an answer to one chat as the Messages `answerMessages` makes of it,
+ * each on `${key}-${index}`; the first replies to `replyTo` when given.
+ */
+export const sendToChat = async (relay: Relay, chatId: string, key: string, answer: string, replyTo?: string): Promise<void> => {
+  const messages = answerMessages(answer);
+  if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
   for (const [index, message] of messages.entries()) {
     const messageKey = `${key}-${index}`;
     let parts = message.parts;
@@ -353,7 +358,7 @@ export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: st
         continue;
       }
     }
-    await relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: messageKey, ...(index === 0 ? replyTo : {}) } });
+    await relay.chats.messages.send(chatId, { message: { parts, idempotency_key: messageKey, ...(index === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}) } });
   }
 };
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);

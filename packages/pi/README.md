@@ -47,6 +47,52 @@ to the chat the Message came from once Pi reports `agent_settled`. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
+## With pi-channels
+
+[pi-channels](https://github.com/espennilsen/pi/tree/main/packages/pi-channels)
+routes Messages between Pi and Telegram, Slack and webhooks. With this
+extension also installed, Relay is one more pi-channels adapter, named
+`relay`: `channel:send` to a Relay chat, routes, cron output and the chat
+bridge all work with it, and Relay Messages arrive on `channel:receive`.
+
+```bash
+pi install npm:@e9n/pi-channels
+pi install npm:@relaymessenger/pi
+```
+
+Put a `relay` key in the `pi-channels` settings, beside the routes that name
+your Relay chats (`~/.pi/agent/settings.json`, or `.pi/settings.json` in a
+project):
+
+```json
+{
+  "pi-channels": {
+    "relay": {
+      "agentTokenCommand": ["secret-tool", "lookup", "service", "relay", "username", "agent"],
+      "senders": ["alice"]
+    },
+    "routes": {
+      "me": { "adapter": "relay", "recipient": "3f1c9a52-8d4e-4b7a-9c61-2e5f0d8b7a14" }
+    },
+    "bridge": { "enabled": true }
+  }
+}
+```
+
+The token is `RELAY_AGENT_TOKEN`, else whatever `agentTokenCommand` prints; it
+is never logged. `baseURL`, `senders` and `transcribeCpp` work as in session
+mode. Do not add `relay` under `adapters`: pi-channels makes only its own
+adapter types from there, and would report `Unknown adapter type: relay`.
+
+The recipient is a Relay chat id. An incoming Message's `sender` is its chat
+id too, so the chat bridge answers in the same chat; the sender's Handle and
+the Message id are in `metadata`. Outgoing text goes through the same answer
+parser as Pi's answers, so `buttons`, `selection`, `place` and the other
+fenced blocks are sent as their parts. Photos and files arrive as
+attachments in a temporary folder; voice notes arrive as their transcript
+when `transcribeCpp` is set. The adapter keeps its own Relay WebSocket, so do
+not also run session mode on the same Agent Token.
+
 ## Parts, silence and tools
 
 Pi's final text carries Relay's parts as fenced blocks, read by the SDK's
