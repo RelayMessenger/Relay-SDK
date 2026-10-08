@@ -101,7 +101,8 @@ describe("answers", () => {
     channel.ended([{ role: "assistant", content: [], stopReason: "stop" }]);
     await channel.settled();
     expect(send).not.toHaveBeenCalled();
-    expect(channel.chatId).toBeUndefined();
+    // Between turns the tools act on the last chat, so a background result's run can still text it.
+    expect(channel.chatId).toBe("one");
     expect(runAnswers([{ role: "assistant", content: [], stopReason: "stop" }])).toEqual([]);
   });
 });
