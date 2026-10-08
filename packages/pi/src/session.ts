@@ -4,7 +4,7 @@ import Relay, {
   type MessageWebhookData,
   type RelayWebhookEvent,
 } from "@relaymessenger/sdk";
-import { piPrompt, repliedContext, sendAnswer, wordsOf } from "./index.js";
+import { messageIdLine, piPrompt, repliedContext, sendAnswer, typing, wordsOf } from "./index.js";
 import type { Transcribe } from "./voice.js";
 
 export interface TextBlock { readonly type: "text"; readonly text: string }
@@ -76,7 +76,7 @@ export const sessionContent = async (data: MessageWebhookData, media: SessionMed
   }
   const words = [wordsOf(data), lines.join("\n"), replyLine].filter(Boolean).join("\n\n");
   if (!words) return null;
-  return [{ type: "text", text: piPrompt(words) }, ...images];
+  return [{ type: "text", text: piPrompt([words, messageIdLine(data)].filter(Boolean).join("\n\n")) }, ...images];
 };
 
 /**
@@ -168,6 +168,10 @@ export class SessionChannel {
   get chatId(): string | undefined {
     return this.#pending?.data.chat.id;
   }
+  /** The Message the session is answering now, for relay_react. */
+  get messageId(): string | undefined {
+    return this.#pending?.data.id;
+  }
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
     if (!this.#pending && this.#origin === undefined) this.#origin = (messages[0] as { role?: string } | undefined)?.role ?? null;
@@ -192,6 +196,7 @@ export class SessionChannel {
     } catch (error) {
       console.error(`Relay: the answer was not sent: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      if (turn) await typing(this.#relay, turn.data.chat.id, false);
       this.next();
     }
   }
@@ -204,6 +209,8 @@ export class SessionChannel {
     if (this.#pending || !this.#queue.length) return;
     const turn = this.#queue.shift()!;
     this.#pending = turn;
+    // The person sees Pi typing while it works, steered or not; settled() stops it once the answer is sent.
+    void typing(this.#relay, turn.data.chat.id, true);
     if (!this.#options.isIdle()) {
       this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
       return;
