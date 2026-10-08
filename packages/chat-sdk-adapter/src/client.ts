@@ -17,8 +17,10 @@ import type {
   RelayAttachment,
   RelayAttachmentAllocation,
   RelayChat,
+  RelayChatLocation,
   RelayGetMessagesResult,
   RelayCreatePaymentRequest,
+  RelayLocationRequestResponse,
   RelayMessage,
   RelayOutgoingPart,
   RelayPaymentRequest,
@@ -387,6 +389,34 @@ export class RelayClient {
         headers: { "Content-Type": "application/json" },
         method: "POST",
       },
+    );
+  }
+
+  /**
+   * Ask the person in this one-to-one chat to share their location. The chat
+   * gets a Message from the agent with one `location_request` part; no
+   * position comes back. Wait for `location.sharing.started`, then read it
+   * with `getLocation`. Relay answers 409 while the person already shares,
+   * and in a group chat; 429 after one request in the same chat within 60 s.
+   */
+  async requestLocation(chatId: string): Promise<RelayLocationRequestResponse> {
+    assertRelayUuid(chatId, "chatId");
+    return this.request<RelayLocationRequestResponse>(
+      `/v1/chats/${encodeURIComponent(chatId)}/location/request`,
+      { method: "POST" },
+    );
+  }
+
+  /**
+   * Read where everyone sharing with the agent in this chat is now: one
+   * GeoJSON Feature per person, coordinates `[longitude, latitude]`.
+   * `data.features` is empty when nobody shares.
+   */
+  async getLocation(chatId: string): Promise<RelayChatLocation> {
+    assertRelayUuid(chatId, "chatId");
+    return this.request<RelayChatLocation>(
+      `/v1/chats/${encodeURIComponent(chatId)}/location`,
+      { method: "GET" },
     );
   }
 

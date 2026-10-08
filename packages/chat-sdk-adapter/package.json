@@ -62,7 +62,8 @@
     "chat": "^4.41.0"
   },
   "dependencies": {
-    "@chat-adapter/shared": "4.41.0"
+    "@chat-adapter/shared": "4.41.0",
+    "@relaymessenger/sdk": "0.5.3-staging.0"
   },
   "devDependencies": {
     "@chat-adapter/state-memory": "4.41.0",
