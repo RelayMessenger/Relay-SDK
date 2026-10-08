@@ -8,6 +8,7 @@ import {
   rewriteCookbook,
   rewriteCookbooks,
   deriveVersion,
+  dependsOnRelay,
   filesCarryingVersion,
   readManifests,
   releaseOrder,
@@ -234,4 +235,20 @@ test("the cookbook rewrite fails closed", () => {
   mkdirSync(odd, { recursive: true });
   writeFileSync(join(odd, "package.json"), JSON.stringify({ dependencies: { "@relaymessenger/sdk": ">=0.3.0-staging.1 <1" } }));
   assert.throws(() => rewriteCookbook(odd, cookbookPlan), /only X.Y.Z-staging.N/u);
+});
+
+test("a dry run skips validation for each package with a Relay dependency or peer, read from its manifest", () => {
+  const manifests = readManifests(root);
+  const relay = Object.fromEntries(Object.keys(manifests).map((key) => [key, dependsOnRelay(manifests[key], manifests)]));
+  assert.equal(relay.sdk, false);
+  // chat-sdk-adapter depends on the sdk since #514; a name list had it as none.
+  assert.equal(relay["chat-sdk-adapter"], true);
+  for (const key of ["livekit", "pi", "cli", "openclaw", "claude-code", "elevenlabs", "think"]) assert.equal(relay[key], true, key);
+  const fixtures = {
+    sdk: { name: "@relaymessenger/sdk", version: "1.0.0-staging.0" },
+    plain: { name: "@relaymessenger/plain", dependencies: { zod: "4.6.5" } },
+    peer: { name: "@relaymessenger/peer", peerDependencies: { "@relaymessenger/sdk": "^1.0.0" } },
+  };
+  assert.equal(dependsOnRelay(fixtures.plain, fixtures), false);
+  assert.equal(dependsOnRelay(fixtures.peer, fixtures), true);
 });

@@ -61,6 +61,18 @@ export function internalDependencies(manifest, manifests) {
 }
 
 /**
+ * Whether a package depends on another Relay workspace package (a dependency
+ * or peer dependency). A dry run cannot install such a package's Relay pins,
+ * which npm does not have until the release publishes them, so it builds it
+ * but skips its validation. Read from the manifest, never a list of names:
+ * chat-sdk-adapter gained an sdk dependency (#514) while a list still said it
+ * had none, and the dry run then asked npm for an unreleased sdk (ETARGET).
+ */
+export function dependsOnRelay(manifest, manifests) {
+  return internalDependencies(manifest, manifests).length > 0;
+}
+
+/**
  * The catalog order is the publish order. A dependent's validation installs
  * its Relay dependencies from npm, so every dependency must come earlier.
  */

@@ -22,6 +22,7 @@ import { landCookbookPins } from "./release-cookbook-land.mjs";
 import {
   cookbookDirectories,
   cookbookPrereleasePins,
+  dependsOnRelay,
   filesCarryingVersion,
   internalDependencies,
   readManifests,
@@ -209,11 +210,7 @@ for (const row of plan) {
   // the checked-in runtime still said 0.3.0-staging.6 and the test failed
   // against the rewritten 0.3.0 manifest (2026-09-07).
   run(npm, ["run", "build", "--workspace", row.name]);
-  // Read from the manifest, not a list of names: chat-sdk-adapter gained an
-  // sdk dependency (#514) while still listed here as having none, and its
-  // installed test then asked npm for an sdk not yet released (ETARGET).
-  const dependsOnRelay = relayDependencies.length > 0;
-  if (!(dryRun && dependsOnRelay)) {
+  if (!(dryRun && dependsOnRelay(manifests[row.key], manifests))) {
     // A dependent's validation installs its Relay pins from npm; in a dry run
     // they are not there yet, so the build above is as far as it can go.
     run(npm, ["run", entry.validate], { env: { RELAY_RELEASE: "1" } });
