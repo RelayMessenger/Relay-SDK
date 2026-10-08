@@ -47,6 +47,13 @@ to the chat the Message came from once Pi reports `agent_settled`. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
+A Message that arrives while the session is busy with a run Relay did not
+start steers that run (`deliverAs: "steer"`), and its answer goes back once
+the run settles. A run no one prompted, such as a pi-subagents result, sends
+its last words to the chat of the last Message, kept in
+`relay-last-chat.json` in the agent directory so it survives a restart; a turn
+typed in the session stays there.
+
 ## With pi-channels
 
 [pi-channels](https://github.com/espennilsen/pi/tree/main/packages/pi-channels)
@@ -102,13 +109,22 @@ Pi's final text carries Relay's parts as fenced blocks, read by the SDK's
 with no words is Pi choosing to stay silent: nothing is sent, in the channel
 and in the session alike.
 
-The extension registers three tools for the chat Pi is answering (Pi
+The extension registers four tools for the chat Pi is answering (Pi
 `registerTool`): `relay_request_location` asks the person to share their
-location, `relay_read_location` reads where everyone sharing is now, and
+location, `relay_read_location` reads where everyone sharing is now,
 `relay_send_media` uploads a file from the machine and sends it as its own
-Message. `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
+Message (`reply_to` threads it to a Message by id), and `relay_react` reacts
+to a Message with an emoji (the six tapbacks, or any other emoji as a custom
+reaction), the Message being answered unless `message_id` names another.
+`runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
 `RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
 session mode they act on the chat whose Message is being answered.
+
+Each prompt ends with `[Relay message id: <id>]`. An answer that contains
+`[[reply_to_current]]` is sent as a reply to that Message, and one with
+`[[reply_to:<id>]]` as a reply to the Message named; the tag is removed from
+the words (the reply tags of OpenClaw's rich output protocol). Pi's typing
+indicator shows in the chat from the start of a turn until its answer is sent.
 
 ## Selection
 

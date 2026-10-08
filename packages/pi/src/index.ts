@@ -159,10 +159,29 @@ export const piPrompt = (message: string): string =>
 
 /**
  * The Relay tools the Pi extension registers when Relay starts it for a chat
- * (`relay_request_location`, `relay_read_location`, `relay_send_media`).
+ * (`relay_request_location`, `relay_read_location`, `relay_send_media`,
+ * `relay_react`), and the reply tags OpenClaw's channels read
+ * (docs/reference/rich-output-protocol.md: `[[reply_to_current]]`,
+ * `[[reply_to:<id>]]`).
  */
 export const RELAY_TOOLS_LINE =
-  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. relay_send_media sends a file from this machine as its own Message.";
+  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. relay_send_media sends a file from this machine as its own Message. relay_react reacts to a Message with an emoji. Each Message names its Relay message id; to thread your answer to a Message, put [[reply_to_current]] (the Message you are answering) or [[reply_to:<id>]] in it: the tag is removed and not shown.";
+
+/** The id of the Message being answered, as one line of data the Relay tools and reply tags can name. */
+export const messageIdLine = (data: Pick<MessageWebhookData, "id">): string => data.id ? `[Relay message id: ${data.id}]` : "";
+
+const REPLY_TAG = /\[\[\s*reply_to(?:_current|\s*:\s*([^\]\s]+))\s*\]\]/gu;
+
+/**
+ * An answer's reply tag: the words without any `[[reply_to_current]]` or
+ * `[[reply_to:<id>]]`, and the Message the first one names (`current` for the
+ * Message being answered). No tag leaves the words as they are.
+ */
+export const replyTag = (answer: string): { answer: string; replyTo?: string } => {
+  const first = [...answer.matchAll(REPLY_TAG)][0];
+  if (!first) return { answer };
+  return { answer: answer.replace(REPLY_TAG, "").replace(/[ \t]+\n/gu, "\n").trim(), replyTo: first[1] ?? "current" };
+};
 
 /**
  * The messages an answer becomes: each link written alone on a line as its
@@ -304,13 +323,19 @@ export class PiChannel {
     if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
     const replyLine = await repliedContext(this.#relay, data);
-    await session.command("prompt", { message: piPrompt([message, replyLine].filter(Boolean).join("\n\n")) }, timeout, signal);
-    if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
-    const response = await session.command("get_last_assistant_text", {}, timeout, signal);
-    const answer = response.data?.text?.trim();
-    // No words is Pi's choice to stay silent: nothing is sent.
-    if (!answer) return;
-    await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+    // The person sees Pi typing while it works; it stops once the answer is sent.
+    await typing(this.#relay, data.chat.id, true);
+    try {
+      await session.command("prompt", { message: piPrompt([message, replyLine, messageIdLine(data)].filter(Boolean).join("\n\n")) }, timeout, signal);
+      if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
+      const response = await session.command("get_last_assistant_text", {}, timeout, signal);
+      const answer = response.data?.text?.trim();
+      // No words is Pi's choice to stay silent: nothing is sent.
+      if (!answer) return;
+      await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+    } finally {
+      await typing(this.#relay, data.chat.id, false);
+    }
   }
 }
 /**
@@ -335,16 +360,23 @@ export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: st
   // not reply to buttons or a selection, and a reply names part 0.
   // Turns in one chat already run one after another, so an agent's two
   // messages each get their own answer.
+  // A reply tag Pi wrote names the Message itself and wins.
   const opening = data.parts[0]?.type;
-  const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection" ? data.id : undefined;
-  await sendToChat(relay, data.chat.id, key, answer, replyTo);
+  const answerable = opening !== "buttons" && opening !== "selection";
+  const replyTo = data.sender_handle?.kind === "agent" && answerable ? data.id : undefined;
+  await sendToChat(relay, data.chat.id, key, answer, replyTo, answerable ? data.id : undefined);
 };
 /**
  * Sends an answer to one chat as the Messages `answerMessages` makes of it,
- * each on `${key}-${index}`; the first replies to `replyTo` when given.
+ * each on `${key}-${index}`; the first replies to `replyTo` when given. A
+ * reply tag in the answer wins and is removed: `[[reply_to:<id>]]` names the
+ * Message, `[[reply_to_current]]` names `current`, and no reply when there is
+ * no current Message.
  */
-export const sendToChat = async (relay: Relay, chatId: string, key: string, answer: string, replyTo?: string): Promise<void> => {
-  const messages = answerMessages(answer);
+export const sendToChat = async (relay: Relay, chatId: string, key: string, answer: string, replyTo?: string, current?: string): Promise<void> => {
+  const tagged = replyTag(answer);
+  const target = tagged.replyTo === undefined ? replyTo : tagged.replyTo === "current" ? current : tagged.replyTo;
+  const messages = answerMessages(tagged.answer);
   if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
   for (const [index, message] of messages.entries()) {
     const messageKey = `${key}-${index}`;
@@ -358,7 +390,17 @@ export const sendToChat = async (relay: Relay, chatId: string, key: string, answ
         continue;
       }
     }
-    await relay.chats.messages.send(chatId, { message: { parts, idempotency_key: messageKey, ...(index === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}) } });
+    await relay.chats.messages.send(chatId, { message: { parts, idempotency_key: messageKey, ...(index === 0 && target ? { reply_to: { message_id: target } } : {}) } });
   }
 };
+/**
+ * Shows or clears Pi's typing indicator in a chat. It is a courtesy: a
+ * failure is logged and the turn goes on.
+ */
+export const typing = (relay: Relay, chatId: string, on: boolean): Promise<void> =>
+  Promise.resolve()
+    .then(() => on ? relay.chats.startTyping(chatId) : relay.chats.stopTyping(chatId))
+    .catch((error: unknown) => {
+      console.error(`Relay: typing indicator failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);

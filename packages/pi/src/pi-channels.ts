@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import type Relay from "@relaymessenger/sdk";
 import type { MediaPartResponse, MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
-import { repliedContext, sendToChat, wordsOf } from "./index.js";
+import { messageIdLine, repliedContext, sendToChat, wordsOf } from "./index.js";
 import { downloadMedia } from "./session.js";
 import type { Transcribe } from "./voice.js";
 
@@ -105,8 +105,10 @@ export const incomingMessage = async (
       lines.push(`[file: ${name}, could not be downloaded]`);
     }
   }
-  const text = [wordsOf(data), lines.join("\n"), await repliedContext(relay, data)].filter(Boolean).join("\n\n");
-  if (!text && !attachments.length) return null;
+  const words = [wordsOf(data), lines.join("\n"), await repliedContext(relay, data)].filter(Boolean).join("\n\n");
+  if (!words && !attachments.length) return null;
+  // The Message's id, as session mode gives it, so relay_react and reply tags can name it.
+  const text = [words, messageIdLine(data)].filter(Boolean).join("\n\n");
   return {
     adapter: RELAY_ADAPTER,
     sender: data.chat.id,

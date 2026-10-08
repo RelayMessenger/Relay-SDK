@@ -100,12 +100,13 @@ const attachSession = (pi: ExtensionAPI): void => {
       agentToken: token,
       relay,
       isIdle: () => ctx.isIdle(),
+      lastChatFile: join(agentDir(), "relay-last-chat.json"),
       ...(baseURL ? { baseURL } : {}),
       ...(senders ? { senders } : {}),
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
     });
     const current = channel;
-    registerRelayTools(pi, relay, () => current.chatId);
+    registerRelayTools(pi, relay, () => current.chatId, () => current.messageId);
     void channel.run(stop.signal).catch((error: unknown) => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -147,8 +148,8 @@ const attachPiChannels = (pi: ExtensionAPI): void => {
 };
 
 /** The Relay tools, as Pi registers a tool (docs/extensions.md, registerTool). */
-const registerRelayTools = (pi: ExtensionAPI, relay: Relay, chatId: () => string | undefined): void => {
-  for (const tool of relayTools(relay, chatId)) pi.registerTool(tool as unknown as Parameters<ExtensionAPI["registerTool"]>[0]);
+const registerRelayTools = (pi: ExtensionAPI, relay: Relay, chatId: () => string | undefined, messageId?: () => string | undefined): void => {
+  for (const tool of relayTools(relay, chatId, messageId)) pi.registerTool(tool as unknown as Parameters<ExtensionAPI["registerTool"]>[0]);
 };
 
 /**

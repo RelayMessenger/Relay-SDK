@@ -133,7 +133,7 @@ it.each([
   await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
   const prompt = vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line)))
     .find((command) => command.type === "prompt");
-  expect(prompt?.message).toBe(piPrompt(message));
+  expect(prompt?.message).toBe(piPrompt(`${message}\n\n[Relay message id: ${event.data.id}]`));
   expect(send).toHaveBeenCalledTimes(1);
 });
 

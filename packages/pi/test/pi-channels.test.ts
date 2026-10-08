@@ -86,7 +86,7 @@ describe("receiving", () => {
     const fake = fakeRelay();
     registerRelayAdapter(events, () => relayChannelAdapter({ relay: fake.relay }));
     await fake.deliver(event("e1", [text("hi there")]));
-    const expected = { adapter: "relay", sender: "chat_1", text: "hi there", metadata: expect.objectContaining({ eventId: "e1", messageId: "message-e1", chatId: "chat_1", handle: "alice" }) };
+    const expected = { adapter: "relay", sender: "chat_1", text: "hi there\n\n[Relay message id: message-e1]", metadata: expect.objectContaining({ eventId: "e1", messageId: "message-e1", chatId: "chat_1", handle: "alice" }) };
     expect(host.received).toEqual([expected]);
     expect(host.bridged).toEqual([expected]);
     expect(await host.bridge.sendReply(host.bridged[0]!.adapter, host.bridged[0]!.sender, "hello back")).toEqual({ ok: true });
@@ -101,7 +101,21 @@ describe("receiving", () => {
     await fake.deliver(event("e2", [text("stranger")], { handle: "mallory" }));
     await fake.deliver(event("e3", [text("ok")]));
     await fake.deliver(event("e3", [text("ok")]));
-    expect(host.received.map((message) => message.text)).toEqual(["ok"]);
+    expect(host.received.map((message) => message.text)).toEqual(["ok\n\n[Relay message id: message-e3]"]);
+  });
+  it("names the Message's id, so a bridged answer can thread to it with a reply tag", async () => {
+    const events = createEventBus();
+    const host = piChannelsHost(events);
+    const fake = fakeRelay();
+    registerRelayAdapter(events, () => relayChannelAdapter({ relay: fake.relay }));
+    await fake.deliver(event("e7", [text("which one?")]));
+    expect(host.bridged[0]!.text).toBe("which one?\n\n[Relay message id: message-e7]");
+    await host.bridge.sendReply("relay", "chat_1", "[[reply_to:message-e7]] This one.");
+    expect(fake.send).toHaveBeenCalledWith("chat_1", { message: { parts: [{ type: "text", value: "This one." }], idempotency_key: expect.stringMatching(/-0$/u), reply_to: { message_id: "message-e7" } } });
+    // No Message is current on the pi-channels path, so reply_to_current is removed and threads nothing.
+    fake.send.mockClear();
+    await host.bridge.sendReply("relay", "chat_1", "[[reply_to_current]] Plain.");
+    expect(fake.send).toHaveBeenCalledWith("chat_1", { message: { parts: [{ type: "text", value: "Plain." }], idempotency_key: expect.stringMatching(/-0$/u) } });
   });
   it("gives a photo as a downloaded image attachment", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(Buffer.from("png"))));
