@@ -6,7 +6,7 @@ import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, piEnv, piPrompt, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
-import { lastAnswer, SessionChannel } from "../src/session.js";
+import { runAnswers, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
 
 const fakeRelay = () => {
@@ -56,7 +56,7 @@ describe("tool registration", () => {
     vi.stubEnv("RELAY_AGENT_TOKEN", "secret");
     const tools: string[] = [];
     native({ registerTool: (tool: { name: string }) => tools.push(tool.name), registerCommand: vi.fn(), on: vi.fn() } as never);
-    expect(tools).toEqual(["relay_request_location", "relay_read_location", "relay_send_media", "relay_react"]);
+    expect(tools).toEqual(["message", "relay_request_location", "relay_read_location", "relay_send_media", "relay_react"]);
   });
   it("passes the chat, token and API origin to the Pi it starts", () => {
     expect(piEnv({ agentToken: "secret", baseURL: "https://api.example" }, "chat-1", { PATH: "/bin" })).toEqual({
@@ -101,7 +101,8 @@ describe("answers", () => {
     channel.ended([{ role: "assistant", content: [], stopReason: "stop" }]);
     await channel.settled();
     expect(send).not.toHaveBeenCalled();
-    expect(channel.chatId).toBeUndefined();
-    expect(lastAnswer([{ role: "assistant", content: [], stopReason: "stop" }])).toBeUndefined();
+    // Between turns the tools act on the last chat, so a background result's run can still text it.
+    expect(channel.chatId).toBe("one");
+    expect(runAnswers([{ role: "assistant", content: [], stopReason: "stop" }])).toEqual([]);
   });
 });
