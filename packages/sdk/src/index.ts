@@ -85,6 +85,13 @@ export {
   type AnswerSegment,
 } from "./links.js";
 export {
+  CARD_BLOCK_INSTRUCTION,
+  CARD_GUIDANCE,
+  PLACE_BLOCK_INSTRUCTION,
+  splitCardBlocks,
+  type SplitCardBlocks,
+} from "./card-blocks.js";
+export {
   PAYMENT_BLOCK_INSTRUCTION,
   PAYMENT_CATEGORIES,
   PAYMENT_DESCRIPTION_MAX_LENGTH,

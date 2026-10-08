@@ -72,7 +72,7 @@ describe("session channel", () => {
     await channel.settled();
     expect(send.mock.calls).toEqual([["one", { message: { parts: [{ type: "text", value: "hi there" }], idempotency_key: "pi-a-0" } }]]);
   });
-  it("sends the fallback line when a run ends with no words", async () => {
+  it("sends the fallback line when a run fails with no words", async () => {
     const { channel, send } = harness();
     await channel.receive(makeEvent("a", [text("hello")]));
     channel.ended([{ role: "assistant", content: [], stopReason: "error" }]);
