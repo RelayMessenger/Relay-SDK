@@ -91,11 +91,10 @@ claude plugin marketplace add /absolute/path/to/Relay-SDK
 claude plugin install relay@relay-messenger --scope user
 ```
 
-Do not edit `plugins/relay` directly. Refresh and validate root discovery with:
+Do not edit `plugins/relay` directly. Refresh root discovery with:
 
 ```bash
 npm run discovery:sync
-npm run discovery:validate
 ```
 
 ## Development

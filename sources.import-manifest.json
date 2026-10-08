@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "0a3a37d0e5a83bddde3073a6724e88e61f0f8d74cd2151c39263a20f1c8530c0",
+      "destination_sha256": "efe1afc817c29f6b5bbcbf08ec6797b68218cc13f232291027704a3a38663e78",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -800,7 +800,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/doctor.ts",
       "source_sha256": "230f4c6de33a36414bfbc0a5adb9d8605b0dae1b23c3035236568059aac05fee",
-      "destination_sha256": "13b246d46005ac6d11b1d89887a14b3d9fa444497349204b0c3db0922a53d228",
+      "destination_sha256": "2a8bc0228829cdb2230d9540f77e056161340dae1e1c2669579269d0448c31df",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

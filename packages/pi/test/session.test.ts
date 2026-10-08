@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { MessagePartResponse, MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { agentToken, relaySettings } from "../src/native.js";
-import { accepts, lastAnswer, NO_ANSWER, SessionChannel, sessionContent, type SessionContent } from "../src/session.js";
+import { accepts, bubbles, NO_ANSWER, runAnswers, SessionChannel, sessionContent, type SessionContent } from "../src/session.js";
 import { pcmFloats } from "../src/voice.js";
 
 const media = (id: string, mime: string, filename: string): MessagePartResponse => ({ type: "media", id, url: `https://files.test/${id}`, filename, mime_type: mime, size_bytes: 3, reactions: null }) as MessagePartResponse;
@@ -34,8 +34,8 @@ describe("session content", () => {
     const content = await sessionContent(event.data as MessageWebhookData, { download, transcribe });
     expect(content?.[1]).toEqual({ type: "image", data: Buffer.from("img").toString("base64"), mimeType: "image/png" });
     const words = (content?.[0] as { text: string }).text;
-    expect(words).toContain("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]");
-    expect(words).toContain("Relay sends that answer to the chat for you");
+    // The Message alone: the Relay hint is in the system prompt, not here.
+    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]");
     expect(transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "note.m4a");
   });
   it("names a voice note it cannot hear, and gives nothing for an empty Message", async () => {
@@ -54,9 +54,14 @@ describe("session content", () => {
     expect(accepts(makeEvent("a", [text("hi")], { handle: "Bob" }), ["@bob"])).toBe(true);
     expect(accepts(makeEvent("a", [text("hi")], { handle: "mallory" }), ["bob"])).toBe(false);
   });
-  it("reads the last assistant words of a run", () => {
-    expect(lastAnswer([assistant("first"), { role: "user", content: "x" }, assistant("last")])).toBe("last");
-    expect(lastAnswer([{ role: "assistant", content: [{ type: "toolCall" }] }])).toBeUndefined();
+  it("reads every assistant text of a run, in order", () => {
+    expect(runAnswers([assistant("first"), { role: "user", content: "x" }, assistant(""), assistant("last")])).toEqual(["first", "last"]);
+    expect(runAnswers([{ role: "assistant", content: [{ type: "toolCall" }] }])).toEqual([]);
+    expect(runAnswers([{ role: "assistant", content: [], stopReason: "error" }])).toEqual([NO_ANSWER]);
+  });
+  it("splits an answer at blank lines, keeping a fenced block whole under its words", () => {
+    expect(bubbles("**On it.**\n\nThe store opens at 9.\n\n\nSee you")).toEqual(["**On it.**", "The store opens at 9.", "See you"]);
+    expect(bubbles("Pick one\n\n```buttons\nA\n\nB\n```\n\nLater")).toEqual(["Pick one\n\n```buttons\nA\n\nB\n```", "Later"]);
   });
 });
 
@@ -89,14 +94,36 @@ describe("session channel", () => {
     channel.ended([assistant("to two")]); await channel.settled();
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "to one"], ["two", "to two"]]);
   });
-  it("waits while the session is busy with something else", async () => {
-    let idle = false;
-    const { channel, sent } = harness({ idle: () => idle });
-    await channel.receive(makeEvent("a", [text("hello")]));
-    expect(sent).toHaveLength(0);
-    // The person's own run settles; Relay's Message goes next.
-    idle = true; await channel.settled();
+  it("steers a run it did not start, and answers once when it settles", async () => {
+    const { channel, send, sent } = harness({ idle: () => false });
+    await channel.receive(makeEvent("a", [text("stop that")], { chat: "one" }));
+    expect(sent).toEqual([{ content: expect.any(Array), options: { deliverAs: "steer" } }]);
+    // A second Message waits behind the pending one rather than steering too.
+    await channel.receive(makeEvent("b", [text("and this")], { chat: "one" }));
     expect(sent).toHaveLength(1);
+    channel.ended([{ role: "user", content: "typed" }, assistant("stopped")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "stopped"]]);
+    expect(sent).toHaveLength(2);
+  });
+  it("sends a run no one prompted to the last chat, kept across restarts", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "relay-pi-last-")), "last.json");
+    const send = vi.fn().mockResolvedValue({});
+    const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() }, attachments: { retrieve: vi.fn() } } as unknown as Relay;
+    const pi = { sendUserMessage: vi.fn() };
+    const first = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: () => true, lastChatFile: file });
+    await first.receive(makeEvent("a", [text("start a helper")], { chat: "phone" }));
+    first.ended([assistant("started")]); await first.settled();
+    send.mockClear();
+    const channel = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: () => true, lastChatFile: file });
+    channel.ended([{ role: "custom", customType: "subagent-notify", content: "done" }, assistant("the helper finished")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["phone", "the helper finished"]]);
+    expect(send.mock.calls[0]?.[1].message.reply_to).toBeUndefined();
+    // A typed turn stays on the desktop.
+    channel.ended([{ role: "user", content: "typed" }, assistant("desk only")]);
+    await channel.settled();
+    expect(send).toHaveBeenCalledTimes(1);
   });
   it("does not answer a run it did not start", async () => {
     const { channel, send } = harness();

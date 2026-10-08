@@ -47,22 +47,104 @@ to the chat the Message came from once Pi reports `agent_settled`. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
+A Message that arrives while the session is busy with a run Relay did not
+start steers that run (`deliverAs: "steer"`), and its answer goes back once
+the run settles. A run no one prompted, such as a pi-subagents result, sends
+its last words to the chat of the last Message, kept in
+`relay-last-chat.json` in the agent directory so it survives a restart; a turn
+typed in the session stays there.
+
+## With pi-channels
+
+[pi-channels](https://github.com/espennilsen/pi/tree/main/packages/pi-channels)
+routes Messages between Pi and Telegram, Slack and webhooks. With this
+extension also installed, Relay is one more pi-channels adapter, named
+`relay`: `channel:send` to a Relay chat, routes, cron output and the chat
+bridge all work with it, and Relay Messages arrive on `channel:receive`.
+
+```bash
+pi install npm:@e9n/pi-channels
+pi install npm:@relaymessenger/pi
+```
+
+Put a `relay` key in the `pi-channels` settings, beside the routes that name
+your Relay chats (`~/.pi/agent/settings.json`, or `.pi/settings.json` in a
+project):
+
+```json
+{
+  "pi-channels": {
+    "relay": {
+      "agentTokenCommand": ["secret-tool", "lookup", "service", "relay", "username", "agent"],
+      "senders": ["alice"]
+    },
+    "routes": {
+      "me": { "adapter": "relay", "recipient": "3f1c9a52-8d4e-4b7a-9c61-2e5f0d8b7a14" }
+    },
+    "bridge": { "enabled": true }
+  }
+}
+```
+
+The token is `RELAY_AGENT_TOKEN`, else whatever `agentTokenCommand` prints; it
+is never logged. `baseURL`, `senders` and `transcribeCpp` work as in session
+mode. Do not add `relay` under `adapters`: pi-channels makes only its own
+adapter types from there, and would report `Unknown adapter type: relay`.
+
+The recipient is a Relay chat id. An incoming Message's `sender` is its chat
+id too, so the chat bridge answers in the same chat; the sender's Handle and
+the Message id are in `metadata`. Outgoing text goes through the same answer
+parser as Pi's answers, so `buttons`, `selection`, `place` and the other
+fenced blocks are sent as their parts. Photos and files arrive as
+attachments in a temporary folder; voice notes arrive as their transcript
+when `transcribeCpp` is set. The adapter keeps its own Relay WebSocket, so do
+not also run session mode on the same Agent Token.
+
 ## Parts, silence and tools
 
+Relay describes itself once, in the system prompt, the way Hermes and
+OpenClaw give each platform a short hint: what renders in a Relay chat, that
+the final answer is sent to the chat, and that the `message` tool can text,
+react or send a file, images included, at any time. `runPiChannel` passes it
+with `--append-system-prompt`; session mode adds it as a `relay` section from
+`before_agent_start` while Relay is attached. Each Message reaches Pi as its
+own words only: the text, the Message it replies to, and its Relay message id.
+The pi-channels adapter adds no hint: pi-channels answers in its own
+subprocesses, started with `--no-extensions`.
+
 Pi's final text carries Relay's parts as fenced blocks, read by the SDK's
-`answerMessages`, and every prompt teaches them: `buttons`, `selection`,
+`answerMessages`, and the hint teaches them: `buttons`, `selection`,
 `form`, `rich_card`, `carousel` (2 to 10 cards), `place`, `payment` and
 `rating_request`, plus a URL alone on a line for a link card. A final answer
 with no words is Pi choosing to stay silent: nothing is sent, in the channel
 and in the session alike.
 
-The extension registers three tools for the chat Pi is answering (Pi
-`registerTool`): `relay_request_location` asks the person to share their
-location, `relay_read_location` reads where everyone sharing is now, and
-`relay_send_media` uploads a file from the machine and sends it as its own
-Message. `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
+In session mode every assistant text of a run is sent, in order, each split
+at blank lines into its own Message (OpenClaw's `chunkMode: "newline"`); a
+fenced block stays with the words above it. A run that starts a background
+pi-subagents task remembers the Message it answered, and the task's result is
+sent as a reply to that Message.
+
+The extension registers the `message` tool for the chat Pi is answering (Pi
+`registerTool`, after OpenClaw's shared `message` tool): `action: "send"`
+texts the person now (`text`, optional `reply_to`), `action: "react"` reacts
+to a Message with an emoji (the six tapbacks, or any other emoji as a custom
+reaction), the Message being answered unless `message_id` names another, and
+`action: "file"` uploads a file from the machine and sends it as its own
+Message. A run that texts with `message` sends no final text, so nothing is
+sent twice. `relay_request_location` asks the person to share their location
+and `relay_read_location` reads where everyone sharing is now.
+`relay_send_media` and `relay_react` stay registered for one release as
+aliases of `message` file and react.
+`runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
 `RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
 session mode they act on the chat whose Message is being answered.
+
+Each Message ends with `[Relay message id: <id>]`. An answer that contains
+`[[reply_to_current]]` is sent as a reply to that Message, and one with
+`[[reply_to:<id>]]` as a reply to the Message named; the tag is removed from
+the words (the reply tags of OpenClaw's rich output protocol). Pi's typing
+indicator shows in the chat from the start of a turn until its answer is sent.
 
 ## Selection
 

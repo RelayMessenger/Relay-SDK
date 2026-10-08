@@ -10,7 +10,9 @@ from packaging.requirements import Requirement
 ROOT = Path(__file__).resolve().parents[1]
 # relaymessenger 0.1.0 is the first release whose relaymessenger.calls exports
 # RelayRive and WordTiming, which this package's rive.py imports when it loads.
-FIRST_WITH_RIVE = "0.1.0"
+# 0.1.1 adds the call-speed fixes (bounded relay gathering, 2 s restart connect
+# timeout); without them a voice call can wait 5-17 s before it connects.
+FIRST_WITH_FAST_CALLS = "0.1.1"
 
 
 def _core() -> Requirement:
@@ -19,11 +21,11 @@ def _core() -> Requirement:
     return core
 
 
-def test_allows_no_relaymessenger_without_relay_rive() -> None:
+def test_allows_no_relaymessenger_without_fast_calls() -> None:
     core = _core()
-    for older in ["0.1.0.dev1", "0.1.0rc1", "0.0.9"]:
+    for older in ["0.1.0", "0.1.1rc1", "0.0.9"]:
         assert not core.specifier.contains(older, prereleases=True), older
-    assert core.specifier.contains(FIRST_WITH_RIVE)
+    assert core.specifier.contains(FIRST_WITH_FAST_CALLS)
 
 
 def test_allows_the_relaymessenger_in_this_repository() -> None:

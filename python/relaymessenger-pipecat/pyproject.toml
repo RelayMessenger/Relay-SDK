@@ -1,6 +1,6 @@
 [project]
 name = "relaymessenger-pipecat"
-version = "0.1.1"
+version = "0.1.2"
 description = "Relay Calls for Pipecat: a transport that joins a Relay Call as the agent."
 readme = "README.md"
 license = "MIT"

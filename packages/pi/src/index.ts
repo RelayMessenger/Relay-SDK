@@ -82,6 +82,10 @@ interface RpcRecord {
   readonly type?: string; readonly id?: string; readonly success?: boolean; readonly data?: { text?: string | null }; readonly error?: string;
   /** `extension_ui_request` fields (Pi docs/rpc.md). */
   readonly method?: string; readonly title?: string; readonly message?: string; readonly options?: unknown; readonly timeout?: unknown;
+  /** `tool_execution_start` fields (Pi docs/rpc.md). */
+  readonly toolName?: string; readonly isError?: boolean;
+  /** `tool_execution_end`: the tool's result. */
+  readonly result?: { details?: { sent?: unknown } };
 }
 
 /** The `extension_ui_response` to one dialog request, from the option picked. */
@@ -150,19 +154,51 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
   return wordsOf(event.data) || null;
 };
 /**
- * The prompt pi is given for one message: the words, then how to answer.
- * This process sends pi's final text for it, and the same buttons and link
- * rules every other runtime carries.
+ * What Relay is and what renders there, given once in the system prompt as a
+ * platform hint (Hermes PLATFORM_HINTS, OpenClaw inboundFormattingHints), so
+ * each Message reaches Pi as the person's own words.
  */
-export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. To stay silent, end with no text: nothing is sent. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${FORM_BLOCK_INSTRUCTION} ${FORM_GUIDANCE} ${CARD_BLOCK_INSTRUCTION} ${CARD_GUIDANCE} ${PLACE_BLOCK_INSTRUCTION} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}${RELAY_TOOLS_LINE}`;
+export const RELAY_HINT = `You are in a Relay chat, a messaging app on the person's phone. Your final message is sent to the chat as your answer, and a final message with no text sends nothing. The message tool can text the person, react to a Message with an emoji, or send a file from this machine, images included, at any time; a run that texted with it sends no final message, so nothing is sent twice. Inline Markdown renders: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.
+
+${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${FORM_BLOCK_INSTRUCTION} ${FORM_GUIDANCE} ${CARD_BLOCK_INSTRUCTION} ${CARD_GUIDANCE} ${PLACE_BLOCK_INSTRUCTION} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}`;
+
+/** The system prompt section the hint goes in: Pi wraps it as `<relay>…</relay>`. */
+export const RELAY_HINT_SECTION = "relay";
 
 /**
  * The Relay tools the Pi extension registers when Relay starts it for a chat
- * (`relay_request_location`, `relay_read_location`, `relay_send_media`).
+ * (`message`, `relay_request_location`, `relay_read_location`), and the reply tags OpenClaw's channels read
+ * (docs/reference/rich-output-protocol.md: `[[reply_to_current]]`,
+ * `[[reply_to:<id>]]`).
  */
 export const RELAY_TOOLS_LINE =
-  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. relay_send_media sends a file from this machine as its own Message.";
+  "In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. message texts the person now (action send), reacts to a Message with an emoji (react), or sends a file from this machine (file). Each Message names its Relay message id; to thread your answer to a Message, put [[reply_to_current]] (the Message you are answering) or [[reply_to:<id>]] in it: the tag is removed and not shown.";
+
+/** The whole hint: what renders, then the Relay tools. */
+export const relayHint = (): string => `${RELAY_HINT}\n\n${RELAY_TOOLS_LINE}`;
+
+/**
+ * One inbound Message as Pi reads it: the person's words, the line naming
+ * the Message it replies to, and its Relay message id.
+ */
+export const inboundText = (words: string, replyLine: string, data: Pick<MessageWebhookData, "id">): string =>
+  [words, replyLine, messageIdLine(data)].filter(Boolean).join("\n\n");
+
+/** The id of the Message being answered, as one line of data the Relay tools and reply tags can name. */
+export const messageIdLine = (data: Pick<MessageWebhookData, "id">): string => data.id ? `[Relay message id: ${data.id}]` : "";
+
+const REPLY_TAG = /\[\[\s*reply_to(?:_current|\s*:\s*([^\]\s]+))\s*\]\]/gu;
+
+/**
+ * An answer's reply tag: the words without any `[[reply_to_current]]` or
+ * `[[reply_to:<id>]]`, and the Message the first one names (`current` for the
+ * Message being answered). No tag leaves the words as they are.
+ */
+export const replyTag = (answer: string): { answer: string; replyTo?: string } => {
+  const first = [...answer.matchAll(REPLY_TAG)][0];
+  if (!first) return { answer };
+  return { answer: answer.replace(REPLY_TAG, "").replace(/[ \t]+\n/gu, "\n").trim(), replyTo: first[1] ?? "current" };
+};
 
 /**
  * The messages an answer becomes: each link written alone on a line as its
@@ -194,6 +230,8 @@ class ChatSession {
   readonly process: PiProcess;
   readonly lines: AsyncIterator<string>;
   settled = false;
+  /** Whether Pi texted the chat itself with `message` since the last prompt, so its final text is not sent again. */
+  texted = false;
   private nextId = 0;
   /** Dialogs waiting on a person; Pi is silent meanwhile, which is not a stall. */
   private dialogs = 0;
@@ -237,6 +275,7 @@ class ChatSession {
       if (result.done) throw new Error("Pi RPC process exited");
       const record = JSON.parse(result.value) as RpcRecord;
       if (record.type === "agent_settled") this.settled = true;
+      if (record.type === "tool_execution_end" && record.toolName === "message" && !record.isError && record.result?.details?.sent === true) this.texted = true;
       if (record.type === "extension_ui_request" && DIALOG_METHODS.has(String(record.method))) this.#answer(record);
       return record;
     } finally {
@@ -301,16 +340,24 @@ export class PiChannel {
   async #runTurn(event: RelayWebhookEvent, message: string, signal?: AbortSignal): Promise<void> {
     const data = event.data as MessageWebhookData;
     let session = this.#sessions.get(data.chat.id);
-    if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
+    if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", "--append-system-prompt", relayHint(), ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
     const replyLine = await repliedContext(this.#relay, data);
-    await session.command("prompt", { message: piPrompt([message, replyLine].filter(Boolean).join("\n\n")) }, timeout, signal);
-    if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
-    const response = await session.command("get_last_assistant_text", {}, timeout, signal);
-    const answer = response.data?.text?.trim();
-    // No words is Pi's choice to stay silent: nothing is sent.
-    if (!answer) return;
-    await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+    // The person sees Pi typing while it works; it stops once the answer is sent.
+    await typing(this.#relay, data.chat.id, true);
+    session.texted = false;
+    try {
+      await session.command("prompt", { message: inboundText(message, replyLine, data) }, timeout, signal);
+      if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
+      const response = await session.command("get_last_assistant_text", {}, timeout, signal);
+      const answer = response.data?.text?.trim();
+      // No words is Pi's choice to stay silent, and a Pi that texted with
+      // `message` has said it (OpenClaw didSendViaMessagingTool): nothing is sent.
+      if (!answer || session.texted) return;
+      await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+    } finally {
+      await typing(this.#relay, data.chat.id, false);
+    }
   }
 }
 /**
@@ -328,8 +375,6 @@ export const repliedContext = async (relay: Relay, data: MessageWebhookData): Pr
  * `answerMessages` makes of it, each on `${key}-${index}`.
  */
 export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: string, answer: string): Promise<void> => {
-  const messages = answerMessages(answer);
-  if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
   // An answer to another agent replies to its Message, as a bot's reply
   // names the message it answers (Telegram `reply_parameters.message_id`), so
   // an agent that sent several knows which one it answers. A person's
@@ -337,10 +382,24 @@ export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: st
   // not reply to buttons or a selection, and a reply names part 0.
   // Turns in one chat already run one after another, so an agent's two
   // messages each get their own answer.
+  // A reply tag Pi wrote names the Message itself and wins.
   const opening = data.parts[0]?.type;
-  const replyTo = data.sender_handle?.kind === "agent" && opening !== "buttons" && opening !== "selection"
-    ? { reply_to: { message_id: data.id } }
-    : {};
+  const answerable = opening !== "buttons" && opening !== "selection";
+  const replyTo = data.sender_handle?.kind === "agent" && answerable ? data.id : undefined;
+  await sendToChat(relay, data.chat.id, key, answer, replyTo, answerable ? data.id : undefined);
+};
+/**
+ * Sends an answer to one chat as the Messages `answerMessages` makes of it,
+ * each on `${key}-${index}`; the first replies to `replyTo` when given. A
+ * reply tag in the answer wins and is removed: `[[reply_to:<id>]]` names the
+ * Message, `[[reply_to_current]]` names `current`, and no reply when there is
+ * no current Message.
+ */
+export const sendToChat = async (relay: Relay, chatId: string, key: string, answer: string, replyTo?: string, current?: string): Promise<void> => {
+  const tagged = replyTag(answer);
+  const target = tagged.replyTo === undefined ? replyTo : tagged.replyTo === "current" ? current : tagged.replyTo;
+  const messages = answerMessages(tagged.answer);
+  if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
   for (const [index, message] of messages.entries()) {
     const messageKey = `${key}-${index}`;
     let parts = message.parts;
@@ -353,7 +412,17 @@ export const sendAnswer = async (relay: Relay, data: MessageWebhookData, key: st
         continue;
       }
     }
-    await relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: messageKey, ...(index === 0 ? replyTo : {}) } });
+    await relay.chats.messages.send(chatId, { message: { parts, idempotency_key: messageKey, ...(index === 0 && target ? { reply_to: { message_id: target } } : {}) } });
   }
 };
+/**
+ * Shows or clears Pi's typing indicator in a chat. It is a courtesy: a
+ * failure is logged and the turn goes on.
+ */
+export const typing = (relay: Relay, chatId: string, on: boolean): Promise<void> =>
+  Promise.resolve()
+    .then(() => on ? relay.chats.startTyping(chatId) : relay.chats.stopTyping(chatId))
+    .catch((error: unknown) => {
+      console.error(`Relay: typing indicator failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);
