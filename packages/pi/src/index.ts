@@ -82,6 +82,8 @@ interface RpcRecord {
   readonly type?: string; readonly id?: string; readonly success?: boolean; readonly data?: { text?: string | null }; readonly error?: string;
   /** `extension_ui_request` fields (Pi docs/rpc.md). */
   readonly method?: string; readonly title?: string; readonly message?: string; readonly options?: unknown; readonly timeout?: unknown;
+  /** `tool_execution_start` fields (Pi docs/rpc.md). */
+  readonly toolName?: string; readonly args?: { action?: unknown };
 }
 
 /** The `extension_ui_response` to one dialog request, from the option picked. */
@@ -155,17 +157,16 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
  * rules every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. To stay silent, end with no text: nothing is sent. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${FORM_BLOCK_INSTRUCTION} ${FORM_GUIDANCE} ${CARD_BLOCK_INSTRUCTION} ${CARD_GUIDANCE} ${PLACE_BLOCK_INSTRUCTION} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}${RELAY_TOOLS_LINE}`;
+  `${message}\n\nWrite your answer as your final message: Relay sends that answer to the chat for you. Or text the person yourself with the message tool, then end with no text so nothing is sent twice. To stay silent, end with no text: nothing is sent. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${FORM_BLOCK_INSTRUCTION} ${FORM_GUIDANCE} ${CARD_BLOCK_INSTRUCTION} ${CARD_GUIDANCE} ${PLACE_BLOCK_INSTRUCTION} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}${RELAY_TOOLS_LINE}`;
 
 /**
  * The Relay tools the Pi extension registers when Relay starts it for a chat
- * (`relay_request_location`, `relay_read_location`, `relay_send_media`,
- * `relay_react`), and the reply tags OpenClaw's channels read
+ * (`message`, `relay_request_location`, `relay_read_location`), and the reply tags OpenClaw's channels read
  * (docs/reference/rich-output-protocol.md: `[[reply_to_current]]`,
  * `[[reply_to:<id>]]`).
  */
 export const RELAY_TOOLS_LINE =
-  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. relay_send_media sends a file from this machine as its own Message. relay_react reacts to a Message with an emoji. Each Message names its Relay message id; to thread your answer to a Message, put [[reply_to_current]] (the Message you are answering) or [[reply_to:<id>]] in it: the tag is removed and not shown.";
+  " In a one-to-one chat, relay_request_location asks the person to share their location and relay_read_location reads where everyone sharing is now. message texts the person now (action send), reacts to a Message with an emoji (react), or sends a file from this machine (file). Each Message names its Relay message id; to thread your answer to a Message, put [[reply_to_current]] (the Message you are answering) or [[reply_to:<id>]] in it: the tag is removed and not shown.";
 
 /** The id of the Message being answered, as one line of data the Relay tools and reply tags can name. */
 export const messageIdLine = (data: Pick<MessageWebhookData, "id">): string => data.id ? `[Relay message id: ${data.id}]` : "";
@@ -213,6 +214,8 @@ class ChatSession {
   readonly process: PiProcess;
   readonly lines: AsyncIterator<string>;
   settled = false;
+  /** Whether Pi texted the chat itself with `message` since the last prompt, so its final text is not sent again. */
+  texted = false;
   private nextId = 0;
   /** Dialogs waiting on a person; Pi is silent meanwhile, which is not a stall. */
   private dialogs = 0;
@@ -256,6 +259,7 @@ class ChatSession {
       if (result.done) throw new Error("Pi RPC process exited");
       const record = JSON.parse(result.value) as RpcRecord;
       if (record.type === "agent_settled") this.settled = true;
+      if (record.type === "tool_execution_start" && record.toolName === "message" && record.args?.action === "send") this.texted = true;
       if (record.type === "extension_ui_request" && DIALOG_METHODS.has(String(record.method))) this.#answer(record);
       return record;
     } finally {
@@ -325,13 +329,15 @@ export class PiChannel {
     const replyLine = await repliedContext(this.#relay, data);
     // The person sees Pi typing while it works; it stops once the answer is sent.
     await typing(this.#relay, data.chat.id, true);
+    session.texted = false;
     try {
       await session.command("prompt", { message: piPrompt([message, replyLine, messageIdLine(data)].filter(Boolean).join("\n\n")) }, timeout, signal);
       if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
       const response = await session.command("get_last_assistant_text", {}, timeout, signal);
       const answer = response.data?.text?.trim();
-      // No words is Pi's choice to stay silent: nothing is sent.
-      if (!answer) return;
+      // No words is Pi's choice to stay silent, and a Pi that texted with
+      // `message` has said it (OpenClaw didSendViaMessagingTool): nothing is sent.
+      if (!answer || session.texted) return;
       await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
     } finally {
       await typing(this.#relay, data.chat.id, false);
