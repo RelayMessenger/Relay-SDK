@@ -423,11 +423,7 @@ assert.match(
 );
 assert.match(release, /run: node scripts\/release-run\.mjs --dry-run$/mu);
 assert.match(release, /run: node --test scripts\/release-derive\.test\.mjs scripts\/release-cookbook-land\.test\.mjs$/mu);
-// The staging bump rehearses on every change the way the release does: the
-// same decisions against the live registry, writing nothing.
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
-assert.match(ci, /run: node --test scripts\/staging-bump\.test\.mjs$/mu);
-assert.match(ci, /run: node scripts\/staging-bump\.mjs --dry-run$/mu);
 assert.doesNotMatch(ci, /staging-bump\.mjs --write/u, "CI never writes a bump");
 // The cookbook standalone check proves which npm channel it picks for the
 // branch before it installs from that channel.

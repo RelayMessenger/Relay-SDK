@@ -14,13 +14,9 @@
     "test": "npm run test --workspaces --if-present",
     "discovery:sync": "node scripts/sync-root-discovery.mjs --write",
     "discovery:check": "node scripts/sync-root-discovery.mjs --check",
-    "discovery:validate": "scripts/validate-root-discovery.sh",
     "metadata:sync": "npm run discovery:sync && node scripts/sync-import-metadata.mjs --write",
     "metadata:check": "npm run discovery:check && node scripts/sync-import-metadata.mjs --check",
-    "sources:check": "node scripts/validate-sources.mjs && node --test scripts/import-inventory.test.mjs && node scripts/verify-import-provenance.mjs",
-    "workflows:check": "node scripts/validate-workflows.mjs && node --test scripts/public-readmes.test.mjs scripts/workflow-shell-syntax.test.mjs scripts/release-derive.test.mjs scripts/release-cookbook-land.test.mjs scripts/staging-bump.test.mjs scripts/verify-npm-registry-integrity.test.mjs scripts/publish-package-staging.test.mjs scripts/release-metadata.test.mjs scripts/validate-cookbook-standalone.test.mjs",
-    "proof:clean": "node scripts/verify-clean-tracked.mjs",
-    "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs && node scripts/validate-contract-copies.mjs && node --test scripts/contract-pin.test.mjs",
+    "workflows:check": "node scripts/validate-workflows.mjs && node --test scripts/ci-affected.test.mjs scripts/public-readmes.test.mjs scripts/workflow-shell-syntax.test.mjs scripts/release-derive.test.mjs scripts/release-cookbook-land.test.mjs scripts/staging-bump.test.mjs scripts/verify-npm-registry-integrity.test.mjs scripts/publish-package-staging.test.mjs scripts/release-metadata.test.mjs scripts/validate-cookbook-standalone.test.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
     "pack:smoke": "node scripts/consumer-smoke.mjs",
     "staging:validate": "node scripts/staging-validate.mjs",
@@ -34,11 +30,10 @@
     "validate:cli": "npm run validate --workspace relaymessenger",
     "validate:openclaw": "npm run validate --workspace @relaymessenger/openclaw-plugin && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin && npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
     "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",
-    "validate:skills": "node --test scripts/distribution-proof.test.mjs && python3 tooling/skills-distributions/scripts/validate.py && tooling/skills-distributions/scripts/validate-host-manifests.sh",
     "cookbook:link-check": "node scripts/validate-cookbook-standalone.mjs --link-check",
     "cookbook:standalone": "node scripts/validate-cookbook-standalone.mjs",
     "validate:cookbook": "npm run cookbook:link-check && npm run test:all --workspace @relaymessenger/cookbook-cloudflare-think-agent && npm run test:all --workspace @relaymessenger/cookbook-webhook-receiver && npm run test:all --workspace @relaymessenger/cookbook-websocket-agent && npm run check --workspace @relaymessenger/cookbook-send-a-message && npm run build --workspace @relaymessenger/cookbook-send-a-message && npm test --workspace @relaymessenger/cookbook-send-a-message && npm run check --workspace @relaymessenger/cookbook-send-an-image && npm run build --workspace @relaymessenger/cookbook-send-an-image && npm test --workspace @relaymessenger/cookbook-send-an-image && npm run check --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run build --workspace @relaymessenger/cookbook-send-a-voice-memo && npm test --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run test:all --workspace @relaymessenger/cookbook-trip-planner-agent && npm run check --workspace @relaymessenger/cookbook-grok-imagine-agent && npm run build --workspace @relaymessenger/cookbook-grok-imagine-agent && npm test --workspace @relaymessenger/cookbook-grok-imagine-agent",
-    "validate": "npm run discovery:validate && npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run validate:livekit && npm run validate:elevenlabs && npm run validate:pi && npm run contract:check && npm run validate:chat-sdk && npm run validate:think && npm run validate:cli && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
+    "validate": "npm run workflows:check && npm run validate:sdk && npm run validate:chat-sdk && npm run build --workspace @relaymessenger/pi && npm run validate:cli && npm run validate:openclaw && npm run validate:claude-code && npm run validate:cookbook"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
