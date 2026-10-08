@@ -6,6 +6,8 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import pytest
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams
 
 from relaymessenger_pipecat import load_chat_context, relay_chat_tools
@@ -68,17 +70,9 @@ class FakeRelay:
         self.chats = FakeChats()
 
 
-class FakeLLM:
-    def __init__(self) -> None:
-        self.registered: dict[str, Any] = {}
-
-    def register_function(self, name: str, handler: Any) -> None:
-        self.registered[name] = handler
-
-
 async def call(relay: FakeRelay, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    llm = FakeLLM()
-    relay_chat_tools(relay, CHAT).register(llm)  # type: ignore[arg-type]
+    [schema] = [t for t in relay_chat_tools(relay, CHAT) if t.name == name]  # type: ignore[arg-type]
+    assert schema.handler is not None
     results: list[dict[str, Any]] = []
 
     async def result_callback(result: Any, **_: Any) -> None:
@@ -88,12 +82,12 @@ async def call(relay: FakeRelay, name: str, arguments: dict[str, Any]) -> dict[s
         function_name=name,
         tool_call_id="call_7",
         arguments=arguments,
-        llm=llm,  # type: ignore[arg-type]
+        llm=None,  # type: ignore[arg-type]
         pipeline_worker=None,  # type: ignore[arg-type]
         context=None,  # type: ignore[arg-type]
         result_callback=result_callback,
     )
-    await llm.registered[name](params)
+    await schema.handler(params)
     assert len(results) == 1
     return results[0]
 
@@ -105,13 +99,13 @@ def only_message(relay: FakeRelay) -> dict[str, Any]:
     return dict(body["message"])
 
 
-def test_schema_and_registration_cover_every_tool() -> None:
+def test_tools_are_function_schemas_with_bundled_handlers() -> None:
     names = ["send_message", "send_buttons", "send_selection", "send_place", "request_location", "read_location", "send_link"]
     tools = relay_chat_tools(FakeRelay(), CHAT)  # type: ignore[arg-type]
-    assert [t.name for t in tools.tools.standard_tools] == names
-    llm = FakeLLM()
-    tools.register(llm)
-    assert list(llm.registered) == names
+    assert all(isinstance(t, FunctionSchema) and t.handler is not None for t in tools)
+    assert [t.name for t in tools] == names
+    context = LLMContext(tools=tools)
+    assert [t.name for t in context.tools.standard_tools] == names  # type: ignore[union-attr]
 
 
 async def test_send_message_sends_a_text_part_with_reply() -> None:

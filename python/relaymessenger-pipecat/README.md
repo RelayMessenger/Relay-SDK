@@ -64,8 +64,11 @@ Call for both sides.
 
 ## Text the person during a Call
 
-`relay_chat_tools` gives the bot's LLM tools for the Call's chat, through
-Pipecat's function calling: `send_message`, `send_buttons`, `send_selection`,
+`relay_chat_tools` gives the bot's LLM tools for the Call's chat, as
+[Pipecat's function calling](https://docs.pipecat.ai/guides/learn/function-calling)
+documents them: each is a `FunctionSchema` with its handler bundled, so you
+list them in `LLMContext(tools=[...])` and the LLM service registers the
+handlers itself. The tools are `send_message`, `send_buttons`, `send_selection`,
 `send_place`, `request_location`, `read_location` and `send_link`. Each tool
 sends with the Relay SDK and its part helpers, as the agent. A failed send goes
 back to the model as `{"status": "failed", "error": ...}`, so the bot can say so.
@@ -83,11 +86,9 @@ relay = Relay(api_key=os.environ["RELAY_AGENT_TOKEN"])
 call = await relay.calls.retrieve(call_id)
 chat_id = call["call"]["chat_id"]
 
-chat_tools = relay_chat_tools(relay, chat_id)
-chat_tools.register(llm)  # llm is your Pipecat LLM service
 context = LLMContext(
     messages=[{"role": "system", "content": "..."}, *await load_chat_context(relay, chat_id)],
-    tools=chat_tools.tools,
+    tools=relay_chat_tools(relay, chat_id),
 )
 ```
 
