@@ -47,6 +47,13 @@ to the chat the Message came from once Pi reports `agent_settled`. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
+A Message that arrives while the session is busy with a run Relay did not
+start steers that run (`deliverAs: "steer"`), and its answer goes back once
+the run settles. A run no one prompted, such as a pi-subagents result, sends
+its last words to the chat of the last Message, kept in
+`relay-last-chat.json` in the agent directory so it survives a restart; a turn
+typed in the session stays there.
+
 ## With pi-channels
 
 [pi-channels](https://github.com/espennilsen/pi/tree/main/packages/pi-channels)

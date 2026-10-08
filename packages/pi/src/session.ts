@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import Relay, {
   type MediaPartResponse,
   type MessageWebhookData,
@@ -13,7 +14,7 @@ export type SessionContent = (TextBlock | ImageBlock)[];
 
 /** What the session is given in place of the Pi it would otherwise start. */
 export interface SessionPi {
-  sendUserMessage(content: SessionContent, options?: { deliverAs: "followUp" }): void;
+  sendUserMessage(content: SessionContent, options?: { deliverAs: "followUp" | "steer" }): void;
 }
 
 export interface SessionChannelOptions {
@@ -26,6 +27,11 @@ export interface SessionChannelOptions {
   readonly transcribe?: Transcribe;
   /** Whether the session is between runs, so a Message can start one now. */
   readonly isIdle: () => boolean;
+  /**
+   * Where the chat of the last accepted Message is kept across restarts. A
+   * run no Message started (a helper's result) sends its words there.
+   */
+  readonly lastChatFile?: string;
 }
 
 /**
@@ -117,11 +123,18 @@ export class SessionChannel {
   readonly #inflight = new Map<string, Promise<void>>();
   #pending: Turn | undefined;
   #ended: readonly unknown[] = [];
+  // The role of the first message of the first run since the last settle:
+  // "user" for a typed or Relay prompt, "custom" for an extension's message.
+  #origin: string | null | undefined;
+  #last: MessageWebhookData | undefined;
   constructor(pi: SessionPi, options: SessionChannelOptions) {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
     this.#pi = pi;
     this.#options = options;
     this.#relay = options.relay ?? new Relay({ apiKey: options.agentToken, ...(options.baseURL ? { baseURL: options.baseURL } : {}) });
+    try {
+      if (options.lastChatFile) this.#last = JSON.parse(readFileSync(options.lastChatFile, "utf8")) as MessageWebhookData;
+    } catch { /* no chat yet */ }
   }
   run(signal?: AbortSignal): Promise<void> {
     return this.#relay.websocket.run({
@@ -143,6 +156,7 @@ export class SessionChannel {
         ...(this.#options.transcribe ? { transcribe: this.#options.transcribe } : {}),
       }, await repliedContext(this.#relay, event.data));
       this.#seen.add(event.event_id);
+      this.#remember(event.data);
       if (!content) return;
       this.#queue.push({ data: event.data, key: `pi-${event.event_id}`, content });
       this.next();
@@ -156,27 +170,44 @@ export class SessionChannel {
   }
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
-    if (this.#pending) this.#ended = messages;
+    if (!this.#pending && this.#origin === undefined) this.#origin = (messages[0] as { role?: string } | undefined)?.role ?? null;
+    this.#ended = messages;
   }
-  /** Pi's `agent_settled`: the pending Message is answered and cleared, then the next one starts. */
+  /**
+   * Pi's `agent_settled`: the pending Message is answered and cleared, then
+   * the next one starts. A run no Message started and no one typed (a
+   * helper's result) sends its words to the last chat, as OpenClaw sends an
+   * unprompted turn to the last route.
+   */
   async settled(): Promise<void> {
     const turn = this.#pending;
     this.#pending = undefined;
     const answer = lastAnswer(this.#ended);
+    const unprompted = !turn && this.#origin && this.#origin !== "user" ? this.#last : undefined;
     this.#ended = [];
+    this.#origin = undefined;
     try {
       if (turn && answer) await sendAnswer(this.#relay, turn.data, turn.key, answer);
+      else if (unprompted && answer) await sendAnswer(this.#relay, unprompted, `pi-unprompted-${Date.now()}`, answer);
     } catch (error) {
       console.error(`Relay: the answer was not sent: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.next();
     }
   }
-  /** Starts the next waiting Message when nothing of Relay's is running and the session is idle. */
+  /**
+   * Starts the next waiting Message when nothing of Relay's is running. When
+   * the session is busy with a run Relay did not start, the Message steers
+   * that run and its settled answer goes to the chat once.
+   */
   next(): void {
-    if (this.#pending || !this.#queue.length || !this.#options.isIdle()) return;
+    if (this.#pending || !this.#queue.length) return;
     const turn = this.#queue.shift()!;
     this.#pending = turn;
+    if (!this.#options.isIdle()) {
+      this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
+      return;
+    }
     this.#ended = [];
     try {
       this.#pi.sendUserMessage(turn.content);
@@ -189,6 +220,16 @@ export class SessionChannel {
     this.#queue.length = 0;
     this.#pending = undefined;
     this.#ended = [];
+    this.#origin = undefined;
+  }
+  /** Keeps the chat of an accepted Message, across restarts, for unprompted answers. */
+  #remember(data: MessageWebhookData): void {
+    this.#last = { id: data.id, chat: { id: data.chat.id }, sender_handle: { handle: data.sender_handle?.handle }, parts: [] } as unknown as MessageWebhookData;
+    try {
+      if (this.#options.lastChatFile) writeFileSync(this.#options.lastChatFile, JSON.stringify(this.#last));
+    } catch (error) {
+      console.error(`Relay: the last chat was not saved: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   #download(part: MediaPartResponse): Promise<Buffer> {
     return downloadMedia(this.#relay, part);

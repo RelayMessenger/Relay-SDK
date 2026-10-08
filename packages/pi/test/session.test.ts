@@ -89,14 +89,36 @@ describe("session channel", () => {
     channel.ended([assistant("to two")]); await channel.settled();
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "to one"], ["two", "to two"]]);
   });
-  it("waits while the session is busy with something else", async () => {
-    let idle = false;
-    const { channel, sent } = harness({ idle: () => idle });
-    await channel.receive(makeEvent("a", [text("hello")]));
-    expect(sent).toHaveLength(0);
-    // The person's own run settles; Relay's Message goes next.
-    idle = true; await channel.settled();
+  it("steers a run it did not start, and answers once when it settles", async () => {
+    const { channel, send, sent } = harness({ idle: () => false });
+    await channel.receive(makeEvent("a", [text("stop that")], { chat: "one" }));
+    expect(sent).toEqual([{ content: expect.any(Array), options: { deliverAs: "steer" } }]);
+    // A second Message waits behind the pending one rather than steering too.
+    await channel.receive(makeEvent("b", [text("and this")], { chat: "one" }));
     expect(sent).toHaveLength(1);
+    channel.ended([{ role: "user", content: "typed" }, assistant("stopped")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "stopped"]]);
+    expect(sent).toHaveLength(2);
+  });
+  it("sends a run no one prompted to the last chat, kept across restarts", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "relay-pi-last-")), "last.json");
+    const send = vi.fn().mockResolvedValue({});
+    const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() }, attachments: { retrieve: vi.fn() } } as unknown as Relay;
+    const pi = { sendUserMessage: vi.fn() };
+    const first = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: () => true, lastChatFile: file });
+    await first.receive(makeEvent("a", [text("start a helper")], { chat: "phone" }));
+    first.ended([assistant("started")]); await first.settled();
+    send.mockClear();
+    const channel = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: () => true, lastChatFile: file });
+    channel.ended([{ role: "custom", customType: "subagent-notify", content: "done" }, assistant("the helper finished")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["phone", "the helper finished"]]);
+    expect(send.mock.calls[0]?.[1].message.reply_to).toBeUndefined();
+    // A typed turn stays on the desktop.
+    channel.ended([{ role: "user", content: "typed" }, assistant("desk only")]);
+    await channel.settled();
+    expect(send).toHaveBeenCalledTimes(1);
   });
   it("does not answer a run it did not start", async () => {
     const { channel, send } = harness();

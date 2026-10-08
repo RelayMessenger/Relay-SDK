@@ -100,6 +100,7 @@ const attachSession = (pi: ExtensionAPI): void => {
       agentToken: token,
       relay,
       isIdle: () => ctx.isIdle(),
+      lastChatFile: join(agentDir(), "relay-last-chat.json"),
       ...(baseURL ? { baseURL } : {}),
       ...(senders ? { senders } : {}),
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
