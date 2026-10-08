@@ -104,6 +104,21 @@ describe("channel delivery", () => {
 });
 
 describe("review fixes", () => {
+  it("still sends the channel answer when a message send did not go out", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const event = inbound("m1");
+    const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    async function* lines(): AsyncGenerator<string> {
+      yield JSON.stringify({ id: "1", type: "response", success: true });
+      yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "" } });
+      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [{ type: "text", text: "Write the text to send." }], details: {} }, isError: false });
+      yield JSON.stringify({ type: "agent_settled" });
+      yield JSON.stringify({ id: "2", type: "response", success: true, data: { text: "Here it is." } });
+    }
+    const pi: PiProcess = { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines(), kill: vi.fn() };
+    await new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi }).run();
+    expect(send.mock.calls.map(([, body]) => body.message.parts[0].value)).toEqual(["Here it is."]);
+  });
   it("still sends the answer when a message send did not go out", async () => {
     const relay = fakeRelay();
     const channel = session(relay);
