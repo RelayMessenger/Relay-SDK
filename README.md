@@ -46,6 +46,12 @@ cookbook/
   send-an-image/
   send-a-voice-memo/
   trip-planner-agent/
+  group-chat-agents/
+  clone-agent-rag/
+  grok-imagine-agent/
+  grok-voice-agent/
+  elevenlabs-voice-agent/
+  elevenlabs-agents-call/
 ```
 
 All public code is pinned to the same Relay v1 OpenAPI under
