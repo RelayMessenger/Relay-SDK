@@ -1,4 +1,4 @@
-import { RATING_REQUEST_GUIDANCE, RATING_REQUEST_BLOCK_INSTRUCTION, BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
+import { CARD_BLOCK_INSTRUCTION, CARD_GUIDANCE, FORM_BLOCK_INSTRUCTION, FORM_GUIDANCE, PLACE_BLOCK_INSTRUCTION, RATING_REQUEST_GUIDANCE, RATING_REQUEST_BLOCK_INSTRUCTION, BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   Message,
   Relay,
@@ -170,6 +170,25 @@ export function agentReplyPayload(
   if (payload.replyToId !== facts.messageId) return payload;
   const { replyToId: _unlinked, ...rest } = payload;
   return rest;
+}
+
+/**
+ * How the agent's answer can carry Relay's parts, for every turn: the same
+ * fenced blocks and link lines the SDK's `answerMessages` reads. A direct
+ * chat also names the location tools, which Relay refuses in a group.
+ */
+export function relayAnswerGuidance(chatType: RelayInboundFacts["chatType"]): string {
+  return [
+    BUTTONS_BLOCK_INSTRUCTION, LINK_LINE_INSTRUCTION, BUTTONS_GUIDANCE,
+    SELECTION_BLOCK_INSTRUCTION, SELECTION_GUIDANCE,
+    FORM_BLOCK_INSTRUCTION, FORM_GUIDANCE,
+    CARD_BLOCK_INSTRUCTION, CARD_GUIDANCE, PLACE_BLOCK_INSTRUCTION,
+    PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE,
+    RATING_REQUEST_BLOCK_INSTRUCTION, RATING_REQUEST_GUIDANCE,
+    ...(chatType === "direct"
+      ? ["relay_request_location asks the person to share their location; relay_read_location reads where everyone sharing is now."]
+      : []),
+  ].join(" ");
 }
 
 export async function dispatchRelayEvent(params: {
@@ -347,7 +366,7 @@ export async function dispatchRelayEvent(params: {
       inboundEventKind: "user_request",
       body,
       bodyForAgent: [facts.text, selectionReplyContext(facts.selection, facts.richMessage),
-        `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE} ${RATING_REQUEST_BLOCK_INSTRUCTION} ${RATING_REQUEST_GUIDANCE}`,
+        relayAnswerGuidance(facts.chatType),
       ].filter(Boolean).join("\n\n"),
       rawBody: facts.text,
       commandBody: facts.text,

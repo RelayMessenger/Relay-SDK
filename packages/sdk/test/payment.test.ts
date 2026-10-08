@@ -264,13 +264,15 @@ describe("payment fee documentation", () => {
     expect(description).not.toContain("Relay takes no fee");
   });
 
-  it("documents application_fee_amount in both SDK types with the contract's own words", () => {
+  it("documents application_fee_amount with the contract's own words, and the Chat SDK adapter reuses that type", () => {
     const document = parse(readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8"));
     const contract = document.components.schemas.PaymentRequest.properties.application_fee_amount.description;
-    for (const path of ["../src/types.ts", "../../chat-sdk-adapter/src/types.ts"]) {
-      const source = readFileSync(new URL(path, import.meta.url), "utf8");
-      expect(source, path).toContain(`/** ${contract} */\n  application_fee_amount: number;`);
-    }
+    const source = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
+    expect(source).toContain(`/** ${contract} */\n  application_fee_amount: number;`);
+    // The adapter carries no copy of the type, so its documentation cannot drift.
+    const adapter = readFileSync(new URL("../../chat-sdk-adapter/src/types.ts", import.meta.url), "utf8");
+    expect(adapter).toContain("export type RelayPaymentRequest = Sdk.PaymentRequest;");
+    expect(adapter).not.toContain("application_fee_amount");
   });
 
   it("tells cookbook users about the 5% application fee and response field", () => {

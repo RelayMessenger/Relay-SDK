@@ -5,7 +5,7 @@ description = "Answer a Relay Call with Grok (xAI) and an ElevenLabs voice, on P
 requires-python = ">=3.11"
 dependencies = [
   "pipecat-ai[elevenlabs,openai,silero]>=1.12,<2",
-  "relaymessenger-pipecat",
+  "relaymessenger-pipecat>=0.1.0",
   "websockets>=15",
   "aiohttp>=3.10",
 ]
@@ -20,7 +20,3 @@ asyncio_default_fixture_loop_scope = "function"
 [tool.uv]
 package = false
 
-# relaymessenger-pipecat is not on PyPI yet, so uv installs it from one pinned
-# commit of this repository. It moves to PyPI once the package is published.
-[tool.uv.sources]
-relaymessenger-pipecat = { git = "https://github.com/RelayMessenger/Relay-SDK", subdirectory = "python/relaymessenger-pipecat", rev = "2e339167ba211dee3d705bf22c2ee5c8f58d73f8" }

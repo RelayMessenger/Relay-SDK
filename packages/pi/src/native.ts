@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { runPiChannel } from "./index.js";
+import Relay from "@relaymessenger/sdk";
+import { RELAY_CHAT_ID_ENV, runPiChannel } from "./index.js";
+import { relayTools } from "./tools.js";
+import { registerRelayAdapter, relayChannelAdapter, RELAY_ADAPTER } from "./pi-channels.js";
 import { SessionChannel } from "./session.js";
 import { transcribeCpp } from "./voice.js";
 
@@ -37,6 +40,25 @@ export const relaySettings = async (dir = agentDir()): Promise<RelaySettings> =>
   } catch {
     return {};
   }
+};
+
+/**
+ * The `relay` key of the `pi-channels` settings, beside pi-channels' own
+ * `slack` key: global settings.json, then the project's .pi/settings.json
+ * over it, as pi-channels merges its settings. None when absent.
+ */
+export const piChannelsRelaySettings = async (cwd: string, dir = agentDir()): Promise<RelaySettings | undefined> => {
+  const read = async (file: string): Promise<RelaySettings | undefined> => {
+    try {
+      const value = (JSON.parse(await readFile(file, "utf8")) as { "pi-channels"?: { relay?: unknown } })["pi-channels"]?.relay;
+      return value && typeof value === "object" ? value as RelaySettings : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const global = await read(join(dir, "settings.json"));
+  const project = await read(join(cwd, ".pi", "settings.json"));
+  return global || project ? { ...global, ...project } : undefined;
 };
 
 /** RELAY_AGENT_TOKEN, else what `agentTokenCommand` prints; never logged. */
@@ -73,13 +95,18 @@ const attachSession = (pi: ExtensionAPI): void => {
     const senders = process.env.RELAY_SENDERS?.split(",").map((sender) => sender.trim()).filter(Boolean) ?? settings.senders;
     const voice = settings.transcribeCpp;
     stop = new AbortController();
+    const relay = new Relay({ apiKey: token, ...(baseURL ? { baseURL } : {}) });
     channel = new SessionChannel(pi, {
       agentToken: token,
+      relay,
       isIdle: () => ctx.isIdle(),
+      lastChatFile: join(agentDir(), "relay-last-chat.json"),
       ...(baseURL ? { baseURL } : {}),
       ...(senders ? { senders } : {}),
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
     });
+    const current = channel;
+    registerRelayTools(pi, relay, () => current.chatId, () => current.messageId);
     void channel.run(stop.signal).catch((error: unknown) => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -95,13 +122,58 @@ const attachSession = (pi: ExtensionAPI): void => {
 };
 
 /**
+ * Relay as a pi-channels adapter, registered with `channel:register` when
+ * pi-channels is loaded and its settings have a `relay` key. It registers on
+ * `resources_discover`, which Pi fires after every `session_start` handler,
+ * because pi-channels' `session_start` drops adapters registered before it.
+ */
+const attachPiChannels = (pi: ExtensionAPI): void => {
+  pi.on("resources_discover", async (event) => {
+    if (process.env.PI_SUBAGENT_CHILD === "1") return;
+    const settings = await piChannelsRelaySettings(event.cwd);
+    if (!settings) return;
+    const token = await agentToken(settings);
+    if (!token) {
+      console.error("Relay: no Agent Token (RELAY_AGENT_TOKEN or pi-channels.relay.agentTokenCommand); the pi-channels adapter is off.");
+      return;
+    }
+    const baseURL = process.env.RELAY_BASE_URL?.trim() || settings.baseURL;
+    const voice = settings.transcribeCpp;
+    registerRelayAdapter(pi.events, () => relayChannelAdapter({
+      relay: new Relay({ apiKey: token, ...(baseURL ? { baseURL } : {}) }),
+      ...(settings.senders ? { senders: settings.senders } : {}),
+      ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
+    }), RELAY_ADAPTER);
+  });
+};
+
+/** The Relay tools, as Pi registers a tool (docs/extensions.md, registerTool). */
+const registerRelayTools = (pi: ExtensionAPI, relay: Relay, chatId: () => string | undefined, messageId?: () => string | undefined): void => {
+  for (const tool of relayTools(relay, chatId, messageId)) pi.registerTool(tool as unknown as Parameters<ExtensionAPI["registerTool"]>[0]);
+};
+
+/**
+ * The Pi that `runPiChannel` starts for one chat: its environment names the
+ * chat and carries the token, so it gets the Relay tools for that chat.
+ */
+const attachChatTools = (pi: ExtensionAPI): void => {
+  const chatId = process.env[RELAY_CHAT_ID_ENV]?.trim();
+  const token = process.env.RELAY_AGENT_TOKEN?.trim();
+  if (!chatId || !token) return;
+  const baseURL = process.env.RELAY_BASE_URL?.trim();
+  registerRelayTools(pi, new Relay({ apiKey: token, ...(baseURL ? { baseURL } : {}) }), () => chatId);
+};
+
+/**
  * Pi-native entry point. By default it exposes only lifecycle-safe commands,
  * and Relay ingress is owned by runPiChannel so the CLI and extension share
  * the same authenticated routing implementation. With `relay.mode: "session"`
  * (or RELAY_PI_MODE=session) Messages come into this session instead.
  */
 export default function relayPiExtension(pi: ExtensionAPI): void {
+  attachChatTools(pi);
   attachSession(pi);
+  attachPiChannels(pi);
   pi.registerCommand("relay-connect", {
     description: "Start the Relay channel using the configured Agent Token",
     handler: async (_args, ctx) => {

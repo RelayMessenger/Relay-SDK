@@ -6,7 +6,10 @@ import {
   Relay,
   RelayAPIError,
   type MessageSendResponse,
+  type SupportedContentType,
 } from "@relaymessenger/sdk";
+import { buildOutboundMediaLoadOptions, type OutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
+import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
 import type { ResolvedRelayAccount } from "./types.js";
 
 export const RELAY_TEXT_CHUNK_LIMIT = 10_000;
@@ -87,6 +90,75 @@ export async function sendRelayText(params: {
     first ??= response;
   }
   return first!;
+}
+
+/** Relay's attachment limit (contracts/relay-v1-openapi.yaml, AttachmentCreateParams). */
+export const RELAY_MEDIA_MAX_BYTES = 100 * 1024 * 1024;
+
+/** The bytes, type and name of one outbound file, as OpenClaw's loader returns them. */
+export interface RelayMediaFile {
+  buffer: Buffer;
+  contentType?: string;
+  fileName?: string;
+}
+
+/**
+ * Loads the file OpenClaw hands a channel (a URL or an allowed local path)
+ * through OpenClaw's own media policy, the way its Telegram channel does.
+ */
+export const loadRelayMedia = (params: {
+  mediaUrl: string;
+  mediaAccess?: OutboundMediaAccess | undefined;
+  mediaLocalRoots?: readonly string[] | undefined;
+  mediaReadFile?: ((filePath: string) => Promise<Buffer>) | undefined;
+}): Promise<RelayMediaFile> => loadWebMedia(params.mediaUrl, buildOutboundMediaLoadOptions({
+  maxBytes: RELAY_MEDIA_MAX_BYTES,
+  ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
+  ...(params.mediaLocalRoots ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
+  ...(params.mediaReadFile ? { mediaReadFile: params.mediaReadFile } : {}),
+}));
+
+/**
+ * Sends one file as a media Message: Relay takes an upload, then a Message
+ * whose one part names it. Words OpenClaw sends with the file go first,
+ * through `sendRelayText`, so their component blocks and link lines are read
+ * as for any answer. The response is the media Message's.
+ */
+export async function sendRelayMedia(params: {
+  relay: Pick<Relay, "chats" | "paymentRequests" | "attachments">;
+  chatId: string;
+  text?: string | undefined;
+  file: RelayMediaFile;
+  replyToId?: string | null | undefined;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+  onPlatformSendDispatch?: () => Promise<void>;
+}): Promise<MessageSendResponse> {
+  const options = params.signal ? { signal: params.signal } : undefined;
+  const words = params.text?.trim()
+    ? await sendRelayText({
+      relay: params.relay,
+      chatId: params.chatId,
+      text: params.text,
+      replyToId: params.replyToId,
+      idempotencyKey: indexedIdempotencyKey(params.idempotencyKey, 1),
+      ...(params.signal ? { signal: params.signal } : {}),
+      ...(params.onPlatformSendDispatch ? { onPlatformSendDispatch: params.onPlatformSendDispatch } : {}),
+    })
+    : (await params.onPlatformSendDispatch?.(), undefined);
+  const allocation = await params.relay.attachments.create({
+    filename: params.file.fileName || "file",
+    content_type: (params.file.contentType || "application/octet-stream") as SupportedContentType,
+    size_bytes: params.file.buffer.byteLength,
+  }, options);
+  await params.relay.attachments.upload(allocation, new Uint8Array(params.file.buffer), options);
+  return params.relay.chats.messages.send(params.chatId, {
+    message: {
+      parts: [{ type: "media", attachment_id: allocation.attachment_id }],
+      idempotency_key: params.idempotencyKey,
+      ...(!words && params.replyToId ? { reply_to: { message_id: params.replyToId } } : {}),
+    },
+  }, options);
 }
 
 export function classifyUnknownRelaySend(error: unknown): {

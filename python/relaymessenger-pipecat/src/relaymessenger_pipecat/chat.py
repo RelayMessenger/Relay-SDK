@@ -2,8 +2,9 @@
 interactive parts, during a Call.
 
 The tools are Pipecat function calling (docs.pipecat.ai/guides/learn/function-calling):
-a ``ToolsSchema`` for the LLM context and one handler per tool, registered with
-``llm.register_function``. Every handler calls the Relay SDK and builds its
+each tool is a ``FunctionSchema`` with its handler bundled, listed in
+``LLMContext(tools=[...])``; the LLM service registers the handlers itself, so
+there is no ``register_function`` step. Every handler calls the Relay SDK and builds its
 parts with the SDK's own helpers (``relaymessenger.parts``,
 ``relaymessenger.selection``), so the limits match the SDK's.
 
@@ -14,12 +15,10 @@ messages, so the bot knows the chat before it speaks.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 from relaymessenger import Relay
 from relaymessenger.parts import buttons_part, link_part, place_part, text_part
@@ -29,7 +28,7 @@ Handler = Callable[[FunctionCallParams], Awaitable[None]]
 
 _TEXT = {"type": "string", "description": "The message, as you would type it."}
 
-SEND_MESSAGE = FunctionSchema(
+SEND_MESSAGE = dict(
     name="send_message",
     description=(
         "Texts the person in your chat with them. They read it on their phone now "
@@ -42,7 +41,7 @@ SEND_MESSAGE = FunctionSchema(
     required=["text"],
 )
 
-SEND_BUTTONS = FunctionSchema(
+SEND_BUTTONS = dict(
     name="send_buttons",
     description=(
         "Texts the person a question with 1 to 5 buttons under it. A tap on a button "
@@ -67,7 +66,7 @@ SEND_BUTTONS = FunctionSchema(
     required=["text", "buttons"],
 )
 
-SEND_SELECTION = FunctionSchema(
+SEND_SELECTION = dict(
     name="send_selection",
     description=(
         "Texts the person a list of 1 to 25 options to pick from. They see the title "
@@ -95,7 +94,7 @@ SEND_SELECTION = FunctionSchema(
     required=["title", "options"],
 )
 
-SEND_PLACE = FunctionSchema(
+SEND_PLACE = dict(
     name="send_place",
     description="Texts the person a place. They see it on a map and can open directions.",
     properties={
@@ -107,7 +106,7 @@ SEND_PLACE = FunctionSchema(
     required=["latitude", "longitude"],
 )
 
-REQUEST_LOCATION = FunctionSchema(
+REQUEST_LOCATION = dict(
     name="request_location",
     description=(
         "Asks the person to share their location with you. They see a request in the "
@@ -117,42 +116,29 @@ REQUEST_LOCATION = FunctionSchema(
     required=[],
 )
 
-READ_LOCATION = FunctionSchema(
+READ_LOCATION = dict(
     name="read_location",
     description="Reads the locations the person shares with you in this chat. Empty when they share none.",
     properties={},
     required=[],
 )
 
-SEND_LINK = FunctionSchema(
+SEND_LINK = dict(
     name="send_link",
     description="Texts the person a link. They see the page's preview and can open it.",
     properties={"url": {"type": "string", "description": "An https URL."}},
     required=["url"],
 )
 
-CHAT_TOOLS = [SEND_MESSAGE, SEND_BUTTONS, SEND_SELECTION, SEND_PLACE, REQUEST_LOCATION, READ_LOCATION, SEND_LINK]
-"""The schemas ``relay_chat_tools`` registers, in order."""
+_SPECS: list[dict[str, Any]] = [SEND_MESSAGE, SEND_BUTTONS, SEND_SELECTION, SEND_PLACE, REQUEST_LOCATION, READ_LOCATION, SEND_LINK]
 
 
-@dataclass
-class RelayChatTools:
-    """The chat tools for one chat: ``tools`` goes in the LLM context, and
-    ``register(llm)`` registers a handler for each."""
-
-    tools: ToolsSchema
-    handlers: dict[str, Handler] = field(default_factory=dict)
-
-    def register(self, llm: Any) -> None:
-        """Register every handler on a Pipecat ``LLMService``."""
-        for name, handler in self.handlers.items():
-            llm.register_function(name, handler)
-
-
-def relay_chat_tools(relay: Relay, chat_id: str) -> RelayChatTools:
+def relay_chat_tools(relay: Relay, chat_id: str) -> list[FunctionSchema]:
     """Tools that let the bot text the person in ``chat_id`` during a Call:
     send_message, send_buttons, send_selection, send_place,
-    request_location, read_location and send_link.
+    request_location, read_location and send_link, each a ``FunctionSchema``
+    with its handler bundled. List them in ``LLMContext(tools=[...])``; the
+    LLM service registers the handlers itself.
 
     Each send's idempotency key is the chat and the model's tool call id, so a
     retried request never sends the same message twice. A handler reports a
@@ -232,10 +218,7 @@ def relay_chat_tools(relay: Relay, chat_id: str) -> RelayChatTools:
         "read_location": read_location,
         "send_link": send_link,
     }
-    return RelayChatTools(
-        tools=ToolsSchema(standard_tools=list(CHAT_TOOLS)),
-        handlers={name: tool(run) for name, run in runs.items()},
-    )
+    return [FunctionSchema(**spec, handler=tool(runs[spec["name"]])) for spec in _SPECS]
 
 
 def _message_text(parts: list[Mapping[str, Any]]) -> str:
