@@ -176,6 +176,11 @@ const sendButtonSchema = z.object({
 // Relay's form part (@relaymessenger/sdk FormPart) as one object schema with
 // no unions, for the same Vertex reason as the send root. Every field rule is
 // the SDK's own validator (formPart), run in the send refinement below.
+// The field and option counts (50 fields; 20 select or 200 picker options)
+// stay out of this schema: with tool choice required, Vertex compiles the
+// tools into a grammar, and those two nested array bounds alone made every
+// Gemini 3.8 Flash request fail with 400 "Request contains an invalid
+// argument" (2026-10-08, replayed against Vertex). formPart enforces both.
 const formOptionSchema = z.object({
   value: z.string().min(1).max(100),
   label: z.string().trim().min(1).max(30),
@@ -190,7 +195,7 @@ const formFieldSchema = z.object({
   max_length: z.number().int().min(1).optional().describe("text fields only: the longest answer."),
   keyboard: z.enum(["default", "email", "phone", "number", "url"]).optional().describe("text fields only."),
   multiple: z.boolean().optional().describe("select fields only: allow several choices."),
-  options: z.array(formOptionSchema).min(1).max(200).optional().describe(
+  options: z.array(formOptionSchema).min(1).optional().describe(
     "select (1 to 20) and picker (1 to 200) fields only.",
   ),
   min_date: z.string().optional().describe("date fields only: YYYY-MM-DD."),
@@ -201,7 +206,7 @@ const sendFormSchema = z.object({
   pages: z.array(z.object({
     id: z.string().min(1).max(19),
     title: z.string().trim().min(1).max(80),
-    fields: z.array(formFieldSchema).min(1).max(50),
+    fields: z.array(formFieldSchema).min(1),
   }).strict()).min(1),
   show_summary: z.boolean().optional(),
   splash: z.object({

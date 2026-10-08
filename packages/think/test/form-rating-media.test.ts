@@ -75,6 +75,28 @@ describe("Relay send Action: form", () => {
     expect(JSON.stringify(schema.properties?.form)).not.toMatch(/"(oneOf|anyOf)"/u);
   });
 
+  it("keeps the nested field and option counts out of the model's schema, and still refuses past them", () => {
+    // Vertex refuses a required-tool request whose form bounds both nested
+    // arrays (400 INVALID_ARGUMENT, 2026-10-08); formPart enforces the counts.
+    const schema = toJSONSchema(sendInputSchema) as { properties?: Record<string, unknown> };
+    expect(JSON.stringify(schema.properties?.form)).toMatch(/"pages"/u);
+    expect(JSON.stringify(schema.properties?.form)).not.toMatch(/"maxItems"/u);
+    const option = (index: number) => ({ value: `o${index}`, label: `Option ${index}` });
+    const field = (index: number) => ({ id: `f${index}`, type: "text", label: `Field ${index}` });
+    const picker = (count: number) => ({
+      ...FORM,
+      pages: [{ id: "p", title: "Pick", fields: [{ id: "pick", type: "picker", label: "Pick", options: Array.from({ length: count }, (_, index) => option(index)) }] }],
+    });
+    const fields = (count: number) => ({
+      ...FORM,
+      pages: [{ id: "p", title: "Fields", fields: Array.from({ length: count }, (_, index) => field(index)) }],
+    });
+    expect(sendInputSchema.safeParse({ kind: "form", form: picker(200) }).success).toBe(true);
+    expect(sendInputSchema.safeParse({ kind: "form", form: picker(201) }).success).toBe(false);
+    expect(sendInputSchema.safeParse({ kind: "form", form: fields(50) }).success).toBe(true);
+    expect(sendInputSchema.safeParse({ kind: "form", form: fields(51) }).success).toBe(false);
+  });
+
   it("sends the words then the form part in one Message", async () => {
     const bodies = recordSends();
     const composed: string[] = [];
