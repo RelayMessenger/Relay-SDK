@@ -19,53 +19,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # A pull request that changes only the contributor notes below skips every
-  # job after this one. Most Markdown here is product (package READMEs,
-  # skills, cookbook pages, the contract decision) and `npm run validate`
-  # checks it, so only files no check reads are listed. The filter is a job
-  # condition, not `paths-ignore`, because `validate` is a required check on
-  # main: a skipped job reports success, a workflow that never starts leaves
-  # the check pending forever. Pushes and manual runs always run everything,
-  # and so does a pull request whose `changes` job fails (fail open: a broken
-  # filter must never turn a required check into a skipped green one).
+  # Picks the validate legs (scripts/ci-affected.mjs). Pushes, manual runs,
+  # and pull requests into main run every leg; a pull request into staging
+  # runs the legs whose workspace it touches plus their dependents. The
+  # aggregate `validate` job below is the required check on main.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.diff.outputs.code }}
+      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.select.outputs.any }}
+      release: ${{ steps.select.outputs.release }}
     steps:
-      - if: github.event_name == 'pull_request'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - id: diff
+      - id: select
         env:
           EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          code=true
-          if [ "$EVENT" = pull_request ]; then
-            code=false
-            while IFS= read -r file; do
-              case "$file" in
-                AGENTS.md|CLAUDE.md|CONTRIBUTING.md|SECURITY.md|scripts/agent-cli-platforms.md) ;;
-                *) code=true ;;
-              esac
-            done < <(git diff --name-only "$BASE...$HEAD")
-          fi
-          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+        run: node scripts/ci-affected.mjs
 
-  validate:
+  # One job per package harness, in parallel. Each leg installs the workspace,
+  # builds the workspaces it imports, and runs its root validate:* script.
+  validate-leg:
+    name: validate (${{ matrix.leg }})
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ needs.changes.outputs.any == 'true' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
-      # Full history: scripts/validate-contract.mjs reads the contract at the
-      # commit the skill lock pins, which a shallow clone does not carry.
+      # Full history: packages/cli's contract check reads the contract at the
+      # commit its lock pins, which a shallow clone does not carry.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
@@ -74,18 +65,14 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: 0.12.8
-          enable-cache: false
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
       # The OpenClaw pack smoke and gateway harness install the plugin as a
       # user would. Its SDK pin names this tree's SDK version, which the
-      # registry may already hold with older bytes (a pull request that adds
-      # an SDK export the plugin imports). Point both at the SDK packed from
-      # this commit; the release on main still validates against the registry.
+      # registry may already hold with older bytes. Point both at the SDK
+      # packed from this commit; the release still validates the registry.
       - name: Pack this commit's SDK for the plugin install checks
+        if: matrix.leg == 'openclaw'
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/sdk-candidate"
@@ -93,81 +80,26 @@ jobs:
           tarballs=("$RUNNER_TEMP"/sdk-candidate/*.tgz)
           test "${#tarballs[@]}" -eq 1
           echo "RELAY_OPENCLAW_SDK_CANDIDATE_TARBALL=${tarballs[0]}" >> "$GITHUB_ENV"
-      - run: npm run validate
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm audit signatures
+      - name: Build the workspaces this leg imports
+        if: matrix.build != ''
+        run: npm run build ${{ matrix.build }}
+      - run: npm run ${{ matrix.run }}
 
-  # relaymessenger, the Python SDK (its calls extra is the call core under the
-  # LiveKit and Pipecat packages): types and unit tests on Linux from the
-  # locked environment, then a wheel and sdist build. Nothing is published.
-  python-sdk:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+  # The required check. It passes when every selected leg passed, or when no
+  # leg was needed; it fails when the selector or any leg failed.
+  validate:
+    needs: [changes, validate-leg]
+    if: ${{ always() }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: python/relaymessenger
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: 0.12.8
-          enable-cache: false
-      - run: uv sync --locked --python 3.12
-      - run: uv run --locked mypy
-      - run: uv run --locked pytest -q
-      - run: uv build
-
-  # relaymessenger-pipecat, the Pipecat transport for Relay Calls: types and
-  # unit tests on Linux from the locked environment, then a wheel and sdist
-  # build. Nothing is published.
-  python-pipecat:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: python/relaymessenger-pipecat
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: 0.12.8
-          enable-cache: false
-      - run: uv sync --locked --python 3.12
-      - run: uv run --locked mypy
-      - run: uv run --locked pytest -q
-      - run: uv build
-
-  # relaymessenger-livekit, the Python twin of @relaymessenger/livekit: types
-  # and unit tests on Linux from the locked environment, then a wheel and sdist
-  # build. Nothing is published.
-  python-livekit:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: python/relaymessenger-livekit
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: 0.12.8
-          enable-cache: false
-      - run: uv sync --locked --python 3.12
-      - run: uv run --locked mypy
-      - run: uv run --locked pytest -q
-      - run: uv build
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          LEGS: ${{ needs.validate-leg.result }}
+        run: |
+          echo "changes=$CHANGES legs=$LEGS"
+          test "$CHANGES" = success
+          case "$LEGS" in success|skipped) ;; *) exit 1 ;; esac
 
   # Every cookbook folder must work when a developer copies it out of GitHub
   # and runs `npm install && npm start` with only an Agent Token. This job
@@ -177,11 +109,12 @@ jobs:
   # picks the npm channel: staging (a push to it, or a pull request into it)
   # installs the `staging` dist-tag's builds, every other branch the `latest`
   # releases. The workspace-side half of that proof, that the same folders
-  # resolve the workspace sdk inside the monorepo, runs under
-  # `npm run validate` above.
+  # resolve the workspace sdk inside the monorepo, runs in the cookbook leg
+  # above. It checks the registry, not this change, so it runs on pushes, on
+  # pull requests into main, and on pull requests that change root files.
   cookbook-standalone:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ needs.changes.outputs.release == 'true' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
@@ -195,55 +128,16 @@ jobs:
       - run: node --test scripts/validate-cookbook-standalone.test.mjs
       - run: node scripts/validate-cookbook-standalone.mjs
 
-  # The Python cookbook folders (the Pipecat voice agents) must work when a
-  # developer copies one out of GitHub: each is copied outside the checkout,
-  # installed from its own uv.lock, every script is imported, and its tests
-  # run offline: each folder's conftest.py fails every connection off this
-  # machine, so a test never reaches xAI, ElevenLabs or LiveKit Cloud even if
-  # a key is set. The tests build each bot's services and Pipecat pipeline
-  # with placeholder keys (nothing connects), check the greeting reaches the
-  # model, and check the ElevenLabs Agents bridge against a fake socket. They
-  # do not place a call; the live call is proven by hand on staging.
-  cookbook-python:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          version: 0.12.8
-          enable-cache: false
-      - name: Copy, install, and import each Python cookbook
-        run: |
-          set -euo pipefail
-          for project in cookbook/*/pyproject.toml; do
-            source="$(dirname "$project")"
-            copy="$(mktemp -d)"
-            cp -R "$source/." "$copy/"
-            (
-              cd "$copy"
-              uv sync --locked --python 3.12
-              for script in *.py; do
-                uv run --locked python -c "import ${script%.py}"
-                echo "$source/$script imports"
-              done
-              uv run --locked pytest -q
-            )
-            rm -rf "$copy"
-          done
-
   # The production release proves itself before it can run: the same
   # derivation, packing, and `npm publish --dry-run` that release.yml performs
-  # on a push to main, here on every change. GitHub only dispatches a
-  # workflow that already exists on the default branch, so this is also the
-  # only way a change to the release itself is rehearsed before it merges.
+  # on a push to main, here on pushes, on pull requests into main, and on
+  # pull requests that change root files (the release scripts among them).
+  # GitHub only dispatches a workflow that already exists on the default
+  # branch, so this is the only way a change to the release is rehearsed
+  # before it merges.
   release-dry-run:
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ needs.changes.outputs.release == 'true' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
@@ -278,26 +172,3 @@ jobs:
         env:
           NODE_AUTH_TOKEN: dry-run
         run: node scripts/release-run.mjs --dry-run
-  # The staging release proves itself the same way: the bump decisions
-  # publish-package-staging.yml would write, derived here against the live
-  # registry and written nowhere. Its decision table is unit-tested first.
-  staging-bump-dry-run:
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm install --global npm@11.19.1 --no-audit --no-fund
-      - run: npm ci
-      - run: node --test scripts/staging-bump.test.mjs
-      - name: Rehearse the staging bump
-        run: node scripts/staging-bump.mjs --dry-run
-      - name: Verify the rehearsal wrote nothing tracked
-        run: test -z "$(git status --porcelain)"
