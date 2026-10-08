@@ -111,7 +111,8 @@ export const relayTools = (relay: Relay, chatId: () => string | undefined, messa
     const replyTo = named(params.reply_to);
     try {
       await sendToChat(relay, chat(), `pi-message-${toolCallId || randomUUID()}`, text, replyTo, messageId());
-      return result("Sent.");
+      // `sent` tells the channel this run has texted, so its final words are not sent again.
+      return result("Sent.", { sent: true });
     } catch (error) {
       return refusal(error);
     }

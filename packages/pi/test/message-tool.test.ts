@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, RELAY_TOOLS_LINE, type PiProcess } from "../src/index.js";
-import { SessionChannel } from "../src/session.js";
+import { bubbles, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
 
 const fakeRelay = () => ({
@@ -56,7 +56,7 @@ describe("session delivery", () => {
     const relay = fakeRelay();
     const channel = session(relay);
     await channel.receive(inbound("m1"));
-    channel.ended([assistant(call("message", { action: "send", text: "on it" })), { role: "toolResult", toolName: "message", content: [] }, assistant(words("on it"))]);
+    channel.ended([assistant(call("message", { action: "send", text: "on it" })), { role: "toolResult", toolName: "message", content: [], details: { sent: true } }, assistant(words("on it"))]);
     await channel.settled();
     expect(relay.chats.messages.send).not.toHaveBeenCalled();
   });
@@ -93,11 +93,61 @@ describe("channel delivery", () => {
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "on it" } });
+      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [], details: { sent: true } }, isError: false });
       yield JSON.stringify({ type: "agent_settled" });
       yield JSON.stringify({ id: "2", type: "response", success: true, data: { text: "on it" } });
     }
     const pi: PiProcess = { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines(), kill: vi.fn() };
     await new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi }).run();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("review fixes", () => {
+  it("still sends the answer when a message send did not go out", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    const sendTool = relayTools(relay as unknown as Relay, () => channel.chatId, () => channel.messageId).find((each) => each.name === "message")!;
+    const attempt = await sendTool.execute("c1", { action: "send", text: "" });
+    channel.ended([assistant(call("message", { action: "send", text: "" })), { role: "toolResult", toolName: "message", content: attempt.content, details: attempt.details }, assistant(words("Here it is."))]);
+    await channel.settled();
+    expect(sentTexts(relay)).toEqual([["chat-1", "Here it is.", undefined]]);
+  });
+  it("lets a background result's run text with message after the turn settled", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    channel.ended([{ role: "toolResult", toolName: "subagent", content: [], details: { asyncId: "run-42" } }, assistant(words("On it."))]);
+    await channel.settled();
+    relay.chats.messages.send.mockClear();
+    const sendTool = relayTools(relay as unknown as Relay, () => channel.chatId, () => channel.messageId).find((each) => each.name === "message")!;
+    expect((await sendTool.execute("c9", { action: "send", text: "Finished" })).content[0]!.text).toBe("Sent.");
+    expect(sentTexts(relay)).toEqual([["chat-1", "Finished", undefined]]);
+  });
+  it("gives each background result from one Message its own keys", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    channel.ended([{ role: "toolResult", toolName: "subagent", content: [], details: { asyncId: "run-a" } }, { role: "toolResult", toolName: "subagent", content: [], details: { asyncId: "run-b" } }]);
+    await channel.settled();
+    for (const id of ["run-a", "run-b"]) {
+      channel.ended([{ role: "custom", customType: "subagent-notify", content: `Background task completed: ${id}` }, assistant(words("Done."))]);
+      await channel.settled();
+    }
+    const keys = relay.chats.messages.send.mock.calls.map(([, body]) => body.message.idempotency_key);
+    expect(keys).toEqual(["pi-background-run-a-0-0", "pi-background-run-b-0-0"]);
+  });
+  it("threads an answer whose reply tag sits on its own line", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    channel.ended([assistant(words("[[reply_to_current]]\n\nThe answer\n\nMore"))]);
+    await channel.settled();
+    expect(sentTexts(relay)).toEqual([["chat-1", "The answer", "m1"], ["chat-1", "More", undefined]]);
+  });
+  it("closes a fence only with the same character, at least as long", () => {
+    expect(bubbles("````md\n```js\nx\n```\n\nstill code\n````\n\nafter")).toEqual(["````md\n```js\nx\n```\n\nstill code\n````", "after"]);
+    expect(bubbles("~~~\na\n```\n\nb\n~~~")).toEqual(["~~~\na\n```\n\nb\n~~~"]);
   });
 });

@@ -83,7 +83,9 @@ interface RpcRecord {
   /** `extension_ui_request` fields (Pi docs/rpc.md). */
   readonly method?: string; readonly title?: string; readonly message?: string; readonly options?: unknown; readonly timeout?: unknown;
   /** `tool_execution_start` fields (Pi docs/rpc.md). */
-  readonly toolName?: string; readonly args?: { action?: unknown };
+  readonly toolName?: string; readonly isError?: boolean;
+  /** `tool_execution_end`: the tool's result. */
+  readonly result?: { details?: { sent?: unknown } };
 }
 
 /** The `extension_ui_response` to one dialog request, from the option picked. */
@@ -259,7 +261,7 @@ class ChatSession {
       if (result.done) throw new Error("Pi RPC process exited");
       const record = JSON.parse(result.value) as RpcRecord;
       if (record.type === "agent_settled") this.settled = true;
-      if (record.type === "tool_execution_start" && record.toolName === "message" && record.args?.action === "send") this.texted = true;
+      if (record.type === "tool_execution_end" && record.toolName === "message" && !record.isError && record.result?.details?.sent === true) this.texted = true;
       if (record.type === "extension_ui_request" && DIALOG_METHODS.has(String(record.method))) this.#answer(record);
       return record;
     } finally {
