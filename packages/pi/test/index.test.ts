@@ -60,7 +60,7 @@ describe("Pi channel", () => {
   });
 });
 
-describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "agent_end", "agent_settled", "session_shutdown"]); }); });
+describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "agent_end", "agent_settled", "session_shutdown", "resources_discover"]); }); });
 
 describe("buttons", () => {
   it("tells pi how to send buttons and when", () => {
