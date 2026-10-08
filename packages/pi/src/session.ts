@@ -4,7 +4,7 @@ import Relay, {
   type MessageWebhookData,
   type RelayWebhookEvent,
 } from "@relaymessenger/sdk";
-import { messageIdLine, piPrompt, repliedContext, replyTag, sendAnswer, sendToChat, typing, wordsOf } from "./index.js";
+import { inboundText, repliedContext, replyTag, sendAnswer, sendToChat, typing, wordsOf } from "./index.js";
 import { MESSAGE_TOOL } from "./tools.js";
 import type { Transcribe } from "./voice.js";
 
@@ -52,8 +52,8 @@ export interface SessionMedia {
 }
 
 /**
- * One Message as the session's user message: its words with the same answer
- * rules the channel gives Pi, each photo as image content, each voice note as
+ * One Message as the session's user message: its words and Relay message id,
+ * each photo as image content, each voice note as
  * its transcript, and any other file named. Null for a Message with nothing.
  */
 export const sessionContent = async (data: MessageWebhookData, media: SessionMedia, replyLine = ""): Promise<SessionContent | null> => {
@@ -77,7 +77,7 @@ export const sessionContent = async (data: MessageWebhookData, media: SessionMed
   }
   const words = [wordsOf(data), lines.join("\n"), replyLine].filter(Boolean).join("\n\n");
   if (!words) return null;
-  return [{ type: "text", text: piPrompt([words, messageIdLine(data)].filter(Boolean).join("\n\n")) }, ...images];
+  return [{ type: "text", text: inboundText(words, "", data) }, ...images];
 };
 
 type RunMessage = { role?: string; content?: unknown; stopReason?: string; toolName?: string; details?: unknown; isError?: boolean; customType?: string };

@@ -34,8 +34,8 @@ describe("session content", () => {
     const content = await sessionContent(event.data as MessageWebhookData, { download, transcribe });
     expect(content?.[1]).toEqual({ type: "image", data: Buffer.from("img").toString("base64"), mimeType: "image/png" });
     const words = (content?.[0] as { text: string }).text;
-    expect(words).toContain("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]");
-    expect(words).toContain("Relay sends that answer to the chat for you");
+    // The Message alone: the Relay hint is in the system prompt, not here.
+    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]");
     expect(transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "note.m4a");
   });
   it("names a voice note it cannot hear, and gives nothing for an empty Message", async () => {
