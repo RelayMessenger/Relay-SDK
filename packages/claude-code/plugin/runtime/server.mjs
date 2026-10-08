@@ -22768,6 +22768,14 @@ var formReply = (parts, replyTo) => {
   };
 };
 
+// node_modules/@relaymessenger/sdk/dist/rich-cards.js
+var RICH_CARD_TITLE_MAX_LENGTH = 200;
+var RICH_CARD_DESCRIPTION_MAX_LENGTH = 2e3;
+var RICH_CARD_MAX_SUGGESTIONS = 4;
+var SUGGESTION_LABEL_MAX_LENGTH = 25;
+var CAROUSEL_MIN_CARDS = 2;
+var CAROUSEL_MAX_CARDS = 10;
+
 // node_modules/@relaymessenger/sdk/dist/links.js
 var LINK_URL_MAX_LENGTH = 2048;
 var IDEMPOTENCY_KEY_MAX_LENGTH = 255;
@@ -22790,14 +22798,6 @@ var indexedIdempotencyKey = (key, index) => {
   const suffix = `-${index}`;
   return `${key.slice(0, IDEMPOTENCY_KEY_MAX_LENGTH - suffix.length)}${suffix}`;
 };
-
-// node_modules/@relaymessenger/sdk/dist/rich-cards.js
-var RICH_CARD_TITLE_MAX_LENGTH = 200;
-var RICH_CARD_DESCRIPTION_MAX_LENGTH = 2e3;
-var RICH_CARD_MAX_SUGGESTIONS = 4;
-var SUGGESTION_LABEL_MAX_LENGTH = 25;
-var CAROUSEL_MIN_CARDS = 2;
-var CAROUSEL_MAX_CARDS = 10;
 
 // node_modules/@relaymessenger/sdk/dist/reply-target.js
 var REPLY_TARGET_TEXT_MAX_LENGTH = 1e3;
@@ -24844,7 +24844,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.15-staging.1" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.16-staging.0" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
