@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { PiChannel, piEnv, piPrompt, type PiProcess } from "../src/index.js";
+import { PiChannel, piEnv, relayHint, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
 import { runAnswers, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
@@ -74,8 +74,8 @@ describe("tool registration", () => {
 
 describe("answers", () => {
   it("teaches every part a Pi can send", () => {
-    const prompt = piPrompt("hi");
-    for (const tag of ["`form`", "`rich_card`", "`carousel`", "`place`", "rating_request", "`selection`", "`buttons`", "`payment`", "relay_request_location", "To stay silent, end with no text"]) {
+    const prompt = relayHint();
+    for (const tag of ["`form`", "`rich_card`", "`carousel`", "`place`", "rating_request", "`selection`", "`buttons`", "`payment`", "relay_request_location", "a final message with no text sends nothing"]) {
       expect(prompt).toContain(tag);
     }
   });
