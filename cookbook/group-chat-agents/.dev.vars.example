@@ -1,0 +1,5 @@
+# Agent Token from Relay Console. Relay shows it once.
+RELAY_AGENT_TOKEN=replace-with-agent-token
+
+# Signing secret returned when this Worker's webhook subscription is created.
+RELAY_WEBHOOK_SECRET=whsec_replace-with-webhook-secret

@@ -124,8 +124,7 @@ export const runDoctor = async (
   // reports what that package carries and fails only when it is not Relay v1.
   // An exact count of calls cannot live here: it would be the published
   // package's number, which this workspace contradicts the moment the contract
-  // grows. `scripts/validate-contract.mjs` holds the exact count, against the
-  // workspace, where a change is meant to be reviewed.
+  // grows.
   checks.push({
     name: "Installed Relay package",
     ok: RELAY_V1_OPERATIONS.length > 0

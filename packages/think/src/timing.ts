@@ -36,6 +36,7 @@ export interface RelayChatTiming {
   toolCount: number;
   toolMs: number;
   typingStampMs?: number;
+  /** Summed over every model call in the turn (AI SDK `totalUsage`). */
   tokens?: { input?: number; output?: number; reasoning?: number; cached?: number };
   /**
    * The AI Gateway's own cf-aig-* response headers for the last model call
@@ -98,6 +99,10 @@ export function resumeRelayChatTiming(
   return timing;
 }
 
+function addTokens(a: number | undefined, b: number | undefined): number | undefined {
+  return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+}
+
 export function timedRelayModel(
   timing: () => RelayChatTiming | undefined,
 ): LanguageModelMiddleware {
@@ -127,13 +132,18 @@ export function timedRelayModel(
               if (part.type !== "stream-start") record.mark("first_chunk");
               if (part.type === "finish") {
                 record.mark("model_done");
+                // One middleware call per step: add, never overwrite, so the
+                // line carries the turn total like streamText's `totalUsage`.
+                // A closing step after the last tool call would otherwise
+                // hide every earlier step.
+                const sum = record.tokens ?? {};
                 record.tokens = {
-                  input: part.usage.inputTokens.total,
-                  output: part.usage.outputTokens.total,
-                  reasoning: part.usage.outputTokens.reasoning,
+                  input: addTokens(sum.input, part.usage.inputTokens.total),
+                  output: addTokens(sum.output, part.usage.outputTokens.total),
+                  reasoning: addTokens(sum.reasoning, part.usage.outputTokens.reasoning),
                   // Gemini's usageMetadata.cachedContentTokenCount, mapped by
                   // @ai-sdk/google to inputTokens.cacheRead (0 when absent).
-                  cached: part.usage.inputTokens.cacheRead ?? 0,
+                  cached: (sum.cached ?? 0) + (part.usage.inputTokens.cacheRead ?? 0),
                 };
               }
               controller.enqueue(part);
