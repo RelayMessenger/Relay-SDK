@@ -55,7 +55,8 @@ function inboundEvent(
       id: messageId,
       idempotency_key: null,
       direction: "inbound",
-      sender_handle: {
+      is_from_me: false,
+      from_handle: {
         id: USER_ID,
         handle: "@owner",
         kind: sender.kind,
@@ -117,7 +118,7 @@ async function startRelayMock(params: {
           id: CHAT_ID,
           display_name: null,
           group_chat_icon: null,
-          handles: [inboundEvent().data.sender_handle],
+          handles: [inboundEvent().data.from_handle],
           is_group: false,
           created_at: "2026-09-01T00:00:00.000Z",
           updated_at: "2026-09-01T00:00:01.000Z",
@@ -136,8 +137,8 @@ async function startRelayMock(params: {
         messages: [{
           id: data.id,
           chat_id: CHAT_ID,
-          from: data.sender_handle.handle,
-          from_handle: data.sender_handle,
+          from: data.from_handle.handle,
+          from_handle: data.from_handle,
           parts: params.fullSyncSelection ? [
             { type: "text", value: "• Research", reactions: null },
             { type: "selection_response", selected_values: ["research"] },
@@ -402,6 +403,23 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     } };
     expect(checkReply(formArgs), JSON.stringify(checkReply.errors)).toBe(true);
     expect(checkReply({ ...formArgs, form: { ...formArgs.form, expires_at: "soon" } })).toBe(false);
+    expect(tools.map(tool => tool.name)).toEqual([
+      "begin_processing", "complete_processing", "reply",
+      "typing", "react", "request_location", "read_location", "share_contact_card",
+    ]);
+    const card = { title: "Room A", suggestions: [{ type: "reply", label: "Book", id: "book-a" }] };
+    for (const extra of [
+      { media: [{ path: "/tmp/menu.png" }, { url: "https://cdn.example.com/a.jpg" }] },
+      { place: { latitude: 42.28, longitude: -83.74, name: "Diag" } },
+      { rich_card: card },
+      { carousel: { card_width: "small", cards: [card, { description: "Room B" }] } },
+    ]) {
+      expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", ...extra }), JSON.stringify(checkReply.errors)).toBe(true);
+    }
+    expect(checkReply({ chat_id: CHAT_ID, send_id: "rich", place: { latitude: 0 } })).toBe(false);
+    mcp.send({ jsonrpc: "2.0", id: 102, method: "tools/call", params: { name: "no_such_tool", arguments: {} } });
+    const unknown = await mcp.take(message => message.id === 102, "unknown tool");
+    expect((unknown as { error?: { code: number } }).error?.code).toBe(-32602);
     // The list the model sees is the schema the channel ships, list picker fields included.
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
       JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),

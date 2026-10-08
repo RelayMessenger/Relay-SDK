@@ -4,12 +4,18 @@ import type Relay from "@relaymessenger/sdk";
 import {
   BUTTONS_GUIDANCE,
   type ChatSendVoicememoResponse,
+  FORM_GUIDANCE,
+  type FormPart,
   type MessagePart,
   type PaymentRequest,
   type RequestOptions,
   RelayAPIError,
+  RATING_REQUEST_GUIDANCE,
   SELECTION_GUIDANCE,
+  formPart,
+  partsWithForm,
   partsWithSelection,
+  ratingRequestPart,
   selectionPart,
 } from "@relaymessenger/sdk";
 import type { StopCondition, ToolSet } from "ai";
@@ -135,6 +141,23 @@ export type SendInput =
     cards: CardInput[];
     card_width?: "small" | "medium";
     text?: string;
+  }
+  | {
+    kind: "form";
+    /** Relay's form part without its type; the SDK's formPart validates it. */
+    form: Omit<FormPart, "type">;
+    text?: string;
+  }
+  | {
+    /** Relay's rating_request part: the whole Message, with no other fields. */
+    kind: "rating_request";
+    text?: never;
+  }
+  | {
+    kind: "media";
+    /** A public https file; Relay fetches it and stores it as an attachment. */
+    url: string;
+    text?: string;
   };
 
 const CARD_KINDS = new Set(["rich_card", "carousel"]);
@@ -150,9 +173,52 @@ const sendButtonSchema = z.object({
   url: z.string().max(2_048).regex(/^https?:\/\//u).optional(),
 }).strict();
 
+// Relay's form part (@relaymessenger/sdk FormPart) as one object schema with
+// no unions, for the same Vertex reason as the send root. Every field rule is
+// the SDK's own validator (formPart), run in the send refinement below.
+const formOptionSchema = z.object({
+  value: z.string().min(1).max(100),
+  label: z.string().trim().min(1).max(30),
+}).strict();
+const formFieldSchema = z.object({
+  id: z.string().min(1).max(100),
+  type: z.enum(["text", "select", "picker", "date"]),
+  label: z.string().trim().min(1).max(40),
+  placeholder: z.string().optional(),
+  required: z.boolean().optional(),
+  multiline: z.boolean().optional().describe("text fields only."),
+  max_length: z.number().int().min(1).optional().describe("text fields only: the longest answer."),
+  keyboard: z.enum(["default", "email", "phone", "number", "url"]).optional().describe("text fields only."),
+  multiple: z.boolean().optional().describe("select fields only: allow several choices."),
+  options: z.array(formOptionSchema).min(1).max(200).optional().describe(
+    "select (1 to 20) and picker (1 to 200) fields only.",
+  ),
+  min_date: z.string().optional().describe("date fields only: YYYY-MM-DD."),
+  max_date: z.string().optional().describe("date fields only: YYYY-MM-DD."),
+}).strict();
+const sendFormSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  pages: z.array(z.object({
+    id: z.string().min(1).max(19),
+    title: z.string().trim().min(1).max(80),
+    fields: z.array(formFieldSchema).min(1).max(50),
+  }).strict()).min(1),
+  show_summary: z.boolean().optional(),
+  splash: z.object({
+    title: z.string().optional(),
+    text: z.string().optional(),
+    button_title: z.string().trim().min(1).max(35),
+  }).strict().optional(),
+  received_message: z.object({
+    title: z.string().trim().min(1).max(512),
+    subtitle: z.string().optional(),
+  }).strict().optional(),
+}).strict();
+
 /** Every kind of Message the send Action can carry. */
 export const RELAY_SEND_KINDS = [
   "text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel",
+  "form", "rating_request", "media",
 ] as const;
 export type RelaySendKind = (typeof RELAY_SEND_KINDS)[number];
 
@@ -174,9 +240,14 @@ export function relaySendInputSchema(
   // The server's link part: one absolute URL of at most 2,048 characters,
   // alone in its Message. With text, the words go first as their own Message.
   url: z.string().trim().max(2_048).regex(/^https?:\/\/\S+$/u).optional().describe(
-    "With kind link only: one absolute http or https URL the person will look at or read, sent as its own Message and "
+    "With kind link: one absolute http or https URL the person will look at or read, sent as its own Message and "
     + "drawn as a card with the page's title and image. Give text to say something first; it goes as its own Message "
-    + "before the card. A page the person acts on is a url button under a text Message instead.",
+    + "before the card. A page the person acts on is a url button under a text Message instead. "
+    + "With kind media: the public https address of a file (a photo, video, audio or document) to send as the "
+    + "file itself; Relay downloads it. Give text to send words with it.",
+  ),
+  form: sendFormSchema.optional().describe(
+    "With kind form only: the form the person fills in, with optional text shown above its card. " + FORM_GUIDANCE,
   ),
   buttons: z.array(sendButtonSchema).min(1).max(5).optional().describe(
     "With kind text only: 1 to 5 buttons drawn under the Message. Each has a label of 1 to 80 characters; "
@@ -260,8 +331,12 @@ export function relaySendInputSchema(
 }).strict().superRefine((value, context) => {
   const required = value.kind === "image"
     ? "prompt"
-    : value.kind === "link"
+    : value.kind === "link" || value.kind === "media"
     ? "url"
+    : value.kind === "form"
+    ? "form"
+    : value.kind === "rating_request"
+    ? undefined
     : value.kind === "place"
     ? "latitude"
     : value.kind === "payment"
@@ -273,7 +348,9 @@ export function relaySendInputSchema(
   // the words when the whole turn is the choice. A payment has several required
   // fields at once, checked below instead of through this single-field rule.
   // A coordinate of 0 is a real place, so place checks presence, not truth.
-  const missing = value.kind === "place" ? value.latitude === undefined : !value[required];
+  const missing = required === undefined
+    ? false
+    : value.kind === "place" ? value.latitude === undefined : !value[required];
   if (
     value.kind !== "payment"
     && missing
@@ -281,11 +358,19 @@ export function relaySendInputSchema(
   ) {
     context.addIssue({
       code: "custom",
-      path: [required],
+      path: [required!],
       message: value.kind === "text"
         ? "text is required for text, unless buttons or a selection are sent on their own"
         : `${required} is required for ${value.kind}`,
     });
+  }
+  if (value.kind === "media" && value.url !== undefined && !value.url.startsWith("https://")) {
+    context.addIssue({ code: "custom", path: ["url"], message: "url must be an https address for media" });
+  }
+  if (value.kind === "form" && value.form !== undefined) {
+    // One source of truth for the form rules: the SDK's own validator.
+    const checked = formPart({ type: "form", ...value.form });
+    if (typeof checked === "string") context.addIssue({ code: "custom", path: ["form"], message: checked });
   }
   if (value.kind === "place" && value.longitude === undefined) {
     context.addIssue({ code: "custom", path: ["longitude"], message: "longitude is required for place" });
@@ -354,7 +439,7 @@ export function relaySendInputSchema(
   for (const field of [
     "text", "prompt", "caption", "style", "activity", "activity_emoji", "buttons", "selection", "url",
     "description", "category", "mode", "amount", "currency", "price_id", "image_url",
-    "cards", "card_width",
+    "cards", "card_width", "form",
     "reply", "silent", "latitude", "longitude", "name", "address",
   ] as const) {
     const allowed = field === required
@@ -365,7 +450,7 @@ export function relaySendInputSchema(
       || ((value.kind === "image" || value.kind === "voice_memo") && field === "activity")
       || ((value.kind === "image" || value.kind === "voice_memo")
         && field === "activity_emoji" && value.activity !== undefined)
-      || (value.kind === "link" && field === "text")
+      || ((value.kind === "link" || value.kind === "media" || value.kind === "form") && field === "text")
       || (value.kind === "payment" && paymentFields.has(field))
       || cardFields.has(field);
     if (!allowed && value[field] !== undefined) {
@@ -516,7 +601,7 @@ type SendResult = SentResult | VoiceTerminalResult;
 
 async function sendCardAction(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "rich_card" | "carousel" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -531,7 +616,7 @@ async function sendCardAction(
     const result = await relay.chats.messages.send(identity.chatId, {
       message: {
         parts: input.text ? [{ type: "text", value: input.text }, card] : [card],
-        idempotency_key: relayIdempotencyKey(identity.eventId),
+        idempotency_key: identity.sendKey,
       },
     }, requestOptions(signal));
     return { status: "sent", kind: input.kind, messageId: result.message.id };
@@ -547,6 +632,27 @@ const NO_ACTIVITY = { stop: async () => {} };
 
 function relayIdempotencyKey(eventId: string): string {
   return `relay-agent:${eventId}`;
+}
+
+/**
+ * A turn with the Relay idempotency key of one send call. A turn may send
+ * several Messages: each send call has its own key, the same on a retry of
+ * that call, so Relay sends a retried call's Message once.
+ */
+type KeyedTurn = RelayTurnIdentity & { sendKey: string };
+
+/**
+ * When the last Message of a turn went, so the next Message's composing pause
+ * counts from it, as a person types each text after sending the last. Keyed
+ * by Chat and turn; bounded, since only the running turns matter.
+ */
+const lastSends = new Map<string, number>();
+const LAST_SENDS_MAX = 512;
+
+function rememberSend(turnKey: string): void {
+  lastSends.delete(turnKey);
+  lastSends.set(turnKey, Date.now());
+  if (lastSends.size > LAST_SENDS_MAX) lastSends.delete(lastSends.keys().next().value!);
 }
 
 function requestOptions(signal?: AbortSignal): RequestOptions {
@@ -601,7 +707,7 @@ async function upload(
 
 async function sendText(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "text" }>,
   signal?: AbortSignal,
   timing?: (phase: RelayChatTimingPhase) => void,
@@ -624,7 +730,7 @@ async function sendText(
   const result = await relay.chats.messages.send(identity.chatId, {
     message: {
       parts,
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
       ...(input.reply && identity.replyTo
         ? { reply_to: { message_id: identity.replyTo.messageId, part_index: identity.replyTo.partIndex } }
         : {}),
@@ -642,7 +748,7 @@ async function sendText(
 async function sendPayment(
   relay: Relay,
   deps: RelayActionDependencies,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "payment" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -659,7 +765,7 @@ async function sendPayment(
       metadata: { [PAYMENT_CHAT_METADATA_KEY]: identity.chatId },
     }, {
       ...requestOptions(signal),
-      idempotencyKey: `${relayIdempotencyKey(identity.eventId)}:payment_request`,
+      idempotencyKey: `${identity.sendKey}:payment_request`,
     });
   } catch (error) {
     if (error instanceof RelayAPIError && error.status === 403) {
@@ -671,7 +777,7 @@ async function sendPayment(
   const result = await relay.chats.messages.send(identity.chatId, {
     message: {
       parts: [{ type: "payment", checkout_url: request.checkout_url }],
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
     },
   }, requestOptions(signal));
   return {
@@ -682,10 +788,24 @@ async function sendPayment(
   };
 }
 
+/** One Message of ready parts, under the turn's idempotency key. */
+async function sendParts(
+  relay: Relay,
+  identity: KeyedTurn,
+  kind: SendInput["kind"],
+  parts: MessagePart[],
+  signal?: AbortSignal,
+): Promise<SentResult> {
+  const result = await relay.chats.messages.send(identity.chatId, {
+    message: { parts, idempotency_key: identity.sendKey },
+  }, requestOptions(signal));
+  return { status: "sent", kind, messageId: result.message.id };
+}
+
 /** A place pin, alone or after the model's words; it goes at once, like a link. */
 async function sendPlace(
   relay: Relay,
-  identity: RelayTurnIdentity,
+  identity: KeyedTurn,
   input: Extract<SendInput, { kind: "place" }>,
   signal?: AbortSignal,
 ): Promise<SentResult> {
@@ -701,21 +821,47 @@ async function sendPlace(
           ...(input.address ? { address: input.address } : {}),
         },
       ],
-      idempotency_key: relayIdempotencyKey(identity.eventId),
+      idempotency_key: identity.sendKey,
     },
   }, requestOptions(signal));
   return { status: "sent", kind: input.kind, messageId: result.message.id };
 }
 
+/**
+ * Sends one Message. `callKey` names this send call by its position in the
+ * turn (relayCallNumber): a second call sends a second Message, and a retry
+ * of the same position sends nothing new. Without it, the turn has one send key.
+ */
 export async function executeRelaySend(
   deps: RelayActionDependencies,
   input: SendInput,
   signal?: AbortSignal,
+  callKey?: string,
 ): Promise<SendResult> {
-  const identity = deps.turn();
+  const turn = deps.turn();
+  const turnKey = `${turn.chatId}:${turn.eventId}`;
+  // The first Message's pause counts from the typing indicator; each later
+  // one from the Message before it.
+  const startedAt = lastSends.get(turnKey) ?? turn.composingSince ?? Date.now();
+  const result = await sendOnce(deps, turn, input, startedAt, signal, callKey);
+  rememberSend(turnKey);
+  return result;
+}
+
+async function sendOnce(
+  deps: RelayActionDependencies,
+  turn: RelayTurnIdentity,
+  input: SendInput,
+  startedAt: number,
+  signal?: AbortSignal,
+  callKey?: string,
+): Promise<SendResult> {
+  const identity: KeyedTurn = {
+    ...turn,
+    sendKey: relayIdempotencyKey(callKey === undefined ? turn.eventId : `${turn.eventId}:${callKey}`),
+  };
   deps.assertCurrentTurn(identity);
   const relay = createRelayClient(deps.env);
-  const startedAt = identity.composingSince ?? Date.now();
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
     // No words to type when the turn is only its buttons: the empty string
@@ -726,7 +872,7 @@ export async function executeRelaySend(
     return await sendText(relay, identity, input, signal, deps.timing);
   }
   if (input.kind === "link") {
-    const textKey = relayIdempotencyKey(identity.eventId);
+    const textKey = identity.sendKey;
     // A retried turn whose words already went sends only the link.
     if (input.text && !deps.sentParts?.has(textKey)) {
       await compose(input.text, identity.eventId, startedAt, signal);
@@ -745,8 +891,8 @@ export async function executeRelaySend(
       message: {
         parts: [{ type: "link", value: input.url }],
         idempotency_key: input.text
-          ? `${relayIdempotencyKey(identity.eventId)}:link`
-          : relayIdempotencyKey(identity.eventId),
+          ? `${identity.sendKey}:link`
+          : identity.sendKey,
       },
     }, requestOptions(signal));
     return { status: "sent", kind: input.kind, messageId: result.message.id };
@@ -766,6 +912,25 @@ export async function executeRelaySend(
   if (input.kind === "rich_card" || input.kind === "carousel") {
     // A card, like a payment, goes at once.
     return await sendCardAction(relay, identity, input, signal);
+  }
+  if (input.kind === "rating_request") {
+    // Relay writes the request's words; it goes at once, alone, as a card does.
+    return await sendParts(relay, identity, input.kind, [ratingRequestPart()], signal);
+  }
+  if (input.kind === "form" || input.kind === "media") {
+    // Words beside a form or a file are typed first; the part itself, like a
+    // card or a pasted link, needs no typing time of its own.
+    if (input.text) {
+      await compose(input.text, identity.eventId, startedAt, signal);
+      deps.assertCurrentTurn(identity);
+    }
+    const parts: MessagePart[] = input.kind === "form"
+      ? partsWithForm(input.text, { type: "form", ...input.form })
+      : [
+        ...(input.text ? [{ type: "text" as const, value: input.text }] : []),
+        { type: "media" as const, url: input.url },
+      ];
+    return await sendParts(relay, identity, input.kind, parts, signal);
   }
   const assertCurrent = () => {
     signal?.throwIfAborted();
@@ -811,7 +976,7 @@ export async function executeRelaySend(
       const result = await relay.chats.messages.send(identity.chatId, {
         message: {
           parts,
-          idempotency_key: relayIdempotencyKey(identity.eventId),
+          idempotency_key: identity.sendKey,
         },
       }, requestOptions(signal));
       return {
@@ -944,61 +1109,79 @@ export type RelayActionName = (typeof RELAY_ACTION_NAMES)[number];
 /** Options for createRelayTurnSettled. */
 export interface RelayTurnSettledOptions {
   /**
-   * The agent's own tools that send the person something visible, such as its
-   * own send-a-video tool. Each ends the turn the way send does. Every other
-   * tool of the agent's own is a read whose result the model acts on.
+   * The agent's own tools that end the turn when called, such as a tool that
+   * hands the chat to a person. Every other tool, Relay's send included, lets
+   * the model go on and decide whether to send more.
    */
   visibleSends?: readonly string[];
 }
 
 /**
- * A turn is one visible act. It goes on to another step only while every tool
- * the model just called gave it something to act on: a location read, a
- * location request, a call or a payment Relay refused with a reason (to tell
- * the person, or not), or a card Relay refused (its reason, to fix and send
- * again). A tool that is not a Relay Action and not one of `visibleSends` is
- * the agent's own read, and its result is something to act on.
- * Everything else ends the turn; a ringing call is the turn's act.
+ * The model decides how many Messages a turn sends, as a person texting sends
+ * several in a row. The turn goes on after every send, reaction, read and tool,
+ * and ends when the model calls no tool, calls stay_silent, starts a ringing
+ * call, or calls one of `visibleSends`. RELAY_TURN_MAX_STEPS caps a runaway turn.
  */
 export function createRelayTurnSettled(options: RelayTurnSettledOptions = {}): StopCondition<ToolSet> {
   const visibleSends: ReadonlySet<string> = new Set(options.visibleSends ?? []);
   return ({ steps }) => {
     const step = steps.at(-1);
     if (!step || step.toolCalls.length === 0) return true;
-    return !step.toolCalls.every((call) => {
-      if (visibleSends.has(call.toolName)) return false;
-      if (!RELAY_ACTIONS.has(call.toolName)) return true;
-      // Reads give the model something to act on.
-      if (CONTINUING_ACTIONS.has(call.toolName)) return true;
-      const result = step.toolResults.find(({ toolCallId }) =>
-        toolCallId === call.toolCallId
-      );
-      if (call.toolName === "send") {
-        const refused = (result?.output as { error?: { name?: unknown } } | undefined)?.error?.name;
-        return refused === "RelayCardRefused" || refused === "RelayPaymentRefused" || refused === "RelayReplyRefused";
-      }
-      const status = (result?.output as { status?: unknown } | undefined)?.status;
-      if (call.toolName === "start_call") return status === "not_called";
-      if (call.toolName === "group" || call.toolName === "share_contact_card") return status === "not_done";
-      if (call.toolName !== "request_location") return false;
-      return status === "not_requested";
+    return step.toolCalls.some((call) => {
+      if (visibleSends.has(call.toolName) || call.toolName === "stay_silent") return true;
+      if (call.toolName !== "start_call") return false;
+      const result = step.toolResults.find(({ toolCallId }) => toolCallId === call.toolCallId);
+      return (result?.output as { status?: unknown } | undefined)?.status === "ringing";
     });
   };
 }
 
-/** createRelayTurnSettled with no tools of the agent's own that send. */
+/** createRelayTurnSettled with no tools of the agent's own that end the turn. */
 export const relayTurnSettled: StopCondition<ToolSet> = createRelayTurnSettled();
 
-const RELAY_ACTIONS: ReadonlySet<string> = new Set(RELAY_ACTION_NAMES);
-
-/** Actions whose result the model reads and acts on in the same turn. */
-const CONTINUING_ACTIONS: ReadonlySet<string> = new Set([
-  "read_location",
-  "find_agents",
-  "payment_request",
-]);
-
 export const RELAY_TURN_MAX_STEPS = 24;
+
+/** One turn attempt's count of calls to one Action, and the number each call got. */
+interface CallCount {
+  attempt: string;
+  next: number;
+  calls: Map<string, number>;
+}
+
+const callCounts = new Map<string, CallCount>();
+const CALL_COUNTS_MAX = 512;
+
+/**
+ * The 1-based position of this call among the turn's calls to `action`:
+ * the first send of a turn is 1, the next 2. Cloudflare's Think Actions page
+ * asks for a key that "survives recovery retries ... and not a value that
+ * changes per attempt", which a toolCallId is not. A position is: when Think
+ * runs a turn again for the same event (a new requestId), the count starts
+ * again at 1, so the re-issued first send gets the ledger row of the first
+ * send and is not sent twice. Within one attempt a call keeps its number, so
+ * its key function and its execute agree. It is assigned before any await.
+ */
+export function relayCallNumber(
+  action: string,
+  turn: { chatId: string; eventId: string },
+  ctx: { requestId?: string; toolCallId?: string },
+): number {
+  const key = `${action}:${turn.chatId}:${turn.eventId}`;
+  const attempt = ctx.requestId ?? "";
+  let count = callCounts.get(key);
+  if (!count || count.attempt !== attempt) {
+    count = { attempt, next: 0, calls: new Map() };
+  }
+  callCounts.delete(key);
+  callCounts.set(key, count);
+  if (callCounts.size > CALL_COUNTS_MAX) callCounts.delete(callCounts.keys().next().value!);
+  const callId = ctx.toolCallId ?? "";
+  const known = callId ? count.calls.get(callId) : undefined;
+  if (known !== undefined) return known;
+  count.next += 1;
+  if (callId) count.calls.set(callId, count.next);
+  return count.next;
+}
 
 /** Calls start now; scheduling a call later is the agent's own tool. */
 const START_CALL_NOW_ONLY =
@@ -1118,7 +1301,9 @@ export function createRelayActions(
   return {
     send: action({
       description: describe("send",
-        "Send one Relay Message. Use text for a normal Message"
+        "Send one Relay Message. Call send again to send another: like a person texting, you may send several "
+        + "short Messages in a row, one thought each, or just one. Your turn ends when you stop calling tools. "
+        + "Use text for a normal Message"
         + (deps.media?.image ? ", image to generate and send one image or meme" : "")
         + (deps.media?.voiceMemo ? ", voice_memo to speak a real voice memo with an optional delivery style" : "")
         + ". Choose the content and wording yourself. Text is plain chat text, not Markdown. "
@@ -1129,16 +1314,27 @@ export function createRelayActions(
         + "card the person looks at; see the url field for when. Use payment to "
         + "ask the person to pay, drawn as its own card with a Pay button. Use "
         + "rich_card to show one card with a picture, title, description and "
-        + "suggestions, or carousel to show 2 to 10 of them side by side."),
+        + "suggestions, or carousel to show 2 to 10 of them side by side. Use "
+        + "form to collect several answers at once; see the form field. Use "
+        + "media to send a file from a public https url. Use rating_request, "
+        + "with no other field, to ask the person to rate you. "
+        + RATING_REQUEST_GUIDANCE),
       inputSchema: relaySendInputSchema(sendKinds),
-      idempotencyKey: () => `message:${deps.turn().eventId}`,
+      // One key per send call (Think's toolCallId), so a turn sends as many
+      // Messages as the model calls send, and a retried call replays its result.
+      idempotencyKey: ({ ctx }) => {
+        const turn = deps.turn();
+        return `message:${turn.eventId}:${relayCallNumber("send", turn, ctx)}`;
+      },
       // Think 0.17 creates a framework timeout only when timeoutMs > 0.
       // Pre-dispatch generation/upload still obeys the turn signal and its own
       // bounded request timeouts. The irreversible voice call must not lose its
       // native Action ledger row to a framework timeout race.
       timeoutMs: 0,
-      execute: (input, context) =>
-        deps.runChosenAction(
+      execute: async (input, context) => {
+        // The same number the key function gave this call, read before any await.
+        const number = relayCallNumber("send", deps.turn(), context);
+        return deps.runChosenAction(
           "send",
           () => executeRelaySend(
             deps,
@@ -1146,8 +1342,10 @@ export function createRelayActions(
               ? { ...input, text: withoutSearchMarkers(input.text) }
               : input,
             deps.signal(context.signal),
+            String(number),
           ),
-        ),
+        );
+      },
     }),
     react: action({
       description: describe("react",
@@ -1155,7 +1353,10 @@ export function createRelayActions(
         + "After a person's reaction, the current Message is the one they "
         + "reacted to."),
       inputSchema: reactionInputSchema,
-      idempotencyKey: () => `message:${deps.turn().eventId}`,
+      idempotencyKey: ({ ctx }) => {
+        const turn = deps.turn();
+        return `reaction:${turn.eventId}:${relayCallNumber("react", turn, ctx)}`;
+      },
       execute: (input, context) =>
         deps.runChosenAction(
           "react",

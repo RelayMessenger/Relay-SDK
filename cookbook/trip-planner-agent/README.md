@@ -14,6 +14,16 @@ changed it.
 In a direct Chat it answers every Message, because the Chat holds only you and
 this agent, so no mention gate is needed.
 
+## Choices
+
+When the group has to pick between options it already named ("Sintra or
+Cascais on day two?"), the agent sends the plan, then a second Message with a
+`selection` part listing those options. It never invents an option. A person's
+answer arrives as a `selection_response` part; the agent keeps its
+`selected_values` and `reply_to` in the Chat's history, so the next plan
+follows the choice. A retry resends both Messages under the same idempotency
+keys without asking the model again.
+
 ## Run
 
 The agent needs two credentials and no others: a Relay Agent Token and an

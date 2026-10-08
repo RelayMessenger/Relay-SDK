@@ -28,7 +28,7 @@ interface Wired {
     timeoutMs?: number;
     idempotencyKey?: (args: { input: unknown; ctx: unknown }) => string;
     inputSchema: { parse(value: unknown): unknown };
-    execute(input: unknown, context: { signal?: AbortSignal }): Promise<unknown>;
+    execute(input: unknown, context: { signal?: AbortSignal; toolCallId?: string; requestId?: string }): Promise<unknown>;
   };
 }
 
@@ -107,7 +107,7 @@ describe("relayActions", () => {
     await run("send", { kind: "text", text: "hi", reply: true });
     expect(calls[0]!.url).toBe(`https://api.example.test/v1/chats/${CHAT_ID}/messages`);
     expect(JSON.parse(calls[0]!.body!).message).toMatchObject({
-      idempotency_key: `relay-agent:${MESSAGE_ID}`,
+      idempotency_key: `relay-agent:${MESSAGE_ID}:1`,
       reply_to: { message_id: MESSAGE_ID, part_index: 0 },
     });
   });
@@ -179,11 +179,12 @@ describe("relayActions", () => {
     const actions = relayActions(agent(), OPTIONS);
     const keys = Object.fromEntries(Object.entries(actions).map(([name, wired]) => {
       const key = (wired as unknown as Wired).config.idempotencyKey;
-      return [name, key ? key({ input: {}, ctx: {} }) : null];
+      return [name, key ? key({ input: {}, ctx: { requestId: "attempt-ledger", toolCallId: "call-1" } }) : null];
     }));
     expect(keys).toEqual({
-      send: `message:${MESSAGE_ID}`,
-      react: `message:${MESSAGE_ID}`,
+      // One ledger row per send or react call, so a turn may make several.
+      send: `message:${MESSAGE_ID}:1`,
+      react: `reaction:${MESSAGE_ID}:1`,
       stay_silent: `message:${MESSAGE_ID}`,
       request_location: `location_request:${MESSAGE_ID}`,
       start_call: `call:${MESSAGE_ID}`,
@@ -196,6 +197,57 @@ describe("relayActions", () => {
     // Think 0.17 starts a framework timeout only when timeoutMs > 0; the voice
     // memo's send must never lose its ledger row to one.
     expect((actions.send as unknown as Wired).config.timeoutMs).toBe(0);
+  });
+
+  it("numbers each send by its place in the turn, in one step or across steps", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, compose: async () => {} }).send as unknown as Wired;
+    const ctx = (toolCallId: string) => ({ requestId: "attempt-steps", toolCallId });
+    // Two sends in one step run in parallel; a third comes in the next step.
+    const keys = [wired.config.idempotencyKey!({ input: {}, ctx: ctx("a") }), wired.config.idempotencyKey!({ input: {}, ctx: ctx("b") })];
+    await Promise.all([
+      wired.config.execute({ kind: "text", text: "on my way" }, ctx("a")),
+      wired.config.execute({ kind: "text", text: "10 min" }, ctx("b")),
+    ]);
+    keys.push(wired.config.idempotencyKey!({ input: {}, ctx: ctx("c") }));
+    await wired.config.execute({ kind: "text", text: "here" }, ctx("c"));
+    expect(keys).toEqual([`message:${MESSAGE_ID}:1`, `message:${MESSAGE_ID}:2`, `message:${MESSAGE_ID}:3`]);
+    expect(calls.map((call) => JSON.parse(call.body!).message.idempotency_key)).toEqual([
+      `relay-agent:${MESSAGE_ID}:1`, `relay-agent:${MESSAGE_ID}:2`, `relay-agent:${MESSAGE_ID}:3`,
+    ]);
+  });
+
+  it("does not send twice when Think runs the turn again for the same event with new tool call ids", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const actions = relayActions(agent(), { ...OPTIONS, compose: async () => {} });
+    // Think's ledger as its Actions page describes it: rows keyed
+    // action:<name>:<key>; a key already settled returns its stored result
+    // without running execute again.
+    const ledger = new Map<string, unknown>();
+    const runLedgered = async (name: string, input: unknown, ctx: { requestId: string; toolCallId: string }) => {
+      const config = (actions[name] as unknown as Wired).config;
+      const row = `action:${name}:${config.idempotencyKey!({ input, ctx })}`;
+      if (ledger.has(row)) return ledger.get(row);
+      const result = await config.execute(input, ctx);
+      ledger.set(row, result);
+      return result;
+    };
+    await runLedgered("send", { kind: "text", text: "on my way" }, { requestId: "attempt-1", toolCallId: "x1" });
+    await runLedgered("react", { type: "love" }, { requestId: "attempt-1", toolCallId: "x2" });
+    // The isolate restarts mid-turn; Think recovers and runs the turn again.
+    await runLedgered("send", { kind: "text", text: "on my way!" }, { requestId: "attempt-2", toolCallId: "y1" });
+    await runLedgered("react", { type: "love" }, { requestId: "attempt-2", toolCallId: "y2" });
+    await runLedgered("send", { kind: "text", text: "10 min" }, { requestId: "attempt-2", toolCallId: "y3" });
+    expect([...ledger.keys()]).toEqual([
+      `action:send:message:${MESSAGE_ID}:1`,
+      `action:react:reaction:${MESSAGE_ID}:1`,
+      `action:send:message:${MESSAGE_ID}:2`,
+    ]);
+    const sends = calls.filter((call) => call.url.endsWith("/messages"));
+    expect(sends.map((call) => JSON.parse(call.body!).message.idempotency_key)).toEqual([
+      `relay-agent:${MESSAGE_ID}:1`, `relay-agent:${MESSAGE_ID}:2`,
+    ]);
+    expect(calls.filter((call) => call.url.includes("/reactions"))).toHaveLength(1);
   });
 
   it("removes Google Search citation markers from send's words when the agent searches", async () => {
@@ -279,5 +331,22 @@ describe("createRelayTurnSettled", () => {
     expect(settled(step("send_video"))).toBe(true);
     expect(settled(step("lookup_order"))).toBe(false);
     expect(relayTurnSettled(step("send_video"))).toBe(false);
+  });
+
+  it("goes on after a send or reaction, and ends on no tool, stay_silent, or a ringing call", () => {
+    const called = (toolName: string, output?: unknown) => ({
+      steps: [{
+        toolCalls: [{ toolName, toolCallId: "1" }],
+        toolResults: output === undefined ? [] : [{ toolCallId: "1", toolName, output }],
+      }] as unknown as StepResult<ToolSet>[],
+    });
+    expect(relayTurnSettled(called("send", { status: "sent", kind: "text" }))).toBe(false);
+    expect(relayTurnSettled(called("react", { status: "reacted", type: "love" }))).toBe(false);
+    expect(relayTurnSettled(called("stay_silent", { status: "silent" }))).toBe(true);
+    expect(relayTurnSettled(called("start_call", { status: "ringing", call_id: "c" }))).toBe(true);
+    expect(relayTurnSettled(called("start_call", { status: "not_called", reason: "busy" }))).toBe(false);
+    expect(relayTurnSettled({
+      steps: [{ toolCalls: [], toolResults: [] }] as unknown as StepResult<ToolSet>[],
+    })).toBe(true);
   });
 });

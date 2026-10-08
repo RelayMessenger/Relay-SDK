@@ -113,8 +113,8 @@ Message instead of creating a duplicate.
 - a Cloudflare account with Workers AI
 - an agent and its Agent Token from [Relay Console](https://console.relayapp.im)
 
-The starter pins `@relaymessenger/chat-sdk-adapter@0.3.7` and
-`@relaymessenger/sdk@0.3.6` from npm.
+The starter pins `@relaymessenger/chat-sdk-adapter@0.3.13` and
+`@relaymessenger/sdk@0.5.3` from npm.
 
 ## Local setup
 
@@ -207,11 +207,11 @@ The deployed Worker uses the settings in `wrangler.jsonc`, which name
 This revision is tested against:
 
 - Relay Server `8247505bd5f8dffccf8047b91317a68a91632068`
-- Relay-SDK `62b320548d5ba5edf2a9445efdab32122f0257b7`
-- `@relaymessenger/chat-sdk-adapter@0.3.7` npm integrity
-  `sha512-7m/2HDv7pi6C99PxEdwmkcRgUyeUGrjNpb2qZLjQDrUimYHQyWSjzExr2ljEXF4/q+77PlOU4DQ+ZOGjujFdKg==`
-- `@relaymessenger/sdk@0.3.6` npm integrity
-  `sha512-npGKYHveASvFDQ5DEq3ZYEjqwJDrDJhXfxELHEWPUYY2mylwJiXX4J/5RjQ76c5oS+bG2jOy8YXKhgr0TIgMTQ==`
+- Relay-SDK `ea4a4bc1792f7260f98184f6bd9bcdea7746aa1e`
+- `@relaymessenger/chat-sdk-adapter@0.3.13` npm integrity
+  `sha512-fCstCmGGZ15VZtZWpfrXc7nN+KGRVAYlBVY9NF4w806Zxssgbm7v1LYl3542hTeg7mnt8PkRzTVZGq5XMTTABA==`
+- `@relaymessenger/sdk@0.5.3` npm integrity
+  `sha512-3du5+8VQlwV5lMgdlQ3pINIo2g+mM+rcjG7B1jxQOaORvBl78kM0jTpfF1xODP4qhNyq9RLZ0ClxM3f01r81SA==`
 - OpenAPI SHA-256
   `f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy

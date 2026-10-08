@@ -28,12 +28,14 @@ const EVENT: RelayWebhookEnvelope<
     },
     id: "01993d50-ef7b-7b37-886b-23fd80c7ec13",
     direction: "inbound",
-    sender_handle: {
+    sender_handle: null,
+    from_handle: {
       id: "01993d50-ef7b-7b37-886b-23fd80c7ec14",
       handle: "sender",
       kind: "user",
       joined_at: "2026-09-01T12:00:00Z",
       display_name: null,
+      subtitle: null,
       image_url: null,
       about: null,
       verified: false,
@@ -83,7 +85,7 @@ describe("accepted event processing", () => {
 
   it("ignores unmentioned group traffic and accepts the canonical owner mention", () => {
     const owner = {
-      ...EVENT.data.sender_handle,
+      ...EVENT.data.from_handle!,
       id: EVENT.agent_id,
       handle: "metrics",
       kind: "agent" as const,
@@ -112,13 +114,14 @@ describe("accepted event processing", () => {
   });
 
   it("names the Message only when another agent sent it, and never buttons or a selection", async () => {
-    const agent = { ...EVENT.data.sender_handle, kind: "agent" as const };
+    const agent = { ...EVENT.data.from_handle!, kind: "agent" as const };
     expect(replyTo(EVENT.data)).toEqual({});
-    expect(replyTo({ ...EVENT.data, sender_handle: agent })).toEqual({ reply_to: { message_id: EVENT.data.id } });
-    expect(replyTo({ ...EVENT.data, sender_handle: agent, parts: [{ type: "buttons", items: [{ label: "Yes" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
-    expect(replyTo({ ...EVENT.data, sender_handle: agent, parts: [{ type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
+    expect(replyTo({ ...EVENT.data, from_handle: null })).toEqual({});
+    expect(replyTo({ ...EVENT.data, from_handle: agent })).toEqual({ reply_to: { message_id: EVENT.data.id } });
+    expect(replyTo({ ...EVENT.data, from_handle: agent, parts: [{ type: "buttons", items: [{ label: "Yes" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
+    expect(replyTo({ ...EVENT.data, from_handle: agent, parts: [{ type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
     const send = vi.fn(async () => ({}));
-    await processAcceptedEvent({ chats: { markAsRead: vi.fn(async () => undefined), messages: { send } } } as never, { ...EVENT, data: { ...EVENT.data, sender_handle: agent } });
+    await processAcceptedEvent({ chats: { markAsRead: vi.fn(async () => undefined), messages: { send } } } as never, { ...EVENT, data: { ...EVENT.data, from_handle: agent } });
     expect(send).toHaveBeenCalledWith(EVENT.data.chat.id, expect.objectContaining({
       message: expect.objectContaining({ reply_to: { message_id: EVENT.data.id } }),
     }));

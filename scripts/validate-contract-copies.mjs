@@ -51,8 +51,8 @@ const skillLock = JSON.parse(
 assert.equal(skillLock.api.openapi_sha256, expected);
 assert.equal(skillLock.api.commit, manifest.upstream.commit);
 if (manifest.upstream.commit === "PENDING") assert.equal(skillLock.api.publication_status, "local-only");
-assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
-assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
+assert.equal(skillLock.sdk.commit, "4076374bb2ea53dddc5804d4e942ca10af7e7359");
+assert.equal(skillLock.sdk.version, "0.5.3");
 // The lock is what a customer's installed skill reads, on every branch, so its
 // docs address is the production one even while this branch targets staging.
 assert.equal(skillLock.docs_mcp.url, "https://docs.relayapp.im/mcp");

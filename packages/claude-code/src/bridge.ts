@@ -15,7 +15,21 @@ import type { DeliveryCandidate } from "./types.ts";
 
 const MAX_RELAY_TEXT = 10_000;
 
-function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor): Record<string, string> {
+/**
+ * A contact card shared into the chat (`system_event` of type
+ * `contact_card_shared`), as untrusted JSON: who shared it and the card.
+ */
+function contactCardMeta(systemEvent: unknown, redactor: Redactor): Record<string, string> {
+  if (!isRecord(systemEvent) || systemEvent.type !== "contact_card_shared" || !isRecord(systemEvent.contact_card)) return {};
+  const actor = isRecord(systemEvent.actor) && typeof systemEvent.actor.handle === "string" ? systemEvent.actor.handle : null;
+  const card = JSON.stringify({ shared_by: actor, card: systemEvent.contact_card });
+  return {
+    contact_card: redactor.text(card.length > SELECTION_CONTEXT_MAX_LENGTH
+      ? `${card.slice(0, SELECTION_CONTEXT_MAX_LENGTH)}… [truncated]` : card),
+  };
+}
+
+function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor, systemEvent?: unknown): Record<string, string> {
   const selection = selectionReply(parts, replyTo);
   const form = formReply(parts, replyTo);
   // Words, links and media are already in `content`; only the parts the
@@ -23,6 +37,7 @@ function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["
   const components = componentParts(parts);
   const rich = components.length ? JSON.stringify(components) : "";
   return {
+    ...contactCardMeta(systemEvent, redactor),
     ...(rich ? {
       relay_parts: redactor.text(rich.length > SELECTION_CONTEXT_MAX_LENGTH
         ? `${rich.slice(0, SELECTION_CONTEXT_MAX_LENGTH)}… [truncated]` : rich),
@@ -143,7 +158,13 @@ export function classifyRelayEvent(params: {
   if (!isRecord(event.data)) return { kind: "refuse", reason: "Message event data is not an object" };
   const data = event.data;
   const chat = isRecord(data.chat) ? data.chat : null;
-  const sender = isRecord(data.sender_handle) ? data.sender_handle : null;
+  if (data.is_from_me === true) {
+    return { kind: "ignore", reason: "message.received is this agent's own Message" };
+  }
+  // `from_handle` matches the REST Message object; `sender_handle` is the
+  // deprecated field that servers before 2026-10-04 send instead.
+  const senderField = data.from_handle ?? data.sender_handle;
+  const sender = isRecord(senderField) ? senderField : null;
   const chatId = typeof chat?.id === "string" ? chat.id : "";
   const messageId = typeof data.id === "string" ? data.id : "";
   const senderId = typeof sender?.id === "string" ? sender.id : "";
@@ -193,7 +214,7 @@ export function classifyRelayEvent(params: {
     senderHandle,
     content,
     meta: {
-      ...selectionMeta(parts, data.reply_to, params.redactor),
+      ...selectionMeta(parts, data.reply_to, params.redactor, data.system_event),
       chat_id: chatId,
       message_id: messageId,
       sender_id: senderId,
@@ -273,15 +294,20 @@ export function buildReply(
   buttons?: ButtonsPart,
   selection?: SelectionPart,
   form?: FormPart,
+  attached: readonly MessagePart[] = [],
 ): MessageSendParams {
   if (selection && buttons) throw new Error("selection and buttons do not go together");
   if (form && (buttons || selection)) throw new Error("a form sits beside text only");
-  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection && !form)) {
+  if (attached.length > 0 && (selection || form)) throw new Error("media, a place or a card do not go with a selection or form");
+  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection && !form && attached.length === 0)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
+  // Media, a place and a card sit after the words and above any buttons.
+  const words = partsWithButtons(text, undefined);
   return {
     message: {
-      parts: form ? partsWithForm(text, form) : selection ? partsWithSelection(text, selection) : partsWithButtons(text, buttons),
+      parts: form ? partsWithForm(text, form) : selection ? partsWithSelection(text, selection)
+        : [...words, ...attached, ...(buttons ? [buttons] : [])],
       idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },
@@ -305,18 +331,19 @@ export function buildReplyMessages(
   payment?: PaymentPart,
   form?: FormPart,
   ratingRequest?: RatingRequestPart,
+  attached: readonly MessagePart[] = [],
 ): MessageSendParams[] {
   if (ratingRequest) {
-    if (text || buttons || link || selection || payment || form) throw new Error("a rating request is the whole Message");
+    if (text || buttons || link || selection || payment || form || attached.length > 0) throw new Error("a rating request is the whole Message");
     return [{ message: { parts: [ratingRequest], idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}) } }];
   }
   if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
   if (payment && (buttons || selection)) throw new Error("a payment cannot be combined with buttons or selection");
   if (form && (buttons || link || selection || payment)) throw new Error("a form sits beside text only");
-  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection, form)];
+  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection, form, attached)];
   const messages: MessageSendParams[] = [];
-  if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
+  if (text || buttons || attached.length > 0) messages.push(buildReply(text, idempotencyKey, replyTo, buttons, undefined, undefined, attached));
   const solo = (part: MessagePart): void => {
     messages.push({
       message: {

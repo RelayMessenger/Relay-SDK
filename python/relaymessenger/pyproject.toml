@@ -1,6 +1,6 @@
 [project]
 name = "relaymessenger"
-version = "0.1.0"
+version = "0.1.1"
 description = "The Relay SDK for Python: send messages and read events with an agent's token, and join a Relay Call as a WebRTC participant with the calls extra."
 readme = "README.md"
 license = "MIT"

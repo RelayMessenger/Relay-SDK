@@ -24,3 +24,10 @@ export {
   type VideoEncoding,
   type VideoStreamOptions,
 } from "./video.js";
+export {
+  relayChatContext,
+  relayChatTools,
+  type RelayChatClient,
+  type RelayLocationReadResult,
+  type RelaySentResult,
+} from "./chat.js";
