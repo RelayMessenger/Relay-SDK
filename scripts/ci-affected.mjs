@@ -18,7 +18,7 @@ export const legs = {
   cli: { dirs: ["packages/cli", "packages/pi"], build: ["@relaymessenger/sdk", "@relaymessenger/pi"], run: "validate:cli" },
   openclaw: { dirs: ["packages/openclaw"], build: ["@relaymessenger/sdk"], run: "validate:openclaw" },
   "claude-code": { dirs: ["packages/claude-code"], build: ["@relaymessenger/sdk"], run: "validate:claude-code" },
-  cookbook: { dirs: [], build: ["@relaymessenger/sdk", "@relaymessenger/chat-sdk-adapter"], run: "validate:cookbook" },
+  cookbook: { dirs: [], build: ["@relaymessenger/sdk", "@relaymessenger/chat-sdk-adapter", "@relaymessenger/think"], run: "validate:cookbook" },
 };
 
 // Files no check reads.
