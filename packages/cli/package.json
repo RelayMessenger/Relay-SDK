@@ -35,7 +35,7 @@
     "@relaymessenger/sdk": "0.5.5-staging.0",
     "@vercel/detect-agent": "1.2.5",
     "commander": "^15.0.0",
-    "smol-toml": "^1.8.0",
+    "smol-toml": "^1.9.1",
     "toqr": "0.1.1",
     "yaml": "^2.9.1"
   },
