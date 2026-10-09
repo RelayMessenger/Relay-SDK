@@ -1,5 +1,6 @@
 import {
   type Relay,
+  RelayAPIError,
   RelayWebhookConfiguredError,
   type RelayWebhookEvent,
 } from "@relaymessenger/sdk";
@@ -177,7 +178,13 @@ export async function startRelayAccount(
     });
   } catch (error) {
     if (abortSignal.aborted) return;
-    if (error instanceof RelayWebhookConfiguredError) {
+    // Both need the operator: a restart would meet the same webhook, or the
+    // same refused Agent Token (HTTP 401), every time. terminalDisconnect
+    // stops OpenClaw's auto-restart (server-channels.ts).
+    if (
+      error instanceof RelayWebhookConfiguredError
+      || (error instanceof RelayAPIError && error.status === 401)
+    ) {
       ctx.setStatus({
         accountId: account.accountId,
         running: false,
