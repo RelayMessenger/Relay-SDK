@@ -42,11 +42,14 @@ The session starts only on a Pi in RPC mode (the session an app drives),
 never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes one user message
 (`pi.sendUserMessage`): photos as image content, voice notes as their
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
-files named. A Message from the chat whose run is going steers that run
-(`deliverAs: "steer"`, delivered after the current tool call) and that run's
-answer is the reply; a Message from another chat waits its turn. The
-session's words go back to the chat the Message came from once Pi reports
-`agent_settled`. A run that
+files named, then a line `[Relay chat: <chat id>, from @<handle>]`, since
+one session hears every chat. A Message from any chat that arrives while a
+run is going steers that run (`deliverAs: "steer"`, delivered after the
+current tool call). The run's words go back to the chat whose Message
+started it once Pi reports `agent_settled`, as OpenClaw answers on the route a
+run came from. A steered Message from another chat is answered by `message`
+with its `chat_id`; if the run settles without texting that chat, the Message
+runs again as a turn of its own, so its answer reaches its own chat. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
@@ -138,7 +141,11 @@ Message. A run that texts with `message` sends no final text, so nothing is
 sent twice. `relay_request_location` asks the person to share their location
 and `relay_read_location` reads where everyone sharing is now.
 `relay_send_media` and `relay_react` stay registered for one release as
-aliases of `message` file and react.
+aliases of `message` file and react. Every one of these tools takes an
+optional `chat_id` to act on another chat; without it they act on the chat
+being answered, and `react` and `[[reply_to_current]]` name that chat's newest
+Message. A `message` send to another chat does not stop the run's own chat
+getting its final words.
 `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
 `RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
 session mode they act on the chat whose Message is being answered.

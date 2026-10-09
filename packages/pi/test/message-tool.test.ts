@@ -44,6 +44,21 @@ describe("message tool", () => {
     expect((await tool(relay).execute("call-3", { action: "file", path, reply_to: "msg-7" })).content[0]!.text).toBe("Sent map.png.");
     expect(relay.chats.messages.send).toHaveBeenCalledWith("chat-1", { message: { parts: [{ type: "media", attachment_id: "att-1" }], idempotency_key: "pi-media-call-3", reply_to: { message_id: "msg-7" } } });
   });
+  it("acts on the chat named by chat_id, threading and reacting to that chat's newest Message", async () => {
+    const relay = fakeRelay();
+    const tools = relayTools(relay as unknown as Relay, () => "chat-1", () => "msg-current", (chat) => chat === "chat-2" ? "msg-two" : undefined);
+    const message = tools.find((each) => each.name === "message")!;
+    expect((await message.execute("call-4", { action: "send", text: "Yes [[reply_to_current]]", chat_id: "chat-2" })).details).toEqual({ sent: true, chat_id: "chat-2" });
+    await message.execute("call-5", { action: "react", emoji: "👍", chat_id: "chat-2" });
+    // No chat_id: the chat being answered, as before.
+    expect((await message.execute("call-6", { action: "send", text: "Here" })).details).toEqual({ sent: true, chat_id: "chat-1" });
+    expect(sentTexts(relay)).toEqual([["chat-2", "Yes", "msg-two"], ["chat-1", "Here", undefined]]);
+    expect(relay.messages.addReaction).toHaveBeenCalledWith("msg-two", { operation: "add", type: "like" });
+    const location = { request: vi.fn().mockResolvedValue({}) };
+    (relay.chats as unknown as { location: typeof location }).location = location;
+    await tools.find((each) => each.name === "relay_request_location")!.execute("call-7", { chat_id: "chat-2" });
+    expect(location.request).toHaveBeenCalledWith("chat-2");
+  });
   it("is the tool the prompt names, with no channel prefix", () => {
     expect(RELAY_TOOLS_LINE).toContain("message texts the person now");
     expect(RELAY_TOOLS_LINE).not.toContain("relay_react");
@@ -52,6 +67,18 @@ describe("message tool", () => {
 });
 
 describe("session delivery", () => {
+  it("still sends the final words to the run's own chat when message texted only another chat", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    await channel.receive(inbound("m2", "chat-2"));
+    expect(channel.latestIn("chat-2")).toBe("m2");
+    const tool = relayTools(relay as unknown as Relay, () => channel.chatId, () => channel.messageId, (chat) => channel.latestIn(chat)).find((each) => each.name === "message")!;
+    const other = await tool.execute("c1", { action: "send", text: "for two", chat_id: "chat-2" });
+    channel.ended([{ role: "toolResult", toolName: "message", content: other.content, details: other.details }, assistant(words("for one"))]);
+    await channel.settled();
+    expect(sentTexts(relay).map(([chat, text]) => [chat, text])).toEqual([["chat-2", "for two"], ["chat-1", "for one"]]);
+  });
   it("sends no final text after the run texted with message", async () => {
     const relay = fakeRelay();
     const channel = session(relay);

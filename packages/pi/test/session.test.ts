@@ -35,7 +35,7 @@ describe("session content", () => {
     expect(content?.[1]).toEqual({ type: "image", data: Buffer.from("img").toString("base64"), mimeType: "image/png" });
     const words = (content?.[0] as { text: string }).text;
     // The Message alone: the Relay hint is in the system prompt, not here.
-    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]");
+    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]\n[Relay chat: chat, from @alice]");
     expect(transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "note.m4a");
   });
   it("names a voice note it cannot hear, and gives nothing for an empty Message", async () => {
@@ -138,19 +138,39 @@ describe("session channel", () => {
     await channel.settled();
     expect(send.mock.calls.map(([, body]) => body.message.parts[0].value)).toEqual(["one", "two"]);
   });
-  it("keeps a Message from another chat waiting while a run is going", async () => {
+  it("steers a Message from another chat into the running run, and a message with its chat_id answers it there", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    await channel.receive(makeEvent("b", [text("other chat")], { chat: "two", handle: "bob" }));
+    await channel.receive(makeEvent("c", [text("same chat, after")], { chat: "one" }));
+    // Both steer the one run, whatever their chat, and each names its chat and sender.
+    expect(sent.map((entry) => entry.options)).toEqual([undefined, { deliverAs: "steer" }, { deliverAs: "steer" }]);
+    expect((sent[1]!.content[0] as { text: string }).text).toContain("[Relay chat: two, from @bob]");
+    const [first, second, third] = sent.map((entry) => ({ role: "user", content: entry.content }));
+    channel.ended([first, second, { role: "toolResult", toolName: "message", content: [], details: { sent: true, chat_id: "two" } }, third, assistant("to one")]);
+    idle = true;
+    await channel.settled();
+    // The run's words go to the chat that started it; chat two was answered by the tool, so nothing runs again.
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "to one"]]);
+    expect(sent).toHaveLength(3);
+  });
+  it("runs a steered Message from another chat again when the run never texted that chat", async () => {
     let idle = true;
     const { channel, send, sent } = harness({ idle: () => idle });
     await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
     idle = false;
     await channel.receive(makeEvent("b", [text("other chat")], { chat: "two" }));
-    await channel.receive(makeEvent("c", [text("same chat, after")], { chat: "one" }));
-    // b waits for its own run, and c stays behind b so each chat keeps its order.
-    expect(sent).toHaveLength(1);
-    channel.ended([assistant("to one")]); idle = true; await channel.settled();
-    expect(sent).toHaveLength(2);
-    expect((sent[1]!.content[0] as { text: string }).text).toContain("other chat");
-    expect(send.mock.calls.map(([chat]) => chat)).toEqual(["one"]);
+    channel.ended([{ role: "user", content: sent[0]!.content }, { role: "user", content: sent[1]!.content }, assistant("to one")]);
+    idle = true;
+    await channel.settled();
+    // Chat one gets the run's words; chat two's Message is a turn of its own, answered in chat two.
+    expect(sent).toHaveLength(3);
+    expect(sent[2]).toEqual({ content: sent[1]!.content, options: undefined });
+    channel.ended([{ role: "user", content: sent[2]!.content }, assistant("to two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "to one", "pi-a-0"], ["two", "to two", "pi-b-0"]]);
   });
   it("answers a steer that landed after the run went idle with the run it started", async () => {
     let idle = true;

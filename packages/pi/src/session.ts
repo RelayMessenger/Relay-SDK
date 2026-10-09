@@ -77,7 +77,17 @@ export const sessionContent = async (data: MessageWebhookData, media: SessionMed
   }
   const words = [wordsOf(data), lines.join("\n"), replyLine].filter(Boolean).join("\n\n");
   if (!words) return null;
-  return [{ type: "text", text: inboundText(words, "", data) }, ...images];
+  return [{ type: "text", text: [inboundText(words, "", data), chatLine(data)].filter(Boolean).join("\n") }, ...images];
+};
+
+/**
+ * The chat a Message came from and who sent it, as one line of data: one
+ * session hears every chat, so each text names the chat a `message` with
+ * `chat_id` answers it in.
+ */
+export const chatLine = (data: Pick<MessageWebhookData, "chat" | "sender_handle">): string => {
+  const handle = data.sender_handle?.handle?.replace(/^@/u, "");
+  return data.chat?.id ? `[Relay chat: ${data.chat.id}${handle ? `, from @${handle}` : ""}]` : "";
 };
 
 type RunMessage = { role?: string; content?: unknown; stopReason?: string; toolName?: string; details?: unknown; isError?: boolean; customType?: string };
@@ -101,13 +111,22 @@ export const runAnswers = (messages: readonly unknown[]): string[] => {
 };
 
 /**
- * Whether the run texted the chat itself with `message` send, so its final
- * words are not sent again (OpenClaw didSendViaMessagingTool). Only a send
- * that went out counts: the tool marks it with `details.sent`.
+ * The chats the run texted itself with `message` send, so its final words
+ * are not sent there again (OpenClaw didSendViaMessagingTool). Only a send
+ * that went out counts: the tool marks it with `details.sent` and the chat
+ * with `details.chat_id`; a send that names no chat is `CURRENT_CHAT`.
  */
-export const textedWithMessage = (messages: readonly unknown[]): boolean =>
-  (messages as RunMessage[]).some((message) => message?.role === "toolResult" && message.toolName === MESSAGE_TOOL
-    && !message.isError && (message.details as { sent?: unknown } | undefined)?.sent === true);
+export const textedChats = (messages: readonly unknown[]): Set<string> =>
+  new Set((messages as RunMessage[]).flatMap((message) => {
+    if (message?.role !== "toolResult" || message.toolName !== MESSAGE_TOOL || message.isError) return [];
+    const details = message.details as { sent?: unknown; chat_id?: unknown } | undefined;
+    if (details?.sent !== true) return [];
+    return [typeof details.chat_id === "string" && details.chat_id ? details.chat_id : CURRENT_CHAT];
+  }));
+/** A `message` send that named no chat: the chat being answered. */
+export const CURRENT_CHAT = "";
+/** Whether the run texted any chat itself with `message` send. */
+export const textedWithMessage = (messages: readonly unknown[]): boolean => textedChats(messages).size > 0;
 
 /** pi-subagents' tool, whose result carries `details.asyncId` when it started a background run (pi-subagents src/runs/background/async-execution.js). */
 export const SUBAGENT_TOOL = "subagent";
@@ -196,9 +215,11 @@ interface Turn { readonly data: MessageWebhookData; readonly key: string; readon
  * Relay inside the Pi session that loads it, the way pi-telegram holds a chat
  * in its own Pi process: each Message is one user message to that session,
  * and the session's answer goes back to the chat it came from once the run
- * has settled (after retries and queued follow-ups). A Message from the chat
- * whose run is going steers that run; one from another chat waits its turn.
- * A run that ends with no words sends nothing.
+ * has settled (after retries and queued follow-ups). A Message from any chat
+ * that arrives while a run is going steers that run. The run's words go to
+ * the chat whose Message started it; a steered Message from another chat is
+ * answered by `message` with its `chat_id`, and one the run never texted runs
+ * again as a turn of its own. A run that ends with no words sends nothing.
  */
 export class SessionChannel {
   readonly #pi: SessionPi;
@@ -208,15 +229,17 @@ export class SessionChannel {
   readonly #seen = new Set<string>();
   readonly #inflight = new Map<string, Promise<void>>();
   #pending: Turn | undefined;
-  // Messages from the pending turn's chat steered into its run, so the run's answer is theirs too.
+  // Messages from any chat steered into the pending turn's run.
   readonly #steered: Turn[] = [];
   #ended: readonly unknown[] = [];
   // The role of the first message of the first run since the last settle:
   // "user" for a typed or Relay prompt, "custom" for an extension's message.
   #origin: string | null | undefined;
   #last: MessageWebhookData | undefined;
-  // Whether a run since the last settle texted the chat itself with `message`.
-  #texted = false;
+  // The chats a run since the last settle texted itself with `message`.
+  #texted = new Set<string>();
+  // The newest Message of each chat, for a tool that names another chat.
+  readonly #latest = new Map<string, string>();
   // Background runs a Message's turn started, so each result threads to that Message.
   readonly #background: { id: string; dir?: string; data: MessageWebhookData }[] = [];
   constructor(pi: SessionPi, options: SessionChannelOptions) {
@@ -268,19 +291,26 @@ export class SessionChannel {
   get messageId(): string | undefined {
     return (this.#pending?.data ?? this.#background.at(-1)?.data ?? this.#last)?.id;
   }
+  /** The newest Message of a chat the session has heard from. */
+  latestIn(chatId: string): string | undefined {
+    return this.#latest.get(chatId);
+  }
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
     if (!this.#pending && this.#origin === undefined) this.#origin = (messages[0] as { role?: string } | undefined)?.role ?? null;
     // A message queued as a run ends gets a continuation with its own agent_end before the settle.
     this.#ended = [...this.#ended, ...messages];
-    if (textedWithMessage(messages)) this.#texted = true;
+    for (const chat of textedChats(messages)) this.#texted.add(chat);
     const data = this.#pending?.data;
     if (data) for (const launch of backgroundLaunches(messages)) this.#background.push({ ...launch, data });
   }
   /**
    * Pi's `agent_settled`: the pending Message is answered and cleared, then
-   * the next one starts. Every assistant text of the run goes out as bubbles,
-   * unless the run texted the chat itself with `message`. A run no Message
+   * the next one starts. Every assistant text of the run goes out as bubbles
+   * to the chat whose Message started the run (OpenClaw answers on the route
+   * a run came from), unless the run texted that chat itself with `message`.
+   * A Message steered in from another chat that the run never texted runs
+   * again as a turn of its own, so its answer reaches its own chat. A run no Message
    * started and no one typed (a helper's result) sends its words as a reply to
    * the Message whose turn started that background run, or else to the last
    * chat, as OpenClaw sends an unprompted turn to the last route.
@@ -291,15 +321,22 @@ export class SessionChannel {
     // (Pi's prompt with streamingBehavior does that), so that Message is now
     // the pending one and the steers after it went into its run.
     const delivered = new Set((this.#ended as RunMessage[]).flatMap((message) => message?.role === "user" ? [textOf(message)] : []));
-    const [restarted, ...rest] = this.#steered.splice(0).filter((steer) => !delivered.has(contentText(steer.content)));
+    const steers = this.#steered.splice(0);
+    const [restarted, ...rest] = steers.filter((steer) => !delivered.has(contentText(steer.content)));
     this.#pending = restarted;
     this.#steered.push(...rest);
-    const answers = this.#texted ? [] : runAnswers(this.#ended).flatMap(taggedBubbles);
     const unprompted = !turn && this.#origin && this.#origin !== "user";
     const started = unprompted ? this.#startedBy(this.#ended[0]) : undefined;
+    const target = turn?.data.chat.id ?? started?.data.chat.id ?? (unprompted ? this.#last?.chat.id : undefined);
+    const texted = this.#texted;
+    const answered = (chat: string | undefined): boolean => texted.has(chat ?? CURRENT_CHAT) || (chat === target && texted.has(CURRENT_CHAT));
+    const answers = answered(target) ? [] : runAnswers(this.#ended).flatMap(taggedBubbles);
+    // Steers from another chat that this run took in and never texted: each runs again, in order, ahead of the queue.
+    const unanswered = steers.filter((steer) => delivered.has(contentText(steer.content)) && steer.data.chat.id !== target && !answered(steer.data.chat.id));
+    this.#queue.unshift(...unanswered);
     this.#ended = [];
     this.#origin = undefined;
-    this.#texted = false;
+    this.#texted = new Set();
     try {
       for (const [index, bubble] of answers.entries()) {
         if (turn) await sendAnswer(this.#relay, turn.data, index ? `${turn.key}-p${index}` : turn.key, bubble);
@@ -310,6 +347,7 @@ export class SessionChannel {
       console.error(`Relay: the answer was not sent: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       if (turn) await typing(this.#relay, turn.data.chat.id, false);
+      for (const chat of new Set(steers.map((steer) => steer.data.chat.id))) if (chat !== turn?.data.chat.id) await typing(this.#relay, chat, false);
       if (restarted) void typing(this.#relay, restarted.data.chat.id, true);
       this.next();
     }
@@ -331,15 +369,15 @@ export class SessionChannel {
   /**
    * Starts the next waiting Message when nothing of Relay's is running. When
    * the session is busy with a run Relay did not start, the Message steers
-   * that run and its settled answer goes to the chat once. A Message from the
-   * chat whose run is going steers that run too (Pi delivers it after the
-   * current tool call), and that run's answer is the reply; a Message from
-   * another chat waits, so each chat's Messages keep their order.
+   * that run and its settled answer goes to the chat once. A Message from any
+   * chat steers a run Relay started too (Pi delivers it after the current
+   * tool call): it names its chat, and `settled` sees that it is answered.
    */
   next(): void {
-    while (this.#pending && this.#queue[0]?.data.chat.id === this.#pending.data.chat.id && !this.#options.isIdle()) {
+    while (this.#pending && this.#queue.length && !this.#options.isIdle()) {
       const turn = this.#queue.shift()!;
       this.#steered.push(turn);
+      if (turn.data.chat.id !== this.#pending.data.chat.id) void typing(this.#relay, turn.data.chat.id, true);
       this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
     }
     if (this.#pending || !this.#queue.length) return;
@@ -365,11 +403,12 @@ export class SessionChannel {
     this.#steered.length = 0;
     this.#ended = [];
     this.#origin = undefined;
-    this.#texted = false;
+    this.#texted = new Set();
     this.#background.length = 0;
   }
   /** Keeps the chat of an accepted Message, across restarts, for unprompted answers. */
   #remember(data: MessageWebhookData): void {
+    this.#latest.set(data.chat.id, data.id);
     this.#last = { id: data.id, chat: { id: data.chat.id }, sender_handle: { handle: data.sender_handle?.handle }, parts: [] } as unknown as MessageWebhookData;
     try {
       if (this.#options.lastChatFile) writeFileSync(this.#options.lastChatFile, JSON.stringify(this.#last));
