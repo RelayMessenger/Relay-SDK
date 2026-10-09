@@ -345,3 +345,65 @@ describe("a person's swipe-reply reaches pi", () => {
     expect(message).not.toContain("This message is a reply.");
   });
 });
+
+/** A Pi that answers each RPC command as `respond` says, and emits more lines when the test pushes them. */
+function scriptedPi(respond: (command: { id: string; type: string; message?: string }) => string[]) {
+  const lines: string[] = [];
+  const commands: { id: string; type: string; message?: string }[] = [];
+  let wake: (() => void) | undefined;
+  const push = (...out: string[]): void => { lines.push(...out); wake?.(); };
+  async function* stdout(): AsyncGenerator<string> { for (;;) { while (lines.length) yield lines.shift()!; await new Promise<void>((resolve) => { wake = resolve; }); } }
+  const process: PiProcess = { stdin: { write: (line: string) => { const command = JSON.parse(line); commands.push(command); push(...respond(command)); }, end: vi.fn() }, stdout: stdout(), kill: vi.fn() };
+  return { process, commands, push };
+}
+const ok = (id: string, data?: unknown): string => JSON.stringify({ id, type: "response", success: true, ...(data ? { data } : {}) });
+const SETTLED = JSON.stringify({ type: "agent_settled" });
+function liveRelay() {
+  const send = vi.fn().mockResolvedValue({});
+  let onEvent: ((event: RelayWebhookEvent) => Promise<void>) | undefined;
+  let close: () => void = () => {};
+  const relay = { chats: { messages: { send }, startTyping: vi.fn(), stopTyping: vi.fn() }, websocket: { run: async (options: { onEvent: typeof onEvent }) => { onEvent = options.onEvent; await new Promise<void>((resolve) => { close = resolve; }); } } } as unknown as Relay;
+  return { relay, send, deliver: (event: RelayWebhookEvent) => onEvent!(event), close: () => close(), ready: () => vi.waitFor(() => { if (!onEvent) throw new Error("not running"); }) };
+}
+
+describe("Pi channel steering", () => {
+  it("steers a Message that arrives mid-turn into the running turn, and starts a normal turn when idle", async () => {
+    const pi = scriptedPi((command) => command.type === "get_last_assistant_text" ? [ok(command.id, { text: "Booked for 8pm." })] : command.type === "clear_queue" ? [ok(command.id, { steering: [], followUp: [] })] : command.type === "prompt" && command.message?.includes("message-c") ? [ok(command.id), SETTLED] : [ok(command.id)]);
+    const { relay, send, deliver, close, ready } = liveRelay();
+    const running = new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi.process }).run();
+    await ready();
+    const first = deliver(makeEvent("a", "one", "user"));
+    await vi.waitFor(() => expect(pi.commands.map((command) => command.type)).toEqual(["prompt"]));
+    // Mid-turn: the second Message is a steer with the words a prompt would carry, not a queued turn.
+    const second = deliver(makeEvent("b", "one", "user"));
+    await vi.waitFor(() => expect(pi.commands.map((command) => command.type)).toEqual(["prompt", "steer"]));
+    expect(pi.commands[1]?.message).toBe("hello\n\n[Relay message id: message-b]");
+    pi.push(SETTLED);
+    await Promise.all([first, second]);
+    expect(pi.commands.map((command) => command.type)).toEqual(["prompt", "steer", "clear_queue", "get_last_assistant_text"]);
+    // The running turn's answer is the one reply.
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.idempotency_key])).toEqual([["one", "pi-a-0"]]);
+    // Idle again: the next Message starts its own prompt turn.
+    await deliver(makeEvent("c", "one", "user"));
+    expect(pi.commands.filter((command) => command.type === "prompt").map((command) => command.message)).toEqual(["hello\n\n[Relay message id: message-a]", "hello\n\n[Relay message id: message-c]"]);
+    expect(pi.commands.filter((command) => command.type === "steer")).toHaveLength(1);
+    close(); await running;
+  });
+  it("runs a steer Pi still holds after its run settled as a turn of its own", async () => {
+    let answers = 0;
+    const pi = scriptedPi((command) => command.type === "get_last_assistant_text" ? [ok(command.id, { text: `answer ${++answers}` })] : command.type === "clear_queue" ? [ok(command.id, { steering: ["hello"], followUp: [] })] : command.type === "prompt" && command.message?.includes("message-b") ? [ok(command.id), SETTLED] : [ok(command.id)]);
+    const { relay, send, deliver, close, ready } = liveRelay();
+    const running = new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi.process }).run();
+    await ready();
+    const first = deliver(makeEvent("a", "one", "user"));
+    await vi.waitFor(() => expect(pi.commands).toHaveLength(1));
+    const second = deliver(makeEvent("b", "one", "user"));
+    await vi.waitFor(() => expect(pi.commands).toHaveLength(2));
+    pi.push(SETTLED);
+    await Promise.all([first, second]);
+    expect(pi.commands.map((command) => command.type)).toEqual(["prompt", "steer", "clear_queue", "get_last_assistant_text", "prompt", "get_last_assistant_text"]);
+    expect(pi.commands[4]?.message).toBe("hello\n\n[Relay message id: message-b]");
+    expect(send.mock.calls.map(([, body]) => [body.message.parts[0].value, body.message.idempotency_key])).toEqual([["answer 1", "pi-a-0"], ["answer 2", "pi-b-0"]]);
+    close(); await running;
+  });
+});

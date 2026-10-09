@@ -98,13 +98,74 @@ describe("session channel", () => {
     const { channel, send, sent } = harness({ idle: () => false });
     await channel.receive(makeEvent("a", [text("stop that")], { chat: "one" }));
     expect(sent).toEqual([{ content: expect.any(Array), options: { deliverAs: "steer" } }]);
-    // A second Message waits behind the pending one rather than steering too.
+    // A second Message from the same chat steers the same run.
     await channel.receive(makeEvent("b", [text("and this")], { chat: "one" }));
-    expect(sent).toHaveLength(1);
-    channel.ended([{ role: "user", content: "typed" }, assistant("stopped")]);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.options).toEqual({ deliverAs: "steer" });
+    channel.ended([{ role: "user", content: "typed" }, { role: "user", content: sent[1]!.content }, assistant("stopped")]);
     await channel.settled();
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "stopped"]]);
     expect(sent).toHaveLength(2);
+  });
+  it("steers a Message that arrives mid-turn into the running turn, whose answer is the reply", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("book a table")], { chat: "one" }));
+    // Idle: the Message starts a normal run.
+    expect(sent).toEqual([{ content: expect.any(Array), options: undefined }]);
+    idle = false;
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("png"));
+    await channel.receive(makeEvent("b", [text("make it 8pm"), media("img", "image/png", "menu.png")], { chat: "one" }));
+    // Mid-turn: the same content a prompt gets, delivered as a steer, not held for a turn of its own.
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual({ content: [{ type: "text", text: expect.stringContaining("make it 8pm") }, { type: "image", data: expect.any(String), mimeType: "image/png" }], options: { deliverAs: "steer" } });
+    fetch.mockRestore();
+    const [first, second] = sent.map((entry) => ({ role: "user", content: entry.content }));
+    channel.ended([first, assistant("Looking."), second, assistant("Booked for 8pm.")]);
+    idle = true;
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "Looking.", "pi-a-0"], ["one", "Booked for 8pm.", "pi-a-p1-0"]]);
+    expect(sent).toHaveLength(2);
+    // Nothing is left pending: the next Message starts its own run.
+    await channel.receive(makeEvent("c", [text("thanks")], { chat: "one" }));
+    expect(sent[2]?.options).toBeUndefined();
+  });
+  it("answers with every run before the settle, so a steer Pi ran as a continuation keeps the first answer", async () => {
+    const { channel, send } = harness();
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    channel.ended([assistant("one")]);
+    channel.ended([{ role: "user", content: "steered" }, assistant("two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([, body]) => body.message.parts[0].value)).toEqual(["one", "two"]);
+  });
+  it("keeps a Message from another chat waiting while a run is going", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    await channel.receive(makeEvent("b", [text("other chat")], { chat: "two" }));
+    await channel.receive(makeEvent("c", [text("same chat, after")], { chat: "one" }));
+    // b waits for its own run, and c stays behind b so each chat keeps its order.
+    expect(sent).toHaveLength(1);
+    channel.ended([assistant("to one")]); idle = true; await channel.settled();
+    expect(sent).toHaveLength(2);
+    expect((sent[1]!.content[0] as { text: string }).text).toContain("other chat");
+    expect(send.mock.calls.map(([chat]) => chat)).toEqual(["one"]);
+  });
+  it("answers a steer that landed after the run went idle with the run it started", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    await channel.receive(makeEvent("b", [text("second")], { chat: "one" }));
+    expect(sent[1]?.options).toEqual({ deliverAs: "steer" });
+    // The run ended before the steer reached it, so Pi started a run with it instead.
+    channel.ended([{ role: "user", content: sent[0]!.content }, assistant("one")]);
+    await channel.settled();
+    expect(sent).toHaveLength(2);
+    channel.ended([{ role: "user", content: sent[1]!.content }, assistant("two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([, body]) => [body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "pi-a-0"], ["two", "pi-b-0"]]);
   });
   it("sends a run no one prompted to the last chat, kept across restarts", async () => {
     const file = join(await mkdtemp(join(tmpdir(), "relay-pi-last-")), "last.json");

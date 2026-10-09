@@ -79,7 +79,7 @@ export interface PiProcess {
   readonly kill: () => void;
 }
 interface RpcRecord {
-  readonly type?: string; readonly id?: string; readonly success?: boolean; readonly data?: { text?: string | null }; readonly error?: string;
+  readonly type?: string; readonly id?: string; readonly success?: boolean; readonly data?: { text?: string | null; steering?: unknown }; readonly error?: string;
   /** `extension_ui_request` fields (Pi docs/rpc.md). */
   readonly method?: string; readonly title?: string; readonly message?: string; readonly options?: unknown; readonly timeout?: unknown;
   /** `tool_execution_start` fields (Pi docs/rpc.md). */
@@ -232,6 +232,12 @@ class ChatSession {
   settled = false;
   /** Whether Pi texted the chat itself with `message` since the last prompt, so its final text is not sent again. */
   texted = false;
+  /** Whether a prompt turn is running, so a Message from the chat steers it. */
+  running = false;
+  /** The Messages steered into the running turn, in order. */
+  steered: { event: RelayWebhookEvent; message: string }[] = [];
+  /** The steers still being written, one after another so they keep their order. */
+  steering: Promise<void> = Promise.resolve();
   private nextId = 0;
   /** Dialogs waiting on a person; Pi is silent meanwhile, which is not a stall. */
   private dialogs = 0;
@@ -294,6 +300,14 @@ class ChatSession {
       }
     }
   }
+  /**
+   * Writes one command without waiting for its response: the running turn's
+   * reads pass over it. For a steer, whose delivery is checked once the turn
+   * has settled.
+   */
+  send(type: string, data: Record<string, unknown>): void {
+    this.process.stdin.write(`${JSON.stringify({ id: String(++this.nextId), type, ...data })}\n`);
+  }
   stop(): void { this.#stop.abort(); this.process.stdin.end(); this.process.kill(); }
 }
 export class PiChannel {
@@ -302,8 +316,12 @@ export class PiChannel {
   readonly #spawnPi: (command: string, args: readonly string[], chatId: string) => PiProcess;
   readonly #sessions = new Map<string, ChatSession>();
   readonly #turns = new Map<string, Promise<void>>();
+  /** Per chat, the last turn queued, failures kept, so a steered Message shares its outcome. */
+  readonly #last = new Map<string, Promise<void>>();
   readonly #seen = new Set<string>();
   readonly #inflight = new Map<string, Promise<void>>();
+  /** Per chat, the Messages queued behind the running turn that have not started. */
+  readonly #waiting = new Map<string, number>();
   #abortListener?: () => void;
   constructor(options: PiChannelOptions) {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
@@ -331,9 +349,28 @@ export class PiChannel {
     if (!message) return;
     const data = event.data as MessageWebhookData;
     this.#seen.add(event.event_id);
-    const prior = this.#turns.get(data.chat.id) ?? Promise.resolve();
-    const turn = prior.then(() => this.#runTurn(event, message, signal));
-    this.#turns.set(data.chat.id, turn.catch(() => undefined));
+    const chatId = data.chat.id;
+    const session = this.#sessions.get(chatId);
+    // A Message that arrives while the chat's turn runs, with nothing queued
+    // ahead of it, is steered into that turn (Pi's `steer`: delivered after
+    // the current tool call), and that turn's answer is the reply.
+    if (session?.running && !this.#waiting.get(chatId)) {
+      const line = repliedContext(this.#relay, data);
+      session.steered.push({ event, message });
+      session.steering = session.steering.then(async () => { session.send("steer", { message: inboundText(message, await line, data) }); });
+      const running = this.#last.get(chatId) ?? Promise.resolve();
+      this.#inflight.set(event.event_id, running);
+      try { await running; } catch (error) { this.#seen.delete(event.event_id); throw error; } finally { this.#inflight.delete(event.event_id); }
+      return;
+    }
+    const prior = this.#turns.get(chatId) ?? Promise.resolve();
+    this.#waiting.set(chatId, (this.#waiting.get(chatId) ?? 0) + 1);
+    const turn = prior.then(() => {
+      this.#waiting.set(chatId, this.#waiting.get(chatId)! - 1);
+      return this.#runTurn(event, message, signal);
+    });
+    this.#turns.set(chatId, turn.catch(() => undefined));
+    this.#last.set(chatId, turn);
     this.#inflight.set(event.event_id, turn);
     try { await turn; } catch (error) { this.#seen.delete(event.event_id); throw error; } finally { this.#inflight.delete(event.event_id); }
   }
@@ -346,18 +383,33 @@ export class PiChannel {
     // The person sees Pi typing while it works; it stops once the answer is sent.
     await typing(this.#relay, data.chat.id, true);
     session.texted = false;
+    session.settled = false;
+    session.running = true;
+    let missed: { event: RelayWebhookEvent; message: string }[] = [];
     try {
       await session.command("prompt", { message: inboundText(message, replyLine, data) }, timeout, signal);
       if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
+      session.running = false;
+      await session.steering;
+      // A steer that reached Pi after its run settled is still in Pi's queue:
+      // it is taken back and runs as a turn of its own.
+      if (session.steered.length) {
+        const queue = await session.command("clear_queue", {}, timeout, signal);
+        const left = Array.isArray(queue.data?.steering) ? queue.data.steering.length : 0;
+        missed = left ? session.steered.slice(-left) : [];
+        session.steered = [];
+      }
       const response = await session.command("get_last_assistant_text", {}, timeout, signal);
       const answer = response.data?.text?.trim();
       // No words is Pi's choice to stay silent, and a Pi that texted with
       // `message` has said it (OpenClaw didSendViaMessagingTool): nothing is sent.
-      if (!answer || session.texted) return;
-      await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+      if (answer && !session.texted) await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
     } finally {
+      session.running = false;
+      session.steered = [];
       await typing(this.#relay, data.chat.id, false);
     }
+    for (const steer of missed) await this.#runTurn(steer.event, steer.message, signal);
   }
 }
 /**

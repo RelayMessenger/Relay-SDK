@@ -42,8 +42,11 @@ The session starts only on a Pi in RPC mode (the session an app drives),
 never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes one user message
 (`pi.sendUserMessage`): photos as image content, voice notes as their
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
-files named. Messages wait their turn, and the session's last words go back
-to the chat the Message came from once Pi reports `agent_settled`. A run that
+files named. A Message from the chat whose run is going steers that run
+(`deliverAs: "steer"`, delivered after the current tool call) and that run's
+answer is the reply; a Message from another chat waits its turn. The
+session's words go back to the chat the Message came from once Pi reports
+`agent_settled`. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
@@ -151,6 +154,11 @@ indicator shows in the chat from the start of a turn until its answer is sent.
 End the final Pi answer with a `selection` JSON fence holding the question as
 `title` (1 to 60 characters) and the `options`; any words outside the fence go
 as a normal message above the card.
+Without session mode, a Message that arrives while its chat's turn runs is
+sent as Pi's RPC `steer` into that turn, and the turn's answer is the reply.
+A steer Pi still holds once the run settles is taken back with `clear_queue`
+and runs as a turn of its own.
+
 The RPC prompt preserves ordered rich parts, `selected_values`, and `reply_to`
 as data. FULL sync still fails closed rather than discarding skipped context.
 A pin (`place`) or a shared location card (`location`) reaches Pi as one line of

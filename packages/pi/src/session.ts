@@ -83,6 +83,8 @@ export const sessionContent = async (data: MessageWebhookData, media: SessionMed
 type RunMessage = { role?: string; content?: unknown; stopReason?: string; toolName?: string; details?: unknown; isError?: boolean; customType?: string };
 const blocksOf = (message: RunMessage): { type?: string; text?: string; name?: string; arguments?: { action?: unknown } }[] =>
   Array.isArray(message.content) ? message.content as never : [];
+/** The words of a user message as Pi records them: its text blocks joined, as sendUserMessage joins them. */
+const contentText = (content: SessionContent): string => content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n");
 const textOf = (message: RunMessage): string =>
   typeof message.content === "string" ? message.content : blocksOf(message).flatMap((block) => block?.type === "text" && block.text ? [block.text] : []).join("");
 
@@ -194,8 +196,9 @@ interface Turn { readonly data: MessageWebhookData; readonly key: string; readon
  * Relay inside the Pi session that loads it, the way pi-telegram holds a chat
  * in its own Pi process: each Message is one user message to that session,
  * and the session's answer goes back to the chat it came from once the run
- * has settled (after retries and queued follow-ups). Messages wait their turn,
- * so each gets its own answer; a run that ends with no words sends nothing.
+ * has settled (after retries and queued follow-ups). A Message from the chat
+ * whose run is going steers that run; one from another chat waits its turn.
+ * A run that ends with no words sends nothing.
  */
 export class SessionChannel {
   readonly #pi: SessionPi;
@@ -205,6 +208,8 @@ export class SessionChannel {
   readonly #seen = new Set<string>();
   readonly #inflight = new Map<string, Promise<void>>();
   #pending: Turn | undefined;
+  // Messages from the pending turn's chat steered into its run, so the run's answer is theirs too.
+  readonly #steered: Turn[] = [];
   #ended: readonly unknown[] = [];
   // The role of the first message of the first run since the last settle:
   // "user" for a typed or Relay prompt, "custom" for an extension's message.
@@ -266,7 +271,8 @@ export class SessionChannel {
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
     if (!this.#pending && this.#origin === undefined) this.#origin = (messages[0] as { role?: string } | undefined)?.role ?? null;
-    this.#ended = messages;
+    // A message queued as a run ends gets a continuation with its own agent_end before the settle.
+    this.#ended = [...this.#ended, ...messages];
     if (textedWithMessage(messages)) this.#texted = true;
     const data = this.#pending?.data;
     if (data) for (const launch of backgroundLaunches(messages)) this.#background.push({ ...launch, data });
@@ -281,7 +287,13 @@ export class SessionChannel {
    */
   async settled(): Promise<void> {
     const turn = this.#pending;
-    this.#pending = undefined;
+    // A steer Pi took after its run went idle started a run of its own
+    // (Pi's prompt with streamingBehavior does that), so that Message is now
+    // the pending one and the steers after it went into its run.
+    const delivered = new Set((this.#ended as RunMessage[]).flatMap((message) => message?.role === "user" ? [textOf(message)] : []));
+    const [restarted, ...rest] = this.#steered.splice(0).filter((steer) => !delivered.has(contentText(steer.content)));
+    this.#pending = restarted;
+    this.#steered.push(...rest);
     const answers = this.#texted ? [] : runAnswers(this.#ended).flatMap(taggedBubbles);
     const unprompted = !turn && this.#origin && this.#origin !== "user";
     const started = unprompted ? this.#startedBy(this.#ended[0]) : undefined;
@@ -298,6 +310,7 @@ export class SessionChannel {
       console.error(`Relay: the answer was not sent: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       if (turn) await typing(this.#relay, turn.data.chat.id, false);
+      if (restarted) void typing(this.#relay, restarted.data.chat.id, true);
       this.next();
     }
   }
@@ -318,9 +331,17 @@ export class SessionChannel {
   /**
    * Starts the next waiting Message when nothing of Relay's is running. When
    * the session is busy with a run Relay did not start, the Message steers
-   * that run and its settled answer goes to the chat once.
+   * that run and its settled answer goes to the chat once. A Message from the
+   * chat whose run is going steers that run too (Pi delivers it after the
+   * current tool call), and that run's answer is the reply; a Message from
+   * another chat waits, so each chat's Messages keep their order.
    */
   next(): void {
+    while (this.#pending && this.#queue[0]?.data.chat.id === this.#pending.data.chat.id && !this.#options.isIdle()) {
+      const turn = this.#queue.shift()!;
+      this.#steered.push(turn);
+      this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
+    }
     if (this.#pending || !this.#queue.length) return;
     const turn = this.#queue.shift()!;
     this.#pending = turn;
@@ -341,6 +362,7 @@ export class SessionChannel {
   stop(): void {
     this.#queue.length = 0;
     this.#pending = undefined;
+    this.#steered.length = 0;
     this.#ended = [];
     this.#origin = undefined;
     this.#texted = false;
