@@ -505,6 +505,8 @@ export type ReactionInput = z.infer<typeof reactionInputSchema>;
 export interface RelayTurnIdentity {
   chatId: string;
   eventId: string;
+  /** True only for a known one-to-one chat; unknown chats keep their pacing. */
+  isDirectMessage?: boolean;
   /**
    * The Message and part the react Action targets when it is not the turn's
    * own Message: after a person's reaction, the part they reacted to.
@@ -869,9 +871,10 @@ async function sendOnce(
   const relay = createRelayClient(deps.env);
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
-    // No words to type when the turn is only its buttons: the empty string
-    // yields the floor pause rather than a typing time for text never sent.
-    await compose(input.text ?? "", identity.eventId, startedAt, signal);
+    // A first DM reply is ready now; groups and later Messages keep their pacing.
+    if (turn.isDirectMessage !== true || lastSends.has(`${turn.chatId}:${turn.eventId}`)) {
+      await compose(input.text ?? "", identity.eventId, startedAt, signal);
+    }
     deps.timing?.("compose_done");
     deps.assertCurrentTurn(identity);
     return await sendText(relay, identity, input, signal, deps.timing);
@@ -1255,6 +1258,7 @@ export function relayTurnFromMessenger(context: RelayMessengerContext | undefine
   return {
     chatId,
     eventId: messageId,
+    ...(context.kind === "direct-message" ? { isDirectMessage: true } : {}),
     ...(context.kind === undefined || MESSAGE_KINDS.has(context.kind)
       ? { replyTo: { messageId, partIndex: 0 } }
       : {}),

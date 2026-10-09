@@ -35,12 +35,12 @@ interface Wired {
 const ENV = { RELAY_AGENT_TOKEN: "relay-test-token", RELAY_API_ORIGIN: "https://api.example.test" };
 const OPTIONS = { env: ENV, ctx: { waitUntil: () => {} } };
 
-function agent(kind = "direct-message"): RelayActionsAgent {
+function agent(kind = "direct-message", messageId = MESSAGE_ID): RelayActionsAgent {
   return {
     getMessengerContext: () => ({
       kind,
       thread: { providerThreadId: encodeRelayThreadId({ chatId: CHAT_ID }) },
-      message: { id: `relay:${MESSAGE_ID}`, providerMessageId: MESSAGE_ID },
+      message: { id: `relay:${messageId}`, providerMessageId: messageId },
     }),
   };
 }
@@ -63,10 +63,47 @@ async function run(name: string, input: unknown = {}): Promise<unknown> {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("relayActions", () => {
+  it.each(["messenger", "custom"])("sends a ready first DM text without a typing pause, then paces its next text (%s turn)", async (turnSource) => {
+    vi.useFakeTimers();
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const messageId = `first-dm-${turnSource}`;
+    const composingSince = Date.now() - 3_000;
+    const options = turnSource === "custom"
+      ? { ...OPTIONS, turn: () => ({ chatId: CHAT_ID, eventId: messageId, composingSince, isDirectMessage: true }) }
+      : OPTIONS;
+    const wired = relayActions(agent("direct-message", messageId), options).send as unknown as Wired;
+    const input = { kind: "text", text: "A ready answer with several things to explain. ".repeat(20) };
+    const first = wired.config.execute(input, { requestId: "dm", toolCallId: "first" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    await expect(first).resolves.toMatchObject({ status: "sent" });
+    const second = wired.config.execute(input, { requestId: "dm", toolCallId: "second" });
+    await vi.advanceTimersByTimeAsync(5_999);
+    expect(calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toHaveLength(2);
+    await expect(second).resolves.toMatchObject({ status: "sent" });
+  });
+
+  it.each(["mention", "subscribed-message"])("keeps first-text pacing for a group %s", async (kind) => {
+    vi.useFakeTimers();
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(kind, `group-first-${kind}`), OPTIONS).send as unknown as Wired;
+    const sending = wired.config.execute({
+      kind: "text", text: "A ready answer with several things to explain. ".repeat(20),
+    }, { toolCallId: "first" });
+    await vi.advanceTimersByTimeAsync(5_999);
+    expect(calls).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toHaveLength(1);
+    await expect(sending).resolves.toMatchObject({ status: "sent" });
+  });
+
   it("offers every Relay Action in one call", () => {
     expect(Object.keys(relayActions(agent(), OPTIONS)).sort()).toEqual([...RELAY_ACTION_NAMES].sort());
   });
