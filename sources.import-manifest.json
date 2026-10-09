@@ -140,7 +140,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/websocket.ts",
       "source_sha256": "1dcbeeb485f277e5a96a54c87081f5fd371923ea26e66fdaf1c44c9ab6599834",
-      "destination_sha256": "d45b41f3435dacc4241f31687523a87c9b99332c6724ccbc26f2ff5a25a46ba0",
+      "destination_sha256": "9db837b64704ffc7d56ffd1d0ccd51266994cab37ed7ef4caf30de8a4944fb60",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1141,10 +1141,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/gateway.test.ts",
       "source_sha256": "baf551e3bfff93a2e62593e7556e7cad0d3eb9fa89029717c149d65991e255d4",
-      "destination_sha256": "baf551e3bfff93a2e62593e7556e7cad0d3eb9fa89029717c149d65991e255d4",
+      "destination_sha256": "78190b84ae13a6d24a0fce0da63e90a627fd4f62f369331d66edd1414e0bcbbd",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/src/gateway.ts",
@@ -1152,7 +1152,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/gateway.ts",
       "source_sha256": "a767ee2349067f5963b3c9d226ebf5db97638a44e7f6b4749e305d27b4778ff8",
-      "destination_sha256": "919e45f59befd283c9b37920fd289dc7e3bf4d20993d77e00043a782072f7117",
+      "destination_sha256": "a063438fb5084ecf494ca4321839948eb095238bd3149b5cefdbff1af8c15e23",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1515,7 +1515,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "2a6ae78c63e63a3a1711c384f4a2b3595f9a3c7cb5f2a1292b1dfc9dd19b4151",
+      "destination_sha256": "d6941d2f0c4ad47dabaf91978ae1c84d8477a482fcb1627fa06f42eb2bf72dea",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1526,7 +1526,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "2a6ae78c63e63a3a1711c384f4a2b3595f9a3c7cb5f2a1292b1dfc9dd19b4151",
+      "destination_sha256": "d6941d2f0c4ad47dabaf91978ae1c84d8477a482fcb1627fa06f42eb2bf72dea",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"

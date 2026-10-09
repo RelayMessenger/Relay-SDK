@@ -1,5 +1,6 @@
 import NodeWebSocket from "ws";
 import {
+  RelayAPIError,
   RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
 } from "./errors.js";
@@ -192,6 +193,7 @@ const CLIENT_CLOSE_RECONNECT = 4003;
 interface UpgradeResponseLike {
   statusCode?: number;
   statusMessage?: string;
+  headers?: Record<string, string | string[] | undefined>;
   setEncoding?(encoding: string): void;
   on(type: string, listener: (...args: any[]) => void): unknown;
 }
@@ -371,6 +373,14 @@ class WebSocketStoppedError extends Error {
   }
 }
 
+/**
+ * The connection ended before the ready frame on a WebSocket implementation
+ * that does not report the upgrade's HTTP status (no `unexpected-response`
+ * event, as in Bun, Deno and browsers), so a refused token looks the same as
+ * a network failure. `runWebSocket` asks `GET /v1/me` before it reconnects.
+ */
+class UnknownStatusWebSocketError extends Error {}
+
 class DurableApplicationError extends Error {
   readonly closeCode = CLIENT_CLOSE_DURABLE_ACCEPTANCE;
 
@@ -393,18 +403,46 @@ class RetryableWebSocketError extends Error {
   constructor(
     message: string,
     readonly closeCode = CLIENT_CLOSE_RECONNECT,
+    /** Relay's Retry-After on an HTTP 429 upgrade: the soonest to try again. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
 }
 
+/** Relay's one code for a refused credential (Relay-Server auth.ts, ApiError 401 2004). */
+const AGENT_TOKEN_REFUSED_CODE = 2004;
+
+/**
+ * Relay refused the Agent Token: an HTTP 401 on the upgrade, a `revoked`
+ * disconnect frame, or close 4401. The same token is refused on every
+ * attempt, so the run ends instead of reconnecting, as a Discord client stops
+ * on gateway close 4004 "Authentication failed".
+ */
+const agentTokenRefused = (
+  detail: string,
+  options: { code?: number; traceId?: string; body?: unknown } = {},
+): RelayAPIError =>
+  new RelayAPIError(
+    `Relay refused this Agent Token (${detail}): it is invalid or was revoked, so Relay will not reconnect with it. Create a new Agent Token in Relay Console, or run  npx relaymessenger connect , then start again.`,
+    {
+      status: 401,
+      code: options.code ?? AGENT_TOKEN_REFUSED_CODE,
+      ...(options.traceId === undefined ? {} : { traceId: options.traceId }),
+      ...(options.body === undefined ? {} : { body: options.body }),
+    },
+  );
+
 const upgradeResponseBody = (
   status: number,
   statusMessage: string | undefined,
   textBody: string,
-): RelayWebhookConfiguredError | WebSocketStoppedError | RetryableWebSocketError => {
+  retryAfterHeader?: string,
+): RelayAPIError | WebSocketStoppedError | RetryableWebSocketError => {
   let body: unknown = textBody;
   let message: string | undefined;
+  let code: number | undefined;
+  let retryAfter = Number(retryAfterHeader ?? NaN);
   let traceId: string | undefined;
   try {
     const parsed = textBody ? JSON.parse(textBody) as unknown : undefined;
@@ -417,9 +455,23 @@ const upgradeResponseBody = (
       ) {
         message = parsed.error.message;
       }
+      if (isRecord(parsed.error) && typeof parsed.error.code === "number") {
+        code = parsed.error.code;
+      }
+      if (isRecord(parsed.error) && typeof parsed.error.retry_after === "number") {
+        retryAfter = parsed.error.retry_after;
+      }
     }
   } catch {
     // Keep the unparsed response body for diagnostics.
+  }
+
+  if (status === 401) {
+    return agentTokenRefused(`HTTP 401${message ? `: ${message}` : ""}`, {
+      ...(code === undefined ? {} : { code }),
+      ...(traceId === undefined ? {} : { traceId }),
+      body,
+    });
   }
 
   if (status === 409) {
@@ -439,7 +491,14 @@ const upgradeResponseBody = (
     }.`
     : "Relay WebSocket upgrade failed before receiving an HTTP status.";
   const errorMessage = message ?? fallback;
-  return status === 429 || status >= 500 || status === 0
+  if (status === 429) {
+    return new RetryableWebSocketError(
+      errorMessage,
+      CLIENT_CLOSE_RECONNECT,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : undefined,
+    );
+  }
+  return status >= 500 || status === 0
     ? new RetryableWebSocketError(errorMessage)
     : new WebSocketStoppedError(errorMessage);
 };
@@ -511,6 +570,8 @@ const runConnection = (
         Authorization: `Bearer ${agentToken}`,
       },
     });
+    // Without `on`, an HTTP 401 on the upgrade arrives as a bare close.
+    const statusUnknown = typeof socket.on !== "function";
     let chain = Promise.resolve();
     let settled = false;
     let ready = false;
@@ -610,6 +671,8 @@ const runConnection = (
       response: UpgradeResponseLike,
     ): void => {
       const chunks: string[] = [];
+      const header = response.headers?.["retry-after"];
+      const retryAfterHeader = Array.isArray(header) ? header[0] : header;
       let bytes = 0;
       response.setEncoding?.("utf8");
       response.on("data", (chunk: unknown) => {
@@ -623,6 +686,7 @@ const runConnection = (
           response.statusCode ?? 0,
           response.statusMessage,
           chunks.join(""),
+          retryAfterHeader,
         ));
       });
       response.on("error", () => {
@@ -630,6 +694,7 @@ const runConnection = (
           response.statusCode ?? 0,
           response.statusMessage,
           chunks.join(""),
+          retryAfterHeader,
         ));
       });
     };
@@ -688,6 +753,9 @@ const runConnection = (
                 ? "Relay WebSocket is restarting."
                 : "Relay WebSocket heartbeat timed out.",
             );
+          }
+          if (parsed.reason === "revoked") {
+            throw agentTokenRefused("disconnect: revoked");
           }
           if (parsed.reason === "webhook_configured") {
             throw new RelayWebhookConfiguredError(
@@ -810,15 +878,18 @@ const runConnection = (
         // A handler that outlived its connection's drain: that run is over.
         if (settled) return;
         stopReceiving();
+        const refused = error instanceof RelayAPIError && error.status === 401;
         socket.close(
-          error instanceof WebSocketStoppedError
+          refused
+            ? 4401
+            : error instanceof WebSocketStoppedError
             ? error.closeCode
             : error instanceof WebSocketProtocolError
               ? error.closeCode
               : error instanceof RetryableWebSocketError
                 ? error.closeCode
                 : CLIENT_CLOSE_DURABLE_ACCEPTANCE,
-          error instanceof WebSocketStoppedError
+          refused || error instanceof WebSocketStoppedError
             ? "Relay stopped this consumer"
             : error instanceof WebSocketProtocolError
               ? "protocol error"
@@ -851,6 +922,10 @@ const runConnection = (
           ));
           return;
         }
+        if (event.code === 4401) {
+          finish(agentTokenRefused(`close 4401${event.reason ? `: ${event.reason}` : ""}`));
+          return;
+        }
         if (
           event.code !== undefined
           && event.code >= 4400
@@ -866,7 +941,7 @@ const runConnection = (
           return;
         }
         if (!ready) {
-          finish(new Error(
+          finish(new (statusUnknown ? UnknownStatusWebSocketError : Error)(
             `Relay WebSocket closed before ready (${event.code ?? 1006}): ${
               event.reason ?? "connection ended"
             }.`,
@@ -882,7 +957,9 @@ const runConnection = (
         void drained().then(() => finish());
         return;
       }
-      const error = new Error("Relay WebSocket connection failed.");
+      const error = new (statusUnknown && !ready ? UnknownStatusWebSocketError : Error)(
+        "Relay WebSocket connection failed.",
+      );
       void drained().then(() => finish(error));
     };
     const onAbort = (): void => {
@@ -901,6 +978,36 @@ const runConnection = (
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener("abort", onAbort, { once: true });
   });
+
+/**
+ * Whether Relay refuses this Agent Token, asked of `GET /v1/me`. Only an HTTP
+ * 401 is an answer; anything else, a network failure included, leaves the
+ * reconnect loop to try again.
+ */
+const refusedToken = async (
+  baseURL: string,
+  agentToken: string,
+  signal?: AbortSignal,
+): Promise<RelayAPIError | undefined> => {
+  try {
+    const url = new URL(baseURL);
+    url.pathname = "/v1/me";
+    url.search = "";
+    url.hash = "";
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${agentToken}` },
+      ...(signal ? { signal } : {}),
+    });
+    if (response.status !== 401) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    const answer = upgradeResponseBody(401, undefined, await response.text());
+    return answer instanceof RelayAPIError ? answer : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 export const runWebSocket = async (
   baseURL: string,
@@ -950,6 +1057,7 @@ export const runWebSocket = async (
   };
 
   while (!options.signal?.aborted) {
+    let retryAfterMs = 0;
     options.onConnectionState?.("connecting");
     try {
       await runConnection(
@@ -968,14 +1076,21 @@ export const runWebSocket = async (
           attempt = 0;
         },
       );
-    } catch (error) {
+    } catch (caught) {
+      if (options.signal?.aborted) return;
+      const error = caught instanceof UnknownStatusWebSocketError
+        ? await refusedToken(baseURL, agentToken, options.signal) ?? caught
+        : caught;
       if (options.signal?.aborted) return;
       report(error);
       if (error instanceof DurableApplicationError) failing = true;
+      if (error instanceof RetryableWebSocketError && error.retryAfterMs !== undefined) {
+        retryAfterMs = error.retryAfterMs;
+      }
       if (
         error instanceof WebSocketStoppedError
         || error instanceof WebSocketProtocolError
-        || error instanceof RelayWebhookConfiguredError
+        || (error instanceof RelayAPIError && !error.retryable)
       ) throw error;
       attempt += 1;
     } finally {
@@ -986,6 +1101,6 @@ export const runWebSocket = async (
       maximum,
       minimum * 2 ** Math.max(0, attempt - 1),
     );
-    await wait(Math.floor(random() * ceiling), options.signal);
+    await wait(Math.max(retryAfterMs, Math.floor(random() * ceiling)), options.signal);
   }
 };
