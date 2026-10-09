@@ -871,8 +871,11 @@ async function sendOnce(
   const relay = createRelayClient(deps.env);
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
-    // A first DM reply is ready now; groups and later Messages keep their pacing.
-    if (turn.isDirectMessage !== true || lastSends.has(`${turn.chatId}:${turn.eventId}`)) {
+    // The ordinal survives overlap and ledger replay; completed sends alone do not.
+    // An unnumbered turn has one logical send key.
+    const firstSend = (callKey === undefined || callKey === "1")
+      && !lastSends.has(`${turn.chatId}:${turn.eventId}`);
+    if (turn.isDirectMessage !== true || !firstSend) {
       await compose(input.text ?? "", identity.eventId, startedAt, signal);
     }
     deps.timing?.("compose_done");

@@ -46,7 +46,7 @@ function agent(kind = "direct-message", messageId = MESSAGE_ID): RelayActionsAge
 }
 
 /** Records each request and answers with the body `respond` picks. */
-function relayServer(respond: (url: string, method: string) => Response) {
+function relayServer(respond: (url: string, method: string) => Response | Promise<Response>) {
   const calls: Array<{ url: string; method: string; body?: string }> = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
@@ -68,16 +68,31 @@ afterEach(() => {
 });
 
 describe("relayActions", () => {
-  it.each(["messenger", "custom"])("sends a ready first DM text without a typing pause, then paces its next text (%s turn)", async (turnSource) => {
+  it.each(["messenger", "custom"].flatMap((turnSource) =>
+    ["overlap", "replay"].map((laterSend) => ({ turnSource, laterSend }))
+  ))("sends only the first DM text immediately ($turnSource, $laterSend)", async ({ turnSource, laterSend }) => {
     vi.useFakeTimers();
-    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
-    const messageId = `first-dm-${turnSource}`;
-    const composingSince = Date.now() - 3_000;
-    const options = turnSource === "custom"
-      ? { ...OPTIONS, turn: () => ({ chatId: CHAT_ID, eventId: messageId, composingSince, isDirectMessage: true }) }
-      : OPTIONS;
-    const wired = relayActions(agent("direct-message", messageId), options).send as unknown as Wired;
     const input = { kind: "text", text: "A ready answer with several things to explain. ".repeat(20) };
+    for (const kind of ["mention", "subscribed-message"]) {
+      const groupCalls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+      const group = relayActions(agent(kind, `group-${turnSource}-${laterSend}-${kind}`), OPTIONS).send as unknown as Wired;
+      const sending = group.config.execute(input, { toolCallId: "first" });
+      await vi.advanceTimersByTimeAsync(5_999);
+      expect(groupCalls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(groupCalls).toHaveLength(1);
+      await expect(sending).resolves.toMatchObject({ status: "sent" });
+    }
+
+    const dmSend = (messageId: string): Wired => {
+      const composingSince = Date.now() - 3_000;
+      const options = turnSource === "custom"
+        ? { ...OPTIONS, turn: () => ({ chatId: CHAT_ID, eventId: messageId, composingSince, isDirectMessage: true }) }
+        : OPTIONS;
+      return relayActions(agent("direct-message", messageId), options).send as unknown as Wired;
+    };
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = dmSend(`first-dm-${turnSource}-${laterSend}`);
     const first = wired.config.execute(input, { requestId: "dm", toolCallId: "first" });
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
@@ -88,20 +103,44 @@ describe("relayActions", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(calls).toHaveLength(2);
     await expect(second).resolves.toMatchObject({ status: "sent" });
-  });
 
-  it.each(["mention", "subscribed-message"])("keeps first-text pacing for a group %s", async (kind) => {
-    vi.useFakeTimers();
-    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
-    const wired = relayActions(agent(kind, `group-first-${kind}`), OPTIONS).send as unknown as Wired;
-    const sending = wired.config.execute({
-      kind: "text", text: "A ready answer with several things to explain. ".repeat(20),
-    }, { toolCallId: "first" });
-    await vi.advanceTimersByTimeAsync(5_999);
-    expect(calls).toHaveLength(0);
+    let releaseFirst!: () => void;
+    const firstResponse = new Promise<Response>((resolve) => {
+      releaseFirst = () => resolve(Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    });
+    let requests = 0;
+    const laterCalls = relayServer(() => ++requests === 1 && laterSend === "overlap"
+      ? firstResponse
+      : Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const laterMessageId = `later-dm-${turnSource}-${laterSend}`;
+    const later = dmSend(laterMessageId);
+    const ctx = (toolCallId: string) => ({ requestId: "recovered-or-overlapping", toolCallId });
+    let pendingFirst: Promise<unknown> | undefined;
+    if (laterSend === "overlap") {
+      pendingFirst = later.config.execute(input, ctx("first"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(laterCalls).toHaveLength(1);
+    } else {
+      // Think can replay this ledger key without execute; this fresh turn has no lastSends entry.
+      expect(later.config.idempotencyKey!({ input, ctx: ctx("first") }))
+        .toBe(`message:${laterMessageId}:1`);
+      expect(laterCalls).toHaveLength(0);
+    }
+    const priorPosts = laterCalls.length;
+    const pendingSecond = later.config.execute(input, ctx("second"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(laterCalls).toHaveLength(priorPosts);
+    releaseFirst();
+    if (pendingFirst) await expect(pendingFirst).resolves.toMatchObject({ status: "sent" });
+    // Preserve the existing elapsed credit while the first POST is pending or replayed.
+    const remaining = turnSource === "custom" ? 3_000 : 6_000;
+    await vi.advanceTimersByTimeAsync(remaining - 1);
+    expect(laterCalls).toHaveLength(priorPosts);
     await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(1);
-    await expect(sending).resolves.toMatchObject({ status: "sent" });
+    expect(laterCalls).toHaveLength(priorPosts + 1);
+    await expect(pendingSecond).resolves.toMatchObject({ status: "sent" });
+    expect(JSON.parse(laterCalls.at(-1)!.body!).message.idempotency_key)
+      .toBe(`relay-agent:${laterMessageId}:2`);
   });
 
   it("offers every Relay Action in one call", () => {
