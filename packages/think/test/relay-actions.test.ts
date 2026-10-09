@@ -1,4 +1,4 @@
-import { encodeRelayThreadId } from "@relaymessenger/chat-sdk-adapter";
+import { createRelayAdapter, encodeRelayThreadId } from "@relaymessenger/chat-sdk-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StepResult, ToolSet } from "ai";
@@ -68,6 +68,64 @@ afterEach(() => {
 });
 
 describe("relayActions", () => {
+  it.each(["messenger", "custom"])("derives first-text pacing from the Relay Chat without a builder flag (%s)", async (source) => {
+    vi.useFakeTimers();
+    const input = { kind: "text", text: "An answer ready to send. ".repeat(40) };
+    const cases = [
+      { name: "group", isGroup: true, immediate: false },
+      { name: "dm", isGroup: false, immediate: true },
+      { name: "explicit-paced-dm", isGroup: false, override: false, immediate: false },
+      { name: "explicit-fast-group", isGroup: true, override: true, immediate: true },
+      { name: "different-chat", isGroup: false, otherChat: true, immediate: false },
+    ];
+    for (const scenario of cases) {
+      const messageId = `derived-${source}-${scenario.name}`;
+      const calls = relayServer((url, method) => method === "GET"
+        ? Response.json({ id: CHAT_ID, is_group: scenario.isGroup, handles: [] })
+        : Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+      const adapter = createRelayAdapter({
+        token: ENV.RELAY_AGENT_TOKEN,
+        baseUrl: ENV.RELAY_API_ORIGIN,
+        userName: "relay",
+      });
+      const thread = await adapter.fetchThread(encodeRelayThreadId({ chatId: CHAT_ID }));
+      // Think's toMessengerThread retains this Chat SDK identity after raw
+      // webhook data is removed from the stored messenger context.
+      const context = {
+        kind: "subscribed-message",
+        thread: { providerThreadId: thread.id, isDirectMessage: thread.isDM },
+        message: { providerMessageId: messageId },
+      };
+      const custom = source === "custom" || scenario.override !== undefined || scenario.otherChat;
+      const wired = relayActions({ getMessengerContext: () => context }, {
+        ...OPTIONS,
+        ...(custom ? { turn: () => ({
+          chatId: scenario.otherChat ? PAYMENT_ID : CHAT_ID,
+          eventId: messageId,
+          ...(scenario.override === undefined ? {} : { isDirectMessage: scenario.override }),
+        }) } : {}),
+      }).send as unknown as Wired;
+      expect(calls).toHaveLength(1);
+      const first = wired.config.execute(input, { requestId: messageId, toolCallId: "first" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toHaveLength(scenario.immediate ? 2 : 1);
+      if (!scenario.immediate) {
+        await vi.advanceTimersByTimeAsync(5_999);
+        expect(calls).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      await expect(first).resolves.toMatchObject({ status: "sent" });
+      // No extra Chat lookup on the send path; every later text keeps pacing.
+      expect(calls.map(({ method }) => method)).toEqual(["GET", "POST"]);
+      const second = wired.config.execute(input, { requestId: messageId, toolCallId: "second" });
+      await vi.advanceTimersByTimeAsync(5_999);
+      expect(calls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(second).resolves.toMatchObject({ status: "sent" });
+      expect(calls.map(({ method }) => method)).toEqual(["GET", "POST", "POST"]);
+    }
+  });
+
   it.each(["messenger", "custom"].flatMap((turnSource) =>
     ["overlap", "replay"].map((laterSend) => ({ turnSource, laterSend }))
   ))("sends only the first DM text immediately ($turnSource, $laterSend)", async ({ turnSource, laterSend }) => {

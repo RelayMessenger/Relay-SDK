@@ -505,7 +505,7 @@ export type ReactionInput = z.infer<typeof reactionInputSchema>;
 export interface RelayTurnIdentity {
   chatId: string;
   eventId: string;
-  /** True only for a known one-to-one chat; unknown chats keep their pacing. */
+  /** Overrides relayActions' Chat-derived identity; unknown chats keep their pacing. */
   isDirectMessage?: boolean;
   /**
    * The Message and part the react Action targets when it is not the turn's
@@ -1206,7 +1206,7 @@ const START_CALL_NOW_ONLY =
 /** The part of Think's messenger context a Relay turn is read from. */
 export interface RelayMessengerContext {
   kind?: string;
-  thread: { providerThreadId?: string };
+  thread: { providerThreadId?: string; isDirectMessage?: boolean };
   message?: { id?: string; providerMessageId?: string };
 }
 
@@ -1248,6 +1248,13 @@ export class RelayTurnRequired extends Error {
 /** Messenger events that are a person's Message, which a quote-reply can answer. */
 const MESSAGE_KINDS: ReadonlySet<string> = new Set(["direct-message", "mention", "subscribed-message"]);
 
+function relayDirectMessage(context: RelayMessengerContext): boolean | undefined {
+  // The Relay adapter reads Chat.is_group into thread.isDM; Think carries it
+  // here even when it serializes away the raw Message or the builder supplies a turn.
+  return context.thread.isDirectMessage
+    ?? (context.kind === "direct-message" ? true : undefined);
+}
+
 /**
  * The Chat and Message of the turn Think is running, from its messenger
  * context. Only a turn on a person's Message can quote-reply to it.
@@ -1261,7 +1268,7 @@ export function relayTurnFromMessenger(context: RelayMessengerContext | undefine
   return {
     chatId,
     eventId: messageId,
-    ...(context.kind === "direct-message" ? { isDirectMessage: true } : {}),
+    isDirectMessage: relayDirectMessage(context),
     ...(context.kind === undefined || MESSAGE_KINDS.has(context.kind)
       ? { replyTo: { messageId, partIndex: 0 } }
       : {}),
@@ -1290,7 +1297,16 @@ export function relayActions(
     ...hooks,
     env,
     activities: hooks.activities ?? new RelayGenerationActivities(),
-    turn: hooks.turn ?? (() => relayTurnFromMessenger(agent.getMessengerContext())),
+    turn: () => {
+      const turn = hooks.turn?.();
+      if (turn?.isDirectMessage !== undefined) return turn;
+      const context = agent.getMessengerContext();
+      if (!turn) return relayTurnFromMessenger(context);
+      // A scheduled/custom turn must not inherit another Chat's identity.
+      if (!context?.thread.providerThreadId
+        || decodeRelayThreadId(context.thread.providerThreadId).chatId !== turn.chatId) return turn;
+      return { ...turn, isDirectMessage: relayDirectMessage(context) };
+    },
   };
   const all = createRelayActions(deps);
   for (const name of disable) delete all[name];
