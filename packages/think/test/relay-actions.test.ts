@@ -77,6 +77,8 @@ describe("relayActions", () => {
       { name: "explicit-paced-dm", isGroup: false, override: false, immediate: false },
       { name: "explicit-fast-group", isGroup: true, override: true, immediate: true },
       { name: "different-chat", isGroup: false, otherChat: true, immediate: false },
+      { name: "other-provider", isGroup: false, providerThreadId: "slack:C123:123.456", immediate: false },
+      { name: "malformed-relay-thread", isGroup: false, providerThreadId: "relay:unknown", immediate: false },
     ];
     for (const scenario of cases) {
       const messageId = `derived-${source}-${scenario.name}`;
@@ -93,10 +95,11 @@ describe("relayActions", () => {
       // webhook data is removed from the stored messenger context.
       const context = {
         kind: "subscribed-message",
-        thread: { providerThreadId: thread.id, isDirectMessage: thread.isDM },
+        thread: { providerThreadId: scenario.providerThreadId ?? thread.id, isDirectMessage: thread.isDM },
         message: { providerMessageId: messageId },
       };
-      const custom = source === "custom" || scenario.override !== undefined || scenario.otherChat;
+      const custom = source === "custom" || scenario.override !== undefined
+        || scenario.otherChat || scenario.providerThreadId !== undefined;
       const wired = relayActions({ getMessengerContext: () => context }, {
         ...OPTIONS,
         ...(custom ? { turn: () => ({

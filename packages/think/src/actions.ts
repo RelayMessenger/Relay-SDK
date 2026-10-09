@@ -1,5 +1,5 @@
 import { action, type Action } from "@cloudflare/think";
-import { decodeRelayThreadId } from "@relaymessenger/chat-sdk-adapter";
+import { decodeRelayThreadId, RELAY_THREAD_PREFIX } from "@relaymessenger/chat-sdk-adapter";
 import type Relay from "@relaymessenger/sdk";
 import {
   BUTTONS_GUIDANCE,
@@ -1303,8 +1303,7 @@ export function relayActions(
       const context = agent.getMessengerContext();
       if (!turn) return relayTurnFromMessenger(context);
       // A scheduled/custom turn must not inherit another Chat's identity.
-      if (!context?.thread.providerThreadId
-        || decodeRelayThreadId(context.thread.providerThreadId).chatId !== turn.chatId) return turn;
+      if (context?.thread.providerThreadId !== `${RELAY_THREAD_PREFIX}${turn.chatId}`) return turn;
       return { ...turn, isDirectMessage: relayDirectMessage(context) };
     },
   };
