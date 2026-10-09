@@ -49,13 +49,17 @@ try {
 
   const imports = `import { RelayGenerationActivities, createRelayClient } from "@relaymessenger/think";
 import { relayActions, type RelayActionDependencies } from "@relaymessenger/think/actions";
-void createRelayClient; void relayActions;
+import { personMemory, RelayPersonMemory, type PersonMemoryOptions } from "@relaymessenger/think/memory";
+void createRelayClient; void relayActions; void personMemory; void RelayPersonMemory;
 `;
   const good = check("good.ts", `${imports}export const probe: RelayActionDependencies["activities"] = new RelayGenerationActivities();\n`);
   assert.equal(good.status, 0, `the typed usage did not compile:\n${good.output}`);
   const bad = check("bad.ts", `${imports}export const probe: RelayActionDependencies["activities"] = 42;\n`);
   assert.notEqual(bad.status, 0, "a number was accepted as RelayGenerationActivities: the declarations resolve to any");
-  assert.match(bad.output, /bad\.ts\(4,\d+\): error TS2322/u, bad.output);
+  assert.match(bad.output, /bad\.ts\(5,\d+\): error TS2322/u, bad.output);
+  const badMemory = check("bad-memory.ts", `${imports}export const probe: PersonMemoryOptions["agentId"] = 42;\n`);
+  assert.notEqual(badMemory.status, 0, "a number was accepted as an agentId: the memory declarations resolve to any");
+  assert.match(badMemory.output, /bad-memory\.ts\(5,\d+\): error TS2322/u, badMemory.output);
   console.log("consumer_types_nodenext=ok");
 } finally {
   rmSync(consumer, { recursive: true, force: true });

@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
+    exclude: ["test/workerd/**"],
     server: { deps: { inline: [/@cloudflare\/think/, /node_modules\/agents\//] } },
   },
 });
