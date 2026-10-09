@@ -18,13 +18,14 @@ export const legs = {
   cli: { dirs: ["packages/cli", "packages/pi"], build: ["@relaymessenger/sdk", "@relaymessenger/pi"], run: "validate:cli" },
   openclaw: { dirs: ["packages/openclaw"], build: ["@relaymessenger/sdk"], run: "validate:openclaw" },
   "claude-code": { dirs: ["packages/claude-code"], build: ["@relaymessenger/sdk"], run: "validate:claude-code" },
+  think: { dirs: ["packages/think"], build: ["@relaymessenger/sdk", "@relaymessenger/chat-sdk-adapter"], run: "validate:think" },
   cookbook: { dirs: [], build: ["@relaymessenger/sdk", "@relaymessenger/chat-sdk-adapter", "@relaymessenger/think"], run: "validate:cookbook" },
 };
 
 // Files no check reads.
 const notes = new Set(["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "scripts/agent-cli-platforms.md"]);
 // Workspaces whose own suites run in the release (release-run.mjs), not in CI.
-const releaseOnly = new Set(["packages/livekit", "packages/elevenlabs", "packages/think"]);
+const releaseOnly = new Set(["packages/livekit", "packages/elevenlabs"]);
 
 function workspaces() {
   const found = new Map();
