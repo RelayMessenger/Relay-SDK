@@ -164,6 +164,21 @@ export function unlockedReleaseCandidates({ channel, locked, dependencies, candi
     .map((dependency) => ({ ...dependency, ...candidates.get(dependency.name) }));
 }
 
+/**
+ * On the release channel, the npm `overrides` an unlocked folder needs so that
+ * every Relay package in its tree, direct or transitive, is the release's own
+ * tarball. A direct dependency on a tarball is not enough: the tarball of
+ * @relaymessenger/think 0.1.7 depends on @relaymessenger/sdk 0.5.5, which a
+ * folder that does not name the sdk itself resolves from the registry, where
+ * it does not exist before the publish (ETARGET, release-dry-run on Relay-SDK
+ * PR 537, 2026-10-09). npm requires a direct dependency's override to equal
+ * its spec, and both are the same `file:` path.
+ */
+export function releaseTarballOverrides({ channel, locked, candidates }) {
+  if (channel !== "release" || locked) return {};
+  return Object.fromEntries([...candidates].map(([name, { path }]) => [name, `file:${path}`]));
+}
+
 // A Relay dependency range whose lowest release is X.Y.Z: `^X.Y.Z`, `~X.Y.Z`,
 // `X.Y.Z`, or a staging range `^X.Y.Z-staging.N` that the release derives to
 // `^X.Y.Z` (release-derive.mjs, rewriteCookbook). An exact staging pin is
@@ -439,12 +454,14 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
       for (const { field, name: dependency } of dependencies) manifest[field][dependency] = tag;
       writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     }
-    const unreleased = unlockedReleaseCandidates({
-      channel, locked: hasLock, dependencies, candidates: tarballCandidates(tarballs),
-    });
-    if (unreleased.length > 0) {
+    const candidates = tarballCandidates(tarballs);
+    const unreleased = unlockedReleaseCandidates({ channel, locked: hasLock, dependencies, candidates });
+    const overrides = releaseTarballOverrides({ channel, locked: hasLock, candidates });
+    if (unreleased.length > 0 || Object.keys(overrides).length > 0) {
       // Only the copy changes: it installs the bytes this release publishes.
       for (const { field, name: dependency, path } of unreleased) manifest[field][dependency] = `file:${path}`;
+      assert.equal(manifest.overrides, undefined, `${name} declares its own overrides; merge them with the release tarballs first`);
+      if (Object.keys(overrides).length > 0) manifest.overrides = overrides;
       writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     }
     // After a publish, revalidate npm's cached metadata: a packument cached
@@ -463,6 +480,13 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
       const mismatch = installedMismatch({ channel, dependency, installed, locked: hasLock, tagged });
       assert.equal(mismatch, null, `${name} ${mismatch}`);
       say(`  ${name}: ${dependency.name}@${dependency.range}${channel === "staging" && !hasLock ? ` (as ${tag})` : ""} -> ${candidate ? "release tarball" : "registry"} ${installed}`);
+    }
+    for (const overridden of Object.keys(overrides)) {
+      const path = join(copy, "node_modules", ...overridden.split("/"), "package.json");
+      if (!existsSync(path)) continue;
+      assert.equal(readJson(path).version, candidates.get(overridden).version,
+        `${name} installed ${overridden}@${readJson(path).version}, not the release tarball`);
+      say(`  ${name}: ${overridden} -> release tarball ${candidates.get(overridden).version}`);
     }
     // --no-install: tsc must come from the folder's own devDependencies.
     run(npx, ["--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"], copy);

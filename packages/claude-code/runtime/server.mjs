@@ -21084,6 +21084,8 @@ var WebSocketStoppedError = class extends Error {
     this.closeCode = closeCode;
   }
 };
+var UnknownStatusWebSocketError = class extends Error {
+};
 var DurableApplicationError = class extends Error {
   sequence;
   closeCode = CLIENT_CLOSE_DURABLE_ACCEPTANCE;
@@ -21094,14 +21096,25 @@ var DurableApplicationError = class extends Error {
 };
 var RetryableWebSocketError = class extends Error {
   closeCode;
-  constructor(message, closeCode = CLIENT_CLOSE_RECONNECT) {
+  retryAfterMs;
+  constructor(message, closeCode = CLIENT_CLOSE_RECONNECT, retryAfterMs) {
     super(message);
     this.closeCode = closeCode;
+    this.retryAfterMs = retryAfterMs;
   }
 };
-var upgradeResponseBody = (status, statusMessage, textBody) => {
+var AGENT_TOKEN_REFUSED_CODE = 2004;
+var agentTokenRefused = (detail, options2 = {}) => new RelayAPIError(`Relay refused this Agent Token (${detail}): it is invalid or was revoked, so Relay will not reconnect with it. Create a new Agent Token in Relay Console, or run  npx relaymessenger connect , then start again.`, {
+  status: 401,
+  code: options2.code ?? AGENT_TOKEN_REFUSED_CODE,
+  ...options2.traceId === void 0 ? {} : { traceId: options2.traceId },
+  ...options2.body === void 0 ? {} : { body: options2.body }
+});
+var upgradeResponseBody = (status, statusMessage, textBody, retryAfterHeader) => {
   let body = textBody;
   let message;
+  let code;
+  let retryAfter = Number(retryAfterHeader ?? NaN);
   let traceId;
   try {
     const parsed = textBody ? JSON.parse(textBody) : void 0;
@@ -21112,8 +21125,21 @@ var upgradeResponseBody = (status, statusMessage, textBody) => {
       if (isRecord2(parsed.error) && typeof parsed.error.message === "string") {
         message = parsed.error.message;
       }
+      if (isRecord2(parsed.error) && typeof parsed.error.code === "number") {
+        code = parsed.error.code;
+      }
+      if (isRecord2(parsed.error) && typeof parsed.error.retry_after === "number") {
+        retryAfter = parsed.error.retry_after;
+      }
     }
   } catch {
+  }
+  if (status === 401) {
+    return agentTokenRefused(`HTTP 401${message ? `: ${message}` : ""}`, {
+      ...code === void 0 ? {} : { code },
+      ...traceId === void 0 ? {} : { traceId },
+      body
+    });
   }
   if (status === 409) {
     return new RelayWebhookConfiguredError(message ?? "This Agent delivers by webhook; delete its webhook subscription to use the WebSocket.", {
@@ -21123,7 +21149,10 @@ var upgradeResponseBody = (status, statusMessage, textBody) => {
   }
   const fallback = status > 0 ? `Relay WebSocket upgrade failed with HTTP ${status}${statusMessage ? ` ${statusMessage}` : ""}.` : "Relay WebSocket upgrade failed before receiving an HTTP status.";
   const errorMessage = message ?? fallback;
-  return status === 429 || status >= 500 || status === 0 ? new RetryableWebSocketError(errorMessage) : new WebSocketStoppedError(errorMessage);
+  if (status === 429) {
+    return new RetryableWebSocketError(errorMessage, CLIENT_CLOSE_RECONNECT, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : void 0);
+  }
+  return status >= 500 || status === 0 ? new RetryableWebSocketError(errorMessage) : new WebSocketStoppedError(errorMessage);
 };
 var deriveWebSocketURL = (baseURL, observe = false) => {
   let url;
@@ -21166,6 +21195,7 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
       Authorization: `Bearer ${agentToken}`
     }
   });
+  const statusUnknown = typeof socket.on !== "function";
   let chain = Promise.resolve();
   let settled = false;
   let ready = false;
@@ -21241,6 +21271,8 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
   };
   const onUnexpectedResponse = (_request, response) => {
     const chunks = [];
+    const header = response.headers?.["retry-after"];
+    const retryAfterHeader = Array.isArray(header) ? header[0] : header;
     let bytes = 0;
     response.setEncoding?.("utf8");
     response.on("data", (chunk) => {
@@ -21251,10 +21283,10 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
       chunks.push(value.slice(0, Math.max(0, 65536 - (bytes - value.length))));
     });
     response.on("end", () => {
-      finish(upgradeResponseBody(response.statusCode ?? 0, response.statusMessage, chunks.join("")));
+      finish(upgradeResponseBody(response.statusCode ?? 0, response.statusMessage, chunks.join(""), retryAfterHeader));
     });
     response.on("error", () => {
-      finish(upgradeResponseBody(response.statusCode ?? 0, response.statusMessage, chunks.join("")));
+      finish(upgradeResponseBody(response.statusCode ?? 0, response.statusMessage, chunks.join(""), retryAfterHeader));
     });
   };
   const onMessage = (message) => {
@@ -21296,6 +21328,9 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
         const parsed = parseDisconnect(frame);
         if (parsed.reason === "heartbeat_timeout" || parsed.reason === "restart") {
           throw new RetryableWebSocketError(parsed.reason === "restart" ? "Relay WebSocket is restarting." : "Relay WebSocket heartbeat timed out.");
+        }
+        if (parsed.reason === "revoked") {
+          throw agentTokenRefused("disconnect: revoked");
         }
         if (parsed.reason === "webhook_configured") {
           throw new RelayWebhookConfiguredError("Webhook delivery is now configured for this Agent.", { code: 4410 });
@@ -21397,7 +21432,8 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
       if (settled)
         return;
       stopReceiving();
-      socket.close(error2 instanceof WebSocketStoppedError ? error2.closeCode : error2 instanceof WebSocketProtocolError ? error2.closeCode : error2 instanceof RetryableWebSocketError ? error2.closeCode : CLIENT_CLOSE_DURABLE_ACCEPTANCE, error2 instanceof WebSocketStoppedError ? "Relay stopped this consumer" : error2 instanceof WebSocketProtocolError ? "protocol error" : error2 instanceof RetryableWebSocketError ? "Relay requested reconnect" : error2 instanceof DurableApplicationError && error2.sequence !== void 0 ? `durable application failed at sequence ${error2.sequence}` : "durable application failed");
+      const refused = error2 instanceof RelayAPIError && error2.status === 401;
+      socket.close(refused ? 4401 : error2 instanceof WebSocketStoppedError ? error2.closeCode : error2 instanceof WebSocketProtocolError ? error2.closeCode : error2 instanceof RetryableWebSocketError ? error2.closeCode : CLIENT_CLOSE_DURABLE_ACCEPTANCE, refused || error2 instanceof WebSocketStoppedError ? "Relay stopped this consumer" : error2 instanceof WebSocketProtocolError ? "protocol error" : error2 instanceof RetryableWebSocketError ? "Relay requested reconnect" : error2 instanceof DurableApplicationError && error2.sequence !== void 0 ? `durable application failed at sequence ${error2.sequence}` : "durable application failed");
       finish(error2);
     });
   };
@@ -21418,12 +21454,16 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
         }));
         return;
       }
+      if (event.code === 4401) {
+        finish(agentTokenRefused(`close 4401${event.reason ? `: ${event.reason}` : ""}`));
+        return;
+      }
       if (event.code !== void 0 && event.code >= 4400 && event.code <= 4499 && event.code !== 4408) {
         finish(new WebSocketStoppedError(`Relay WebSocket closed permanently (${event.code}): ${event.reason ?? "server policy changed"}.`, event.code));
         return;
       }
       if (!ready) {
-        finish(new Error(`Relay WebSocket closed before ready (${event.code ?? 1006}): ${event.reason ?? "connection ended"}.`));
+        finish(new (statusUnknown ? UnknownStatusWebSocketError : Error)(`Relay WebSocket closed before ready (${event.code ?? 1006}): ${event.reason ?? "connection ended"}.`));
         return;
       }
       finish();
@@ -21435,7 +21475,7 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
       void drained().then(() => finish());
       return;
     }
-    const error2 = new Error("Relay WebSocket connection failed.");
+    const error2 = new (statusUnknown && !ready ? UnknownStatusWebSocketError : Error)("Relay WebSocket connection failed.");
     void drained().then(() => finish(error2));
   };
   const onAbort = () => {
@@ -21455,6 +21495,26 @@ var runConnection = (url, agentToken, options2, Constructor, onReady, onUnknownE
   else
     options2.signal?.addEventListener("abort", onAbort, { once: true });
 });
+var refusedToken = async (baseURL, agentToken, signal) => {
+  try {
+    const url = new URL(baseURL);
+    url.pathname = "/v1/me";
+    url.search = "";
+    url.hash = "";
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${agentToken}` },
+      ...signal ? { signal } : {}
+    });
+    if (response.status !== 401) {
+      await response.body?.cancel();
+      return void 0;
+    }
+    const answer = upgradeResponseBody(401, void 0, await response.text());
+    return answer instanceof RelayAPIError ? answer : void 0;
+  } catch {
+    return void 0;
+  }
+};
 var runWebSocket = async (baseURL, agentToken, options2) => {
   if (options2.observe !== void 0 && typeof options2.observe !== "boolean") {
     throw new TypeError("WebSocket observe must be a boolean when provided.");
@@ -21483,6 +21543,7 @@ var runWebSocket = async (baseURL, agentToken, options2) => {
     report(new RelayUnknownEventTypeError(eventType, sequence));
   };
   while (!options2.signal?.aborted) {
+    let retryAfterMs = 0;
     options2.onConnectionState?.("connecting");
     try {
       await runConnection(url, agentToken, options2, Constructor, (frame) => {
@@ -21494,13 +21555,19 @@ var runWebSocket = async (baseURL, agentToken, options2) => {
         failing = false;
         attempt = 0;
       });
-    } catch (error2) {
+    } catch (caught) {
+      if (options2.signal?.aborted)
+        return;
+      const error2 = caught instanceof UnknownStatusWebSocketError ? await refusedToken(baseURL, agentToken, options2.signal) ?? caught : caught;
       if (options2.signal?.aborted)
         return;
       report(error2);
       if (error2 instanceof DurableApplicationError)
         failing = true;
-      if (error2 instanceof WebSocketStoppedError || error2 instanceof WebSocketProtocolError || error2 instanceof RelayWebhookConfiguredError)
+      if (error2 instanceof RetryableWebSocketError && error2.retryAfterMs !== void 0) {
+        retryAfterMs = error2.retryAfterMs;
+      }
+      if (error2 instanceof WebSocketStoppedError || error2 instanceof WebSocketProtocolError || error2 instanceof RelayAPIError && !error2.retryable)
         throw error2;
       attempt += 1;
     } finally {
@@ -21509,7 +21576,7 @@ var runWebSocket = async (baseURL, agentToken, options2) => {
     if (options2.signal?.aborted)
       return;
     const ceiling = Math.min(maximum, minimum * 2 ** Math.max(0, attempt - 1));
-    await wait(Math.floor(random() * ceiling), options2.signal);
+    await wait(Math.max(retryAfterMs, Math.floor(random() * ceiling)), options2.signal);
   }
 };
 
@@ -24844,7 +24911,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.16-staging.0" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.17-staging.0" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
