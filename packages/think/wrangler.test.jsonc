@@ -1,0 +1,16 @@
+// The Worker the workerd tests run: a Think agent wired to per-person memory.
+{
+  "name": "relay-think-memory-test",
+  "main": "test/workerd/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MemoryTestAgent", "class_name": "MemoryTestAgent" },
+      { "name": "RelayPersonMemory", "class_name": "RelayPersonMemory" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MemoryTestAgent", "RelayPersonMemory"] }
+  ]
+}

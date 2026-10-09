@@ -13,7 +13,8 @@ test("pushes and pull requests into main run every leg and the release rehearsal
 test("a pull request into staging runs the touched workspace and its dependents only", () => {
   assert.deepEqual(pr(["packages/pi/src/index.ts"]), ["workflows", "cli"]);
   assert.deepEqual(pr(["packages/openclaw/src/index.ts"]), ["workflows", "openclaw"]);
-  assert.deepEqual(pr(["packages/chat-sdk-adapter/src/index.ts"]), ["workflows", "chat-sdk", "cookbook"]);
+  assert.deepEqual(pr(["packages/chat-sdk-adapter/src/index.ts"]), ["workflows", "chat-sdk", "think", "cookbook"]);
+  assert.deepEqual(pr(["packages/think/src/memory.ts"]), ["workflows", "think", "cookbook"]);
   assert.deepEqual(pr(["packages/sdk/src/index.ts"]), every);
   assert.equal(select({ event: "pull_request", baseRef: "staging", files: ["packages/pi/src/index.ts"] }).release, false);
 });

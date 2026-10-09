@@ -8,10 +8,10 @@ contact cards, typing, generation activity, chat timing, and the model
 history the agent reads back.
 
 ```sh
-npm install @relaymessenger/think @cloudflare/think ai chat zod
+npm install @relaymessenger/think @cloudflare/think agents ai chat zod
 ```
 
-`@cloudflare/think`, `ai`, `chat` and `zod` are peer dependencies, so the
+`@cloudflare/think`, `agents`, `ai`, `chat` and `zod` are peer dependencies, so the
 agent keeps one copy of each.
 
 ## Create the Relay client
@@ -147,3 +147,71 @@ const adapter = withContactCards(withFormReplies(withCardReplies(withSelectionRe
   they answer.
 - `withContactCards` adds a shared contact card: who shared it, and the
   card's kind, id, handle and name.
+
+## Remember a person across Chats
+
+A Think agent keeps one history per Chat. With per-person memory, it also
+remembers what a person and it said in every Chat they share: in a DM, it
+knows what was said in that person's group with it, and the other way
+around.
+
+Each person gets one `RelayPersonMemory` Durable Object, named
+`person:<personId>`, where `personId` is the person's Handle id (the same in
+every Chat). It indexes their lines with the Agents SDK's
+`AgentSearchProvider`. Memory is off until you bind the class:
+
+```jsonc
+// wrangler.jsonc
+"durable_objects": {
+  "bindings": [
+    { "name": "RelayChat", "class_name": "RelayChatAgent" },
+    { "name": "RelayPersonMemory", "class_name": "RelayPersonMemory" }
+  ]
+},
+"migrations": [{ "tag": "v2", "new_sqlite_classes": ["RelayPersonMemory"] }]
+```
+
+```ts
+import { Think, type TurnContext } from "@cloudflare/think";
+import { personMemory, RelayPersonMemory } from "@relaymessenger/think/memory";
+
+export { RelayPersonMemory };
+
+export class RelayChatAgent extends Think<Env> {
+  memory = personMemory(this, {
+    binding: this.env.RelayPersonMemory,
+    chat: () => this.currentChat(), // GET /v1/chats/{chatId}, cached
+  });
+
+  override async beforeTurn(context: TurnContext) {
+    return await this.memory.turn(context.messages);
+  }
+
+  override async onChatResponse() {
+    await this.memory.ingest();
+  }
+}
+```
+
+- `ingest()` stores the Chat's lines that are new since its last call. Each
+  row is keyed `<chatId>:<messageId>` and reads
+  `[<Chat name or DM>, <date>] <speaker>: <text>`.
+- `turn(messages)` adds one model Message before the newest one, with the
+  person's latest lines from up to 5 other Chats and up to 10 search hits on
+  the new Message, and adds the `search_person_memory` tool. The current
+  Chat's lines are left out: the agent already has them. The system prompt
+  is not changed, so Think's frozen prompt stays cached.
+
+Who sees what:
+
+| Chat | Stored | Read |
+| --- | --- | --- |
+| One person (a DM, or a group of one person and agents) | Every line: the person's, yours, and other agents' | Yes |
+| Two or more people | Each person's own lines and your replies to them, in that person's memory only. Never another person's lines. | No |
+
+One Worker that runs several agents passes `agentId`, so each agent's memory
+of a person is its own (`person:<agentId>:<personId>`). Pass
+`personMemory: false` to turn memory off with the binding in place.
+
+`@relaymessenger/think/memory` loads `agents`, which runs only inside a
+Worker; `agents` is a peer dependency.
