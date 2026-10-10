@@ -41,12 +41,17 @@ it("isolates the same event id by account and API origin", () => {
 
 it("rejects a concurrent writer and recovers committed events after its owner is killed", async () => {
   const source = new URL("../src/inbox.ts", import.meta.url).href;
-  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+  const child = spawn(process.execPath, ["--expose-gc", "--input-type=module", "-e", `
     import { ChannelInbox } from ${JSON.stringify(source)};
     const inbox = new ChannelInbox(${JSON.stringify(directory)}, "https://relay.test", "agent");
     inbox.accept({event_id: "before-crash", agent_id: "agent"});
-    process.stdout.write("committed\\n");
-    setInterval(() => {}, 1000);
+    // Keep the owner reachable until SIGKILL, as PiChannel.run does. An empty
+    // interval lets GC close its SQLite handles before the contender arrives.
+    setInterval(() => { inbox.pending(); }, 1000);
+    setImmediate(() => {
+      global.gc();
+      setImmediate(() => process.stdout.write("committed\\n"));
+    });
   `], { stdio: ["ignore", "pipe", "pipe"] });
   try {
     const [line] = await once(child.stdout!, "data");
