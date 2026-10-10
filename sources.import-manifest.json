@@ -2318,7 +2318,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "package-lock.json",
       "source_sha256": "a8b26b0bff63c93112cadc0d399298f81ecbcc81470da5bf3f4ebb31469bce7e",
-      "destination_sha256": "060b2dcbe60e24aa13fc1ff50a9bd6d95a2abb52cd7b3419c4c896ffddd3a1c4",
+      "destination_sha256": "cc9c82c4a2600a59e4ad1a7035845b0bec12c015f068259eaf4614d1b81436b0",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2329,7 +2329,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "package.json",
       "source_sha256": "28c9c35f4b3d8664fb2b813583e45b97813ef2812f0ec39f8572593d3dce7ca2",
-      "destination_sha256": "1b56d89a6c3b3e3937cb699565dd53c8a7a5c1a13c365acc5578906ea424a23a",
+      "destination_sha256": "e42a6d6a317e2cf4da6623657aed6f59be521dd5e971f23009174cde6246a96f",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
