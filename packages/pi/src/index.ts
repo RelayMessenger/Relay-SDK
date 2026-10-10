@@ -85,7 +85,7 @@ interface RpcRecord {
   /** `tool_execution_start` fields (Pi docs/rpc.md). */
   readonly toolName?: string; readonly isError?: boolean;
   /** `tool_execution_end`: the tool's result. */
-  readonly result?: { details?: { sent?: unknown } };
+  readonly result?: { details?: { sent?: unknown; chat_id?: unknown } };
 }
 
 /** The `extension_ui_response` to one dialog request, from the option picked. */
@@ -243,7 +243,7 @@ class ChatSession {
   private dialogs = 0;
   readonly #approvals: PiApprovals | undefined;
   readonly #stop = new AbortController();
-  constructor(process: PiProcess, approvals?: PiApprovals) {
+  constructor(process: PiProcess, readonly chatId: string, approvals?: PiApprovals) {
     this.process = process;
     this.lines = process.stdout[Symbol.asyncIterator]();
     this.#approvals = approvals;
@@ -281,7 +281,10 @@ class ChatSession {
       if (result.done) throw new Error("Pi RPC process exited");
       const record = JSON.parse(result.value) as RpcRecord;
       if (record.type === "agent_settled") this.settled = true;
-      if (record.type === "tool_execution_end" && record.toolName === "message" && !record.isError && record.result?.details?.sent === true) this.texted = true;
+      if (record.type === "tool_execution_end" && record.toolName === "message" && !record.isError && record.result?.details?.sent === true) {
+        const chat = record.result.details.chat_id;
+        if (typeof chat !== "string" || !chat || chat === this.chatId) this.texted = true;
+      }
       if (record.type === "extension_ui_request" && DIALOG_METHODS.has(String(record.method))) this.#answer(record);
       return record;
     } finally {
@@ -377,7 +380,7 @@ export class PiChannel {
   async #runTurn(event: RelayWebhookEvent, message: string, signal?: AbortSignal): Promise<void> {
     const data = event.data as MessageWebhookData;
     let session = this.#sessions.get(data.chat.id);
-    if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", "--append-system-prompt", relayHint(), ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
+    if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", "--append-system-prompt", relayHint(), ...(this.#options.piArgs ?? [])], data.chat.id), data.chat.id, this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
     const replyLine = await repliedContext(this.#relay, data);
     // The person sees Pi typing while it works; it stops once the answer is sent.

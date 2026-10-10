@@ -113,20 +113,24 @@ describe("session delivery", () => {
 });
 
 describe("channel delivery", () => {
-  it("sends no final text when the Pi texted with message", async () => {
+  it.each([
+    { chat: undefined, expected: [] },
+    { chat: "chat-1", expected: [] },
+    { chat: "chat-2", expected: [["chat-1", "on it"]] },
+  ])("suppresses final text only when message texted this channel: $chat", async ({ chat, expected }) => {
     const send = vi.fn().mockResolvedValue({});
     const event = inbound("m1");
     const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "on it" } });
-      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [], details: { sent: true } }, isError: false });
+      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [], details: { sent: true, chat_id: chat } }, isError: false });
       yield JSON.stringify({ type: "agent_settled" });
       yield JSON.stringify({ id: "2", type: "response", success: true, data: { text: "on it" } });
     }
     const pi: PiProcess = { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines(), kill: vi.fn() };
     await new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi }).run();
-    expect(send).not.toHaveBeenCalled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual(expected);
   });
 });
 
