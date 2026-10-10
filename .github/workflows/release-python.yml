@@ -104,7 +104,7 @@ jobs:
         with:
           name: python-package-distributions-${{ inputs.package }}
           path: dist/
-      - uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+      - uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         name: Load the PyPI API token from Infisical
         with:
           method: oidc

@@ -21,8 +21,12 @@ function harness(options: { idle?: () => boolean; send?: ReturnType<typeof vi.fn
   const send = options.send ?? vi.fn().mockResolvedValue({});
   const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() }, attachments: { retrieve: vi.fn() } } as unknown as Relay;
   const sent: { content: SessionContent; options?: unknown }[] = [];
-  const pi = { sendUserMessage: vi.fn((content: SessionContent, delivery?: unknown) => { sent.push({ content, options: delivery }); }) };
+  const pi = {
+    sendUserMessage: vi.fn((content: SessionContent, delivery?: unknown) => { sent.push({ content, options: delivery }); }),
+    sendMessage: vi.fn((message: { content: SessionContent }, delivery: unknown) => { sent.push({ content: message.content, options: delivery }); }),
+  };
   const channel = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: options.idle ?? (() => true), ...(options.senders ? { senders: options.senders } : {}) });
+  if (options.idle && !options.idle()) channel.started();
   return { channel, send, sent, pi };
 }
 
@@ -35,7 +39,7 @@ describe("session content", () => {
     expect(content?.[1]).toEqual({ type: "image", data: Buffer.from("img").toString("base64"), mimeType: "image/png" });
     const words = (content?.[0] as { text: string }).text;
     // The Message alone: the Relay hint is in the system prompt, not here.
-    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]");
+    expect(words).toBe("look\n\n[photo: a.png]\n[voice note, transcribed]: call mom at six\n[file: b.pdf (application/pdf), not opened]\n\n[Relay message id: message-a]\n[Relay chat: chat, from @alice]");
     expect(transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "note.m4a");
   });
   it("names a voice note it cannot hear, and gives nothing for an empty Message", async () => {
@@ -98,19 +102,115 @@ describe("session channel", () => {
     const { channel, send, sent } = harness({ idle: () => false });
     await channel.receive(makeEvent("a", [text("stop that")], { chat: "one" }));
     expect(sent).toEqual([{ content: expect.any(Array), options: { deliverAs: "steer" } }]);
-    // A second Message waits behind the pending one rather than steering too.
+    // A second Message from the same chat steers the same run.
     await channel.receive(makeEvent("b", [text("and this")], { chat: "one" }));
-    expect(sent).toHaveLength(1);
-    channel.ended([{ role: "user", content: "typed" }, assistant("stopped")]);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.options).toEqual({ deliverAs: "steer" });
+    channel.ended([{ role: "user", content: "typed" }, { role: "user", content: sent[1]!.content }, assistant("stopped")]);
     await channel.settled();
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "stopped"]]);
     expect(sent).toHaveLength(2);
+  });
+  it("steers a Message that arrives mid-turn into the running turn, whose answer is the reply", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("book a table")], { chat: "one" }));
+    // Idle: the Message starts a normal run.
+    expect(sent).toEqual([{ content: expect.any(Array), options: undefined }]);
+    idle = false;
+    channel.started();
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("png"));
+    await channel.receive(makeEvent("b", [text("make it 8pm"), media("img", "image/png", "menu.png")], { chat: "one" }));
+    // Mid-turn: the same content a prompt gets, delivered as a steer, not held for a turn of its own.
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual({ content: [{ type: "text", text: expect.stringContaining("make it 8pm") }, { type: "image", data: expect.any(String), mimeType: "image/png" }], options: { deliverAs: "steer" } });
+    fetch.mockRestore();
+    const [first, second] = sent.map((entry) => ({ role: "user", content: entry.content }));
+    channel.ended([first, assistant("Looking."), second, assistant("Booked for 8pm.")]);
+    idle = true;
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "Looking.", "pi-a-0"], ["one", "Booked for 8pm.", "pi-a-p1-0"]]);
+    expect(sent).toHaveLength(2);
+    // Nothing is left pending: the next Message starts its own run.
+    await channel.receive(makeEvent("c", [text("thanks")], { chat: "one" }));
+    expect(sent[2]?.options).toBeUndefined();
+  });
+  it("answers with every run before the settle, so a steer Pi ran as a continuation keeps the first answer", async () => {
+    const { channel, send } = harness();
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    channel.ended([assistant("one")]);
+    channel.ended([{ role: "user", content: "steered" }, assistant("two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([, body]) => body.message.parts[0].value)).toEqual(["one", "two"]);
+  });
+  it("steers a Message from another chat into the running run, and a message with its chat_id answers it there", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    channel.started();
+    await channel.receive(makeEvent("b", [text("other chat")], { chat: "two", handle: "bob" }));
+    await channel.receive(makeEvent("c", [text("same chat, after")], { chat: "one" }));
+    // Both steer the one run, whatever their chat, and each names its chat and sender.
+    expect(sent.map((entry) => entry.options)).toEqual([undefined, { deliverAs: "steer" }, { deliverAs: "steer" }]);
+    expect((sent[1]!.content[0] as { text: string }).text).toContain("[Relay chat: two, from @bob]");
+    const [first, second, third] = sent.map((entry) => ({ role: "user", content: entry.content }));
+    channel.ended([first, second, { role: "toolResult", toolName: "message", content: [], details: { sent: true, chat_id: "two" } }, third, assistant("to one")]);
+    idle = true;
+    await channel.settled();
+    // The run's words go to the chat that started it; chat two was answered by the tool, so nothing runs again.
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual([["one", "to one"]]);
+    expect(sent).toHaveLength(3);
+  });
+  it("runs a steered Message from another chat again when the run never texted that chat", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    channel.started();
+    await channel.receive(makeEvent("b", [text("other chat")], { chat: "two" }));
+    channel.ended([{ role: "user", content: sent[0]!.content }, { role: "user", content: sent[1]!.content }, assistant("to one")]);
+    idle = true;
+    await channel.settled();
+    // Chat one gets the run's words; chat two's Message is a turn of its own, answered in chat two.
+    expect(sent).toHaveLength(3);
+    expect(sent[2]).toEqual({ content: sent[1]!.content, options: undefined });
+    channel.ended([{ role: "user", content: sent[2]!.content }, assistant("to two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "to one", "pi-a-0"], ["two", "to two", "pi-b-0"]]);
+  });
+  it("starts an ordinary prompt when the previous run settled before the next Message arrives", async () => {
+    let idle = true;
+    const { channel, send, sent } = harness({ idle: () => idle });
+    await channel.receive(makeEvent("a", [text("first")], { chat: "one" }));
+    idle = false;
+    channel.started();
+    channel.ended([{ role: "user", content: sent[0]!.content }, assistant("one")]);
+    idle = true;
+    await channel.settled();
+    await channel.receive(makeEvent("b", [text("second")], { chat: "one" }));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.options).toBeUndefined();
+    channel.ended([{ role: "user", content: sent[1]!.content }, assistant("two")]);
+    await channel.settled();
+    expect(send.mock.calls.map(([, body]) => [body.message.parts[0].value, body.message.idempotency_key])).toEqual([["one", "pi-a-0"], ["two", "pi-b-0"]]);
+  });
+  it("holds compaction-only arrivals until Pi is idle, without starting or steering a run", async () => {
+    let idle = true;
+    const { channel, sent, pi } = harness({ idle: () => idle });
+    idle = false;
+    await channel.receive(makeEvent("compact", [text("after compaction")]));
+    expect(sent).toEqual([]);
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    idle = true;
+    channel.next();
+    expect(sent).toEqual([{ content: expect.any(Array), options: undefined }]);
   });
   it("sends a run no one prompted to the last chat, kept across restarts", async () => {
     const file = join(await mkdtemp(join(tmpdir(), "relay-pi-last-")), "last.json");
     const send = vi.fn().mockResolvedValue({});
     const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() }, attachments: { retrieve: vi.fn() } } as unknown as Relay;
-    const pi = { sendUserMessage: vi.fn() };
+    const pi = { sendUserMessage: vi.fn(), sendMessage: vi.fn() };
     const first = new SessionChannel(pi, { agentToken: "secret", relay, isIdle: () => true, lastChatFile: file });
     await first.receive(makeEvent("a", [text("start a helper")], { chat: "phone" }));
     first.ended([assistant("started")]); await first.settled();
