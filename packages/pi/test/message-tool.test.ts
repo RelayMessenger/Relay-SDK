@@ -1,12 +1,22 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, RELAY_TOOLS_LINE, type PiProcess } from "../src/index.js";
 import { bubbles, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
+
+let channelState: string;
+beforeEach(async () => {
+  channelState = await mkdtemp(join(tmpdir(), "relay-pi-fixture-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", channelState);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(channelState, { recursive: true, force: true });
+});
 
 const fakeRelay = () => ({
   chats: { messages: { send: vi.fn().mockResolvedValue({}) }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) },
@@ -14,13 +24,13 @@ const fakeRelay = () => ({
   attachments: { create: vi.fn().mockResolvedValue({ attachment_id: "att-1" }), upload: vi.fn().mockResolvedValue(undefined), retrieve: vi.fn() },
 });
 const inbound = (id: string, chat = "chat-1") => ({
-  event_type: "message.received", event_id: `e-${id}`,
+  event_type: "message.received", agent_id: "agent", event_id: `e-${id}`,
   data: { direction: "inbound", id, chat: { id: chat, is_group: false }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "hi", reactions: null }] },
 }) as unknown as RelayWebhookEvent & { data: MessageWebhookData };
 const assistant = (...blocks: unknown[]): unknown => ({ role: "assistant", content: blocks });
 const words = (text: string) => ({ type: "text", text });
 const call = (name: string, args: Record<string, unknown>) => ({ type: "toolCall", id: "c1", name, arguments: args });
-const session = (relay: ReturnType<typeof fakeRelay>) => new SessionChannel({ sendUserMessage: vi.fn() }, { agentToken: "secret", relay: relay as unknown as Relay, isIdle: () => true });
+const session = (relay: ReturnType<typeof fakeRelay>) => new SessionChannel({ sendUserMessage: vi.fn(), sendMessage: vi.fn() }, { agentToken: "secret", relay: relay as unknown as Relay, isIdle: () => true });
 const sentTexts = (relay: ReturnType<typeof fakeRelay>) =>
   relay.chats.messages.send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0]?.value, body.message.reply_to?.message_id]);
 
@@ -44,6 +54,21 @@ describe("message tool", () => {
     expect((await tool(relay).execute("call-3", { action: "file", path, reply_to: "msg-7" })).content[0]!.text).toBe("Sent map.png.");
     expect(relay.chats.messages.send).toHaveBeenCalledWith("chat-1", { message: { parts: [{ type: "media", attachment_id: "att-1" }], idempotency_key: "pi-media-call-3", reply_to: { message_id: "msg-7" } } });
   });
+  it("acts on the chat named by chat_id, threading and reacting to that chat's newest Message", async () => {
+    const relay = fakeRelay();
+    const tools = relayTools(relay as unknown as Relay, () => "chat-1", () => "msg-current", (chat) => chat === "chat-2" ? "msg-two" : undefined);
+    const message = tools.find((each) => each.name === "message")!;
+    expect((await message.execute("call-4", { action: "send", text: "Yes [[reply_to_current]]", chat_id: "chat-2" })).details).toEqual({ sent: true, chat_id: "chat-2" });
+    await message.execute("call-5", { action: "react", emoji: "👍", chat_id: "chat-2" });
+    // No chat_id: the chat being answered, as before.
+    expect((await message.execute("call-6", { action: "send", text: "Here" })).details).toEqual({ sent: true, chat_id: "chat-1" });
+    expect(sentTexts(relay)).toEqual([["chat-2", "Yes", "msg-two"], ["chat-1", "Here", undefined]]);
+    expect(relay.messages.addReaction).toHaveBeenCalledWith("msg-two", { operation: "add", type: "like" });
+    const location = { request: vi.fn().mockResolvedValue({}) };
+    (relay.chats as unknown as { location: typeof location }).location = location;
+    await tools.find((each) => each.name === "relay_request_location")!.execute("call-7", { chat_id: "chat-2" });
+    expect(location.request).toHaveBeenCalledWith("chat-2");
+  });
   it("is the tool the prompt names, with no channel prefix", () => {
     expect(RELAY_TOOLS_LINE).toContain("message texts the person now");
     expect(RELAY_TOOLS_LINE).not.toContain("relay_react");
@@ -52,6 +77,18 @@ describe("message tool", () => {
 });
 
 describe("session delivery", () => {
+  it("still sends the final words to the run's own chat when message texted only another chat", async () => {
+    const relay = fakeRelay();
+    const channel = session(relay);
+    await channel.receive(inbound("m1"));
+    await channel.receive(inbound("m2", "chat-2"));
+    expect(channel.latestIn("chat-2")).toBe("m2");
+    const tool = relayTools(relay as unknown as Relay, () => channel.chatId, () => channel.messageId, (chat) => channel.latestIn(chat)).find((each) => each.name === "message")!;
+    const other = await tool.execute("c1", { action: "send", text: "for two", chat_id: "chat-2" });
+    channel.ended([{ role: "toolResult", toolName: "message", content: other.content, details: other.details }, assistant(words("for one"))]);
+    await channel.settled();
+    expect(sentTexts(relay).map(([chat, text]) => [chat, text])).toEqual([["chat-2", "for two"], ["chat-1", "for one"]]);
+  });
   it("sends no final text after the run texted with message", async () => {
     const relay = fakeRelay();
     const channel = session(relay);
@@ -86,20 +123,24 @@ describe("session delivery", () => {
 });
 
 describe("channel delivery", () => {
-  it("sends no final text when the Pi texted with message", async () => {
+  it.each([
+    { chat: undefined, expected: [] },
+    { chat: "chat-1", expected: [] },
+    { chat: "chat-2", expected: [["chat-1", "on it"]] },
+  ])("suppresses final text only when message texted this channel: $chat", async ({ chat, expected }) => {
     const send = vi.fn().mockResolvedValue({});
     const event = inbound("m1");
-    const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "on it" } });
-      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [], details: { sent: true } }, isError: false });
+      yield JSON.stringify({ type: "tool_execution_end", toolCallId: "c1", toolName: "message", result: { content: [], details: { sent: true, chat_id: chat } }, isError: false });
       yield JSON.stringify({ type: "agent_settled" });
       yield JSON.stringify({ id: "2", type: "response", success: true, data: { text: "on it" } });
     }
     const pi: PiProcess = { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines(), kill: vi.fn() };
     await new PiChannel({ agentToken: "secret", relay, spawnPi: () => pi }).run();
-    expect(send).not.toHaveBeenCalled();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value])).toEqual(expected);
   });
 });
 
@@ -107,7 +148,7 @@ describe("review fixes", () => {
   it("still sends the channel answer when a message send did not go out", async () => {
     const send = vi.fn().mockResolvedValue({});
     const event = inbound("m1");
-    const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "" } });

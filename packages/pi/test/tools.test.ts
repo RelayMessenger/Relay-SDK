@@ -1,7 +1,7 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, piEnv, relayHint, type PiProcess } from "../src/index.js";
@@ -9,8 +9,19 @@ import native from "../src/native.js";
 import { runAnswers, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
 
+let channelState: string;
+beforeEach(async () => {
+  channelState = await mkdtemp(join(tmpdir(), "relay-pi-fixture-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", channelState);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(channelState, { recursive: true, force: true });
+});
+
 const fakeRelay = () => {
   const relay = {
+    baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) },
     chats: { location: { request: vi.fn().mockResolvedValue({}), retrieve: vi.fn().mockResolvedValue({ data: { type: "FeatureCollection", features: [] } }) }, messages: { send: vi.fn().mockResolvedValue({}) } },
     attachments: { create: vi.fn().mockResolvedValue({ attachment_id: "att-1", upload_url: "https://up", download_url: "https://down" }), upload: vi.fn().mockResolvedValue(undefined) },
   };
@@ -81,8 +92,8 @@ describe("answers", () => {
   });
   it("sends nothing when the RPC Pi ends with no words", async () => {
     const send = vi.fn().mockResolvedValue({});
-    const event = { event_type: "message.received", event_id: "e", data: { direction: "inbound", id: "m", chat: { id: "one" }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "ok thanks", reactions: null }] } } as unknown as RelayWebhookEvent;
-    const relay = { chats: { messages: { send } }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    const event = { event_type: "message.received", agent_id: "agent", event_id: "e", data: { direction: "inbound", id: "m", chat: { id: "one" }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "ok thanks", reactions: null }] } } as unknown as RelayWebhookEvent;
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send } }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "agent_settled" });
@@ -94,9 +105,9 @@ describe("answers", () => {
   });
   it("sends nothing when a session run ends with no words, and knows the chat it answers", async () => {
     const send = vi.fn().mockResolvedValue({});
-    const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() } } as unknown as Relay;
-    const channel = new SessionChannel({ sendUserMessage: vi.fn() }, { agentToken: "secret", relay, isIdle: () => true });
-    await channel.receive({ event_type: "message.received", event_id: "e", data: { direction: "inbound", id: "m", chat: { id: "one", is_group: false }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "ok", reactions: null }] } } as unknown as RelayWebhookEvent);
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send } }, messages: { retrieve: vi.fn() } } as unknown as Relay;
+    const channel = new SessionChannel({ sendUserMessage: vi.fn(), sendMessage: vi.fn() }, { agentToken: "secret", relay, isIdle: () => true });
+    await channel.receive({ event_type: "message.received", agent_id: "agent", event_id: "e", data: { direction: "inbound", id: "m", chat: { id: "one", is_group: false }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "ok", reactions: null }] } } as unknown as RelayWebhookEvent);
     expect(channel.chatId).toBe("one");
     channel.ended([{ role: "assistant", content: [], stopReason: "stop" }]);
     await channel.settled();

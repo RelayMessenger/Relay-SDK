@@ -106,11 +106,12 @@ const attachSession = (pi: ExtensionAPI): void => {
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
     });
     const current = channel;
-    registerRelayTools(pi, relay, () => current.chatId, () => current.messageId);
+    registerRelayTools(pi, relay, () => current.chatId, () => current.messageId, (chat) => current.latestIn(chat));
     void channel.run(stop.signal).catch((error: unknown) => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
     });
   });
+  pi.on("agent_start", async () => { channel?.started(); });
   pi.on("before_agent_start", async (event) => { if (channel) addRelayHint(event.systemPromptOptions); });
   pi.on("agent_end", async (event) => { channel?.ended(event.messages); });
   pi.on("agent_settled", async () => { await channel?.settled(); });
@@ -158,8 +159,8 @@ export const addRelayHint = (options: { sections: Record<string, string> }): voi
 };
 
 /** The Relay tools, as Pi registers a tool (docs/extensions.md, registerTool). */
-const registerRelayTools = (pi: ExtensionAPI, relay: Relay, chatId: () => string | undefined, messageId?: () => string | undefined): void => {
-  for (const tool of relayTools(relay, chatId, messageId)) pi.registerTool(tool as unknown as Parameters<ExtensionAPI["registerTool"]>[0]);
+const registerRelayTools = (pi: ExtensionAPI, relay: Relay, chatId: () => string | undefined, messageId?: () => string | undefined, latestIn?: (chatId: string) => string | undefined): void => {
+  for (const tool of relayTools(relay, chatId, messageId, latestIn)) pi.registerTool(tool as unknown as Parameters<ExtensionAPI["registerTool"]>[0]);
 };
 
 /**

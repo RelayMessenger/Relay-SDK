@@ -39,11 +39,21 @@ logged. `RELAY_SENDERS` (comma-separated) overrides `senders`; with neither,
 any one-to-one sender is taken. Group chats are skipped.
 
 The session starts only on a Pi in RPC mode (the session an app drives),
-never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes one user message
+never a terminal Pi, a print run or a pi-subagents helper. An idle Message starts a user prompt
 (`pi.sendUserMessage`): photos as image content, voice notes as their
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
-files named. Messages wait their turn, and the session's last words go back
-to the chat the Message came from once Pi reports `agent_settled`. A run that
+files named, then a line `[Relay chat: <chat id>, from @<handle>]`, since
+one session hears every chat. A Message from any chat that arrives while a
+run is going steers that run through `pi.sendMessage` (`deliverAs: "steer"`,
+delivered after the current tool call). Pi queues that extension message
+synchronously, with the Relay event, Message and chat IDs in its details;
+the model receives user-role content. Busy Messages use the already-normalized
+Relay content, not Pi's asynchronous input hooks. Compaction-only arrivals
+wait for Pi to become idle. The run's words go back to the chat whose Message
+started it once Pi reports `agent_settled`, as OpenClaw answers on the route a
+run came from. A steered Message from another chat is answered by `message`
+with its `chat_id`; if the run settles without texting that chat, the Message
+runs again as a turn of its own, so its answer reaches its own chat. A run that
 ends with no words stays silent and sends nothing; a run that fails with no
 words sends `Sorry, something went wrong on my side.`
 
@@ -135,7 +145,11 @@ Message. A run that texts with `message` sends no final text, so nothing is
 sent twice. `relay_request_location` asks the person to share their location
 and `relay_read_location` reads where everyone sharing is now.
 `relay_send_media` and `relay_react` stay registered for one release as
-aliases of `message` file and react.
+aliases of `message` file and react. Every one of these tools takes an
+optional `chat_id` to act on another chat; without it they act on the chat
+being answered, and `react` and `[[reply_to_current]]` name that chat's newest
+Message. A `message` send to another chat does not stop the run's own chat
+getting its final words.
 `runPiChannel` starts each chat's Pi with `RELAY_PI_CHAT_ID`,
 `RELAY_AGENT_TOKEN` and `RELAY_BASE_URL` set, so that Pi gets the tools; in
 session mode they act on the chat whose Message is being answered.
@@ -151,6 +165,19 @@ indicator shows in the chat from the start of a turn until its answer is sent.
 End the final Pi answer with a `selection` JSON fence holding the question as
 `title` (1 to 60 characters) and the `options`; any words outside the fence go
 as a normal message above the card.
+Without session mode, a Message that arrives while its chat's turn runs is
+sent as Pi's RPC `steer` into that turn, and the turn's answer is the reply.
+A steer Pi still holds once the run settles is taken back with `clear_queue`
+and runs as a turn of its own.
+
+Channel mode commits incoming events to a private, account-scoped SQLite inbox
+before acknowledging them. The default directory is
+`${PI_CODING_AGENT_DIR || ~/.pi/agent}/relay/channel-inbox`; `inboxDirectory`
+overrides it in `PiChannelOptions`. Only one channel process can own an inbox.
+On restart, prepared replies use the same message idempotency keys, while
+unfinished turns run again. This does not make arbitrary Pi tool effects
+exactly-once.
+
 The RPC prompt preserves ordered rich parts, `selected_values`, and `reply_to`
 as data. FULL sync still fails closed rather than discarding skipped context.
 A pin (`place`) or a shared location card (`location`) reaches Pi as one line of

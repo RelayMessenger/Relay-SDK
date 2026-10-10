@@ -1,16 +1,27 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import type { MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, replyTag, sendAnswer, type PiProcess } from "../src/index.js";
 import { SessionChannel } from "../src/session.js";
 import { relayReaction, relayTools } from "../src/tools.js";
 
+let channelState: string;
+beforeEach(async () => {
+  channelState = await mkdtemp(join(tmpdir(), "relay-pi-fixture-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", channelState);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(channelState, { recursive: true, force: true });
+});
+
 const fakeRelay = () => {
   const order: string[] = [];
   const relay = {
+    baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) },
     chats: {
       messages: { send: vi.fn(async () => { order.push("send"); return {}; }) },
       startTyping: vi.fn(async () => { order.push("start"); }),
@@ -23,7 +34,7 @@ const fakeRelay = () => {
 };
 
 const inbound = (id: string, kind: "user" | "agent" = "user") => ({
-  event_type: "message.received", event_id: `e-${id}`,
+  event_type: "message.received", agent_id: "agent", event_id: `e-${id}`,
   data: { direction: "inbound", id, chat: { id: "chat-1", is_group: false }, sender_handle: { handle: "alice", kind }, parts: [{ type: "text", value: "hi", reactions: null }] },
 }) as unknown as RelayWebhookEvent & { data: MessageWebhookData };
 
@@ -89,7 +100,7 @@ describe("replies to a specific Message", () => {
   it("gives the model the id of the Message it answers", async () => {
     const { relay } = fakeRelay();
     const sendUserMessage = vi.fn();
-    const channel = new SessionChannel({ sendUserMessage }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => true });
+    const channel = new SessionChannel({ sendUserMessage, sendMessage: vi.fn() }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => true });
     await channel.receive(inbound("msg-42"));
     expect(sendUserMessage.mock.calls[0]![0][0].text).toContain("[Relay message id: msg-42]");
     expect(channel.messageId).toBe("msg-42");
@@ -99,7 +110,7 @@ describe("replies to a specific Message", () => {
 describe("typing indicator", () => {
   it("types while a session turn runs and stops after the answer is sent", async () => {
     const { relay, order } = fakeRelay();
-    const channel = new SessionChannel({ sendUserMessage: vi.fn() }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => true });
+    const channel = new SessionChannel({ sendUserMessage: vi.fn(), sendMessage: vi.fn() }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => true });
     await channel.receive(inbound("msg-1"));
     expect(relay.chats.startTyping).toHaveBeenCalledWith("chat-1");
     expect(relay.chats.stopTyping).not.toHaveBeenCalled();
@@ -111,10 +122,13 @@ describe("typing indicator", () => {
   it("types for a Message that steers a busy run, gives it the Message id, and stops after the steered answer", async () => {
     const { relay, order } = fakeRelay();
     const sendUserMessage = vi.fn();
-    const channel = new SessionChannel({ sendUserMessage }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => false });
+    const sendMessage = vi.fn();
+    const channel = new SessionChannel({ sendUserMessage, sendMessage }, { agentToken: "t", relay: relay as unknown as Relay, isIdle: () => false });
+    channel.started();
     await channel.receive(inbound("msg-5"));
-    expect(sendUserMessage).toHaveBeenCalledWith(expect.any(Array), { deliverAs: "steer" });
-    expect(sendUserMessage.mock.calls[0]![0][0].text).toContain("[Relay message id: msg-5]");
+    expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: expect.any(Array) }), { deliverAs: "steer" });
+    expect(sendMessage.mock.calls[0]![0].content[0].text).toContain("[Relay message id: msg-5]");
+    expect(sendUserMessage).not.toHaveBeenCalled();
     expect(channel.messageId).toBe("msg-5");
     channel.ended([{ role: "user", content: "typed" }, { role: "assistant", content: [{ type: "text", text: "[[reply_to_current]] steered" }], stopReason: "stop" }]);
     await channel.settled();
