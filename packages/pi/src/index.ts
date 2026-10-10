@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { ChannelInbox, inboxDirectory } from "./inbox.js";
 import Relay, {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
@@ -66,6 +67,8 @@ export interface PiChannelOptions {
   readonly rpcTimeoutMs?: number;
   readonly spawnPi?: (command: string, args: readonly string[], chatId: string) => PiProcess;
   readonly relay?: Relay;
+  /** Durable channel state; defaults to Relay's inbox under PI_CODING_AGENT_DIR. */
+  readonly inboxDirectory?: string;
   /**
    * Answers the person's own extensions' dialogs. Without it, a dialog is
    * dismissed at once (`cancelled: true`), so the extension gets its own
@@ -243,6 +246,12 @@ class ChatSession {
   private dialogs = 0;
   readonly #approvals: PiApprovals | undefined;
   readonly #stop = new AbortController();
+  readonly #responses = new Set<{
+    matches(record: RpcRecord): boolean;
+    resolve(record: RpcRecord): void;
+    reject(error: unknown): void;
+  }>();
+  #reading = false;
   constructor(process: PiProcess, readonly chatId: string, approvals?: PiApprovals) {
     this.process = process;
     this.lines = process.stdout[Symbol.asyncIterator]();
@@ -262,6 +271,7 @@ class ChatSession {
       .finally(() => { this.dialogs -= 1; });
   }
   async read(timeoutMs: number, signal?: AbortSignal): Promise<RpcRecord> {
+    signal = signal ? AbortSignal.any([signal, this.#stop.signal]) : this.#stop.signal;
     if (signal?.aborted) throw new Error("Pi RPC request aborted");
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
@@ -280,6 +290,9 @@ class ChatSession {
       ]);
       if (result.done) throw new Error("Pi RPC process exited");
       const record = JSON.parse(result.value) as RpcRecord;
+      if (record.type === "response" && record.success === false) {
+        throw new Error(record.error ?? "Pi RPC command failed");
+      }
       if (record.type === "agent_settled") this.settled = true;
       if (record.type === "tool_execution_end" && record.toolName === "message" && !record.isError && record.result?.details?.sent === true) {
         const chat = record.result.details.chat_id;
@@ -293,23 +306,35 @@ class ChatSession {
     }
   }
   async command(type: string, data: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<RpcRecord> {
+    if (signal?.aborted || this.#stop.signal.aborted) throw new Error("Pi RPC request aborted");
     const id = String(++this.nextId);
     this.process.stdin.write(`${JSON.stringify({ id, type, ...data })}\n`);
-    for (;;) {
-      const record = await this.read(timeoutMs, signal);
-      if (record.type === "response" && record.id === id) {
-        if (record.success === false) throw new Error(record.error ?? `Pi RPC ${type} failed`);
-        return record;
-      }
-    }
+    return this.#wait((record) => record.type === "response" && record.id === id, timeoutMs, signal);
   }
-  /**
-   * Writes one command without waiting for its response: the running turn's
-   * reads pass over it. For a steer, whose delivery is checked once the turn
-   * has settled.
-   */
-  send(type: string, data: Record<string, unknown>): void {
-    this.process.stdin.write(`${JSON.stringify({ id: String(++this.nextId), type, ...data })}\n`);
+  async waitSettled(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    if (!this.settled) await this.#wait((record) => record.type === "agent_settled", timeoutMs, signal);
+  }
+  #wait(matches: (record: RpcRecord) => boolean, timeoutMs: number, signal?: AbortSignal): Promise<RpcRecord> {
+    const result = new Promise<RpcRecord>((resolve, reject) => { this.#responses.add({ matches, resolve, reject }); });
+    if (!this.#reading) {
+      this.#reading = true;
+      void (async () => {
+        try {
+          while (this.#responses.size) {
+            const record = await this.read(timeoutMs, signal);
+            for (const response of this.#responses) {
+              if (response.matches(record)) { this.#responses.delete(response); response.resolve(record); }
+            }
+          }
+        } catch (error) {
+          for (const response of this.#responses) response.reject(error);
+          this.#responses.clear();
+        } finally {
+          this.#reading = false;
+        }
+      })();
+    }
+    return result;
   }
   stop(): void { this.#stop.abort(); this.process.stdin.end(); this.process.kill(); }
 }
@@ -325,7 +350,11 @@ export class PiChannel {
   readonly #inflight = new Map<string, Promise<void>>();
   /** Per chat, the Messages queued behind the running turn that have not started. */
   readonly #waiting = new Map<string, number>();
-  #abortListener?: () => void;
+  readonly #tasks = new Set<Promise<void>>();
+  #admission: Promise<void> = Promise.resolve();
+  #inbox: ChannelInbox | undefined;
+  #controller: AbortController | undefined;
+  #fail: ((error: unknown) => void) | undefined;
   constructor(options: PiChannelOptions) {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
     this.#options = options;
@@ -333,18 +362,71 @@ export class PiChannel {
     this.#spawnPi = options.spawnPi ?? ((command, args, chatId) => new ChildPiProcess(command, args, piEnv(options, chatId)));
   }
   async run(signal?: AbortSignal): Promise<void> {
-    this.#abortListener = () => this.stop();
-    signal?.addEventListener("abort", this.#abortListener, { once: true });
+    if (this.#controller) throw new Error("Pi channel is already running");
+    const controller = new AbortController();
+    this.#controller = controller;
+    const stopped = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const failure = new Promise<never>((_resolve, reject) => { this.#fail = reject; });
+    let socket: Promise<void> | undefined;
     try {
-      await this.#relay.websocket.run({ ...(signal ? { signal } : {}), onEvent: async (event) => { if (await this.#options.approvals?.take(event)) return; await this.#handle(event, signal); }, onFullSync: async () => { throw new Error("Pi channel cannot acknowledge FULL sync without a durable Relay inbox"); } });
+      const agent = await this.#relay.me.retrieve({ signal: stopped });
+      this.#inbox = new ChannelInbox(
+        this.#options.inboxDirectory ?? inboxDirectory(),
+        new URL(this.#relay.baseURL).origin,
+        agent.id,
+      );
+      for (const event of this.#inbox.pending()) this.#dispatch(event, stopped);
+      socket = this.#relay.websocket.run({
+        signal: stopped,
+        onEvent: async (event) => {
+          if (stopped.aborted) throw new Error("Pi channel stopped");
+          if (event.agent_id !== agent.id) throw new Error("Relay event belongs to a different agent");
+          if (this.#inbox!.accept(event)) this.#dispatch(event, stopped);
+        },
+        onFullSync: async () => { throw new Error("Pi channel cannot acknowledge FULL sync without a durable Relay inbox snapshot"); },
+      });
+      await Promise.race([socket, failure]);
+      await Promise.race([Promise.all(this.#tasks), failure]);
     } finally {
       this.stop();
-      if (signal) signal.removeEventListener("abort", this.#abortListener!);
+      await Promise.allSettled([...(socket ? [socket] : []), ...this.#tasks]);
+      this.#inbox?.close();
+      this.#inbox = undefined;
+      this.#controller = undefined;
+      this.#fail = undefined;
     }
   }
-  stop(): void { for (const session of this.#sessions.values()) session.stop(); this.#sessions.clear(); }
+  stop(): void {
+    this.#controller?.abort();
+    for (const session of this.#sessions.values()) session.stop();
+    this.#sessions.clear();
+  }
+  #dispatch(event: RelayWebhookEvent, signal: AbortSignal): void {
+    let turn: Promise<void> | undefined;
+    // Approval lookups may be asynchronous; preserve ingress order while
+    // letting admitted turns continue independently of the transport handler.
+    const admission = this.#admission.then(async () => {
+      if (signal.aborted) throw new Error("Pi RPC request aborted");
+      const taken = (
+        this.#inbox!.answer(event.event_id) === undefined && await this.#options.approvals?.take(event)
+      );
+      if (signal.aborted) throw new Error("Pi RPC request aborted");
+      if (taken || !textFromEvent(event)) {
+        this.#inbox!.complete(event.event_id);
+        return;
+      }
+      turn = this.#handle(event, signal);
+    });
+    this.#admission = admission.catch(() => undefined);
+    const task = admission.then(() => turn);
+    this.#tasks.add(task);
+    void task.then(
+      () => { this.#tasks.delete(task); },
+      (error: unknown) => { this.#fail?.(error); this.stop(); this.#tasks.delete(task); },
+    );
+  }
   async #handle(event: RelayWebhookEvent, signal?: AbortSignal): Promise<void> {
-    // Concurrent redelivery must await the original handoff, not ACK early.
+    // A repeated local handoff shares the work already running.
     const inflight = this.#inflight.get(event.event_id);
     if (inflight) return inflight;
     if (this.#seen.has(event.event_id)) return;
@@ -360,7 +442,11 @@ export class PiChannel {
     if (session?.running && !this.#waiting.get(chatId)) {
       const line = repliedContext(this.#relay, data);
       session.steered.push({ event, message });
-      session.steering = session.steering.then(async () => { session.send("steer", { message: inboundText(message, await line, data) }); });
+      session.steering = session.steering.then(async () => {
+        await session.command("steer", { message: inboundText(message, await line, data) }, this.#options.rpcTimeoutMs ?? 60_000, signal);
+      });
+      // A rejected steer is a failed turn, not an accepted-but-lost Message.
+      void session.steering.catch((error: unknown) => { this.#fail?.(error); this.stop(); });
       const running = this.#last.get(chatId) ?? Promise.resolve();
       this.#inflight.set(event.event_id, running);
       try { await running; } catch (error) { this.#seen.delete(event.event_id); throw error; } finally { this.#inflight.delete(event.event_id); }
@@ -378,7 +464,14 @@ export class PiChannel {
     try { await turn; } catch (error) { this.#seen.delete(event.event_id); throw error; } finally { this.#inflight.delete(event.event_id); }
   }
   async #runTurn(event: RelayWebhookEvent, message: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error("Pi RPC request aborted");
     const data = event.data as MessageWebhookData;
+    const saved = this.#inbox!.answer(event.event_id);
+    if (saved !== undefined) {
+      if (saved) await sendAnswer(this.#relay, data, `pi-${event.event_id}`, saved);
+      this.#inbox!.complete(event.event_id);
+      return;
+    }
     let session = this.#sessions.get(data.chat.id);
     if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", "--append-system-prompt", relayHint(), ...(this.#options.piArgs ?? [])], data.chat.id), data.chat.id, this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
@@ -391,7 +484,7 @@ export class PiChannel {
     let missed: { event: RelayWebhookEvent; message: string }[] = [];
     try {
       await session.command("prompt", { message: inboundText(message, replyLine, data) }, timeout, signal);
-      if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
+      await session.waitSettled(timeout, signal);
       session.running = false;
       await session.steering;
       // A steer that reached Pi after its run settled is still in Pi's queue:
@@ -400,13 +493,19 @@ export class PiChannel {
         const queue = await session.command("clear_queue", {}, timeout, signal);
         const left = Array.isArray(queue.data?.steering) ? queue.data.steering.length : 0;
         missed = left ? session.steered.slice(-left) : [];
-        session.steered = [];
       }
       const response = await session.command("get_last_assistant_text", {}, timeout, signal);
       const answer = response.data?.text?.trim();
       // No words is Pi's choice to stay silent, and a Pi that texted with
       // `message` has said it (OpenClaw didSendViaMessagingTool): nothing is sent.
-      if (answer && !session.texted) await sendAnswer(this.#relay, data, `pi-${event.event_id}`, answer);
+      const outgoing = answer && !session.texted ? answer : "";
+      const missedIds = new Set(missed.map(({ event }) => event.event_id));
+      this.#inbox!.prepareReply(event.event_id, outgoing, [
+        event.event_id,
+        ...session.steered.filter(({ event }) => !missedIds.has(event.event_id)).map(({ event }) => event.event_id),
+      ]);
+      if (outgoing) await sendAnswer(this.#relay, data, `pi-${event.event_id}`, outgoing);
+      this.#inbox!.complete(event.event_id);
     } finally {
       session.running = false;
       session.steered = [];

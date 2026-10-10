@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { answerMessages, PiChannel, relayHint, type PiApprovals, type PiDialog, type PiProcess } from "../src/index.js";
@@ -6,6 +6,17 @@ import native from "../src/native.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+let stateDirectory: string;
+beforeEach(async () => {
+  stateDirectory = await mkdtemp(join(tmpdir(), "relay-pi-channel-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", stateDirectory);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(stateDirectory, { recursive: true, force: true });
+});
+const me = { retrieve: async () => ({ id: "agent" }) };
 
 const makeEvent = (id: string, chat: string, kind: "user" | "agent" = "agent"): RelayWebhookEvent => ({
   event_type: "message.received", event_id: id, api_version: "v1", webhook_version: "2026-08-30", trace_id: "trace", agent_id: "agent",
@@ -21,7 +32,7 @@ function blockedPi(): PiProcess {
   }
   return { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines(), kill: vi.fn() };
 }
-function relayFor(events: RelayWebhookEvent[], send = vi.fn().mockResolvedValue({})): { relay: Relay; send: typeof send } { return { relay: { chats: { messages: { send } }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await Promise.all(events.map(options.onEvent)); } } } as unknown as Relay, send }; }
+function relayFor(events: RelayWebhookEvent[], send = vi.fn().mockResolvedValue({})): { relay: Relay; send: typeof send } { return { relay: { baseURL: "https://relay.test", me, chats: { messages: { send } }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await Promise.all(events.map(options.onEvent)); } } } as unknown as Relay, send }; }
 
 describe("Pi channel", () => {
   it("isolates live sessions per chat and handles settled before prompt response", async () => {
@@ -103,7 +114,7 @@ describe("the Relay hint", () => {
   });
 });
 
-describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "before_agent_start", "agent_end", "agent_settled", "session_shutdown", "resources_discover"]); }); });
+describe("native extension", () => { it("loads and registers only the documented commands, and the session hooks", () => { const names: string[] = []; const events: string[] = []; native({ registerCommand: (name: string) => names.push(name), on: (event: string) => events.push(event) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); expect(events).toEqual(["session_start", "agent_start", "before_agent_start", "agent_end", "agent_settled", "session_shutdown", "resources_discover"]); }); });
 
 describe("buttons", () => {
   it("tells pi how to send buttons and when", () => {
@@ -211,7 +222,7 @@ it("preserves another agent's component-only parts as data rather than dropping 
   expect(send.mock.calls).toEqual([["chat", { message: { parts: [{ type: "text", value: "Acknowledged" }], idempotency_key: "pi-rich-0" } }]]);
 });
 
-it("does not let a concurrent replay ACK before the original selection send finishes", async () => {
+it("ACKs a durable replay while the original selection send remains owned and pending", async () => {
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   let started!: () => void;
@@ -219,14 +230,15 @@ it("does not let a concurrent replay ACK before the original selection send fini
   const send = vi.fn(async () => { started(); await pending; return {}; });
   const event = makeEvent("replay-selection", "chat");
   let replayDone = false;
-  const relay = { chats: { messages: { send } }, websocket: { run: async (options: {
+  const relay = { baseURL: "https://relay.test", me, chats: { messages: { send } }, websocket: { run: async (options: {
     onEvent(event: RelayWebhookEvent): Promise<void>;
   }) => {
     const original = options.onEvent(event);
     await sending;
     const replay = options.onEvent(event).then(() => { replayDone = true; });
-    await Promise.resolve();
-    expect(replayDone).toBe(false);
+    await replay;
+    expect(replayDone).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
     release();
     await Promise.all([original, replay]);
   } } } as unknown as Relay;
@@ -240,7 +252,7 @@ it("does not let a concurrent replay ACK before the original selection send fini
 
 it("refuses FULL sync rather than acknowledging discarded selection context", async () => {
   let completed = false;
-  const relay = { websocket: { run: async (options: { onFullSync(): Promise<void> }) => {
+  const relay = { baseURL: "https://relay.test", me, websocket: { run: async (options: { onFullSync(): Promise<void> }) => {
     await options.onFullSync(); completed = true;
   } } } as unknown as Relay;
   await expect(new PiChannel({ agentToken: "test", relay }).run()).rejects.toThrow("cannot acknowledge FULL sync");
@@ -362,7 +374,7 @@ function liveRelay() {
   const send = vi.fn().mockResolvedValue({});
   let onEvent: ((event: RelayWebhookEvent) => Promise<void>) | undefined;
   let close: () => void = () => {};
-  const relay = { chats: { messages: { send }, startTyping: vi.fn(), stopTyping: vi.fn() }, websocket: { run: async (options: { onEvent: typeof onEvent }) => { onEvent = options.onEvent; await new Promise<void>((resolve) => { close = resolve; }); } } } as unknown as Relay;
+  const relay = { baseURL: "https://relay.test", me, chats: { messages: { send }, startTyping: vi.fn(), stopTyping: vi.fn() }, websocket: { run: async (options: { onEvent: typeof onEvent }) => { onEvent = options.onEvent; await new Promise<void>((resolve) => { close = resolve; }); } } } as unknown as Relay;
   return { relay, send, deliver: (event: RelayWebhookEvent) => onEvent!(event), close: () => close(), ready: () => vi.waitFor(() => { if (!onEvent) throw new Error("not running"); }) };
 }
 
@@ -380,11 +392,13 @@ describe("Pi channel steering", () => {
     expect(pi.commands[1]?.message).toBe("hello\n\n[Relay message id: message-b]");
     pi.push(SETTLED);
     await Promise.all([first, second]);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(pi.commands.map((command) => command.type)).toEqual(["prompt", "steer", "clear_queue", "get_last_assistant_text"]);
     // The running turn's answer is the one reply.
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.idempotency_key])).toEqual([["one", "pi-a-0"]]);
     // Idle again: the next Message starts its own prompt turn.
     await deliver(makeEvent("c", "one", "user"));
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     expect(pi.commands.filter((command) => command.type === "prompt").map((command) => command.message)).toEqual(["hello\n\n[Relay message id: message-a]", "hello\n\n[Relay message id: message-c]"]);
     expect(pi.commands.filter((command) => command.type === "steer")).toHaveLength(1);
     close(); await running;
@@ -401,6 +415,7 @@ describe("Pi channel steering", () => {
     await vi.waitFor(() => expect(pi.commands).toHaveLength(2));
     pi.push(SETTLED);
     await Promise.all([first, second]);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
     expect(pi.commands.map((command) => command.type)).toEqual(["prompt", "steer", "clear_queue", "get_last_assistant_text", "prompt", "get_last_assistant_text"]);
     expect(pi.commands[4]?.message).toBe("hello\n\n[Relay message id: message-b]");
     expect(send.mock.calls.map(([, body]) => [body.message.parts[0].value, body.message.idempotency_key])).toEqual([["answer 1", "pi-a-0"], ["answer 2", "pi-b-0"]]);
