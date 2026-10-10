@@ -39,13 +39,17 @@ logged. `RELAY_SENDERS` (comma-separated) overrides `senders`; with neither,
 any one-to-one sender is taken. Group chats are skipped.
 
 The session starts only on a Pi in RPC mode (the session an app drives),
-never a terminal Pi, a print run or a pi-subagents helper. Each Message becomes one user message
+never a terminal Pi, a print run or a pi-subagents helper. An idle Message starts a user prompt
 (`pi.sendUserMessage`): photos as image content, voice notes as their
 transcript when `transcribeCpp` is set (ffmpeg decodes them first), other
 files named, then a line `[Relay chat: <chat id>, from @<handle>]`, since
 one session hears every chat. A Message from any chat that arrives while a
-run is going steers that run (`deliverAs: "steer"`, delivered after the
-current tool call). The run's words go back to the chat whose Message
+run is going steers that run through `pi.sendMessage` (`deliverAs: "steer"`,
+delivered after the current tool call). Pi queues that extension message
+synchronously, with the Relay event, Message and chat IDs in its details;
+the model receives user-role content. Busy Messages use the already-normalized
+Relay content, not Pi's asynchronous input hooks. Compaction-only arrivals
+wait for Pi to become idle. The run's words go back to the chat whose Message
 started it once Pi reports `agent_settled`, as OpenClaw answers on the route a
 run came from. A steered Message from another chat is answered by `message`
 with its `chat_id`; if the run settles without texting that chat, the Message

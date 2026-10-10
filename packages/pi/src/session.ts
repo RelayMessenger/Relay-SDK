@@ -16,6 +16,12 @@ export type SessionContent = (TextBlock | ImageBlock)[];
 /** What the session is given in place of the Pi it would otherwise start. */
 export interface SessionPi {
   sendUserMessage(content: SessionContent, options?: { deliverAs: "followUp" | "steer" }): void;
+  sendMessage(message: {
+    customType: string;
+    content: SessionContent;
+    display: boolean;
+    details: { event_id: string; message_id: string; chat_id: string };
+  }, options: { deliverAs: "steer" }): void;
 }
 
 export interface SessionChannelOptions {
@@ -93,8 +99,6 @@ export const chatLine = (data: Pick<MessageWebhookData, "chat" | "sender_handle"
 type RunMessage = { role?: string; content?: unknown; stopReason?: string; toolName?: string; details?: unknown; isError?: boolean; customType?: string };
 const blocksOf = (message: RunMessage): { type?: string; text?: string; name?: string; arguments?: { action?: unknown } }[] =>
   Array.isArray(message.content) ? message.content as never : [];
-/** The words of a user message as Pi records them: its text blocks joined, as sendUserMessage joins them. */
-const contentText = (content: SessionContent): string => content.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n");
 const textOf = (message: RunMessage): string =>
   typeof message.content === "string" ? message.content : blocksOf(message).flatMap((block) => block?.type === "text" && block.text ? [block.text] : []).join("");
 
@@ -209,7 +213,7 @@ export const accepts = (event: RelayWebhookEvent, senders: readonly string[] = [
   return senders.some((sender) => handle(sender) === handle(data.sender_handle!.handle));
 };
 
-interface Turn { readonly data: MessageWebhookData; readonly key: string; readonly content: SessionContent }
+interface Turn { readonly data: MessageWebhookData; readonly eventId: string; readonly key: string; readonly content: SessionContent }
 
 /**
  * Relay inside the Pi session that loads it, the way pi-telegram holds a chat
@@ -229,6 +233,8 @@ export class SessionChannel {
   readonly #seen = new Set<string>();
   readonly #inflight = new Map<string, Promise<void>>();
   #pending: Turn | undefined;
+  #running = false;
+  #idleWake: ReturnType<typeof setTimeout> | undefined;
   // Messages from any chat steered into the pending turn's run.
   readonly #steered: Turn[] = [];
   #ended: readonly unknown[] = [];
@@ -273,7 +279,7 @@ export class SessionChannel {
       this.#seen.add(event.event_id);
       this.#remember(event.data);
       if (!content) return;
-      this.#queue.push({ data: event.data, key: `pi-${event.event_id}`, content });
+      this.#queue.push({ data: event.data, eventId: event.event_id, key: `pi-${event.event_id}`, content });
       this.next();
     })();
     this.#inflight.set(event.event_id, handoff);
@@ -294,6 +300,11 @@ export class SessionChannel {
   /** The newest Message of a chat the session has heard from. */
   latestIn(chatId: string): string | undefined {
     return this.#latest.get(chatId);
+  }
+  /** Pi's agent_start, distinct from being busy with compaction or a tree summary. */
+  started(): void {
+    this.#running = true;
+    this.next();
   }
   /** Pi's `agent_end`: the messages of the run that just ended. */
   ended(messages: readonly unknown[]): void {
@@ -317,14 +328,11 @@ export class SessionChannel {
    */
   async settled(): Promise<void> {
     const turn = this.#pending;
-    // A steer Pi took after its run went idle started a run of its own
-    // (Pi's prompt with streamingBehavior does that), so that Message is now
-    // the pending one and the steers after it went into its run.
-    const delivered = new Set((this.#ended as RunMessage[]).flatMap((message) => message?.role === "user" ? [textOf(message)] : []));
+    this.#running = false;
+    this.#pending = undefined;
+    // Custom steers enter Pi's queue synchronously; they cannot become a
+    // delayed prompt while an input hook runs. No whole-text matching is needed.
     const steers = this.#steered.splice(0);
-    const [restarted, ...rest] = steers.filter((steer) => !delivered.has(contentText(steer.content)));
-    this.#pending = restarted;
-    this.#steered.push(...rest);
     const unprompted = !turn && this.#origin && this.#origin !== "user";
     const started = unprompted ? this.#startedBy(this.#ended[0]) : undefined;
     const target = turn?.data.chat.id ?? started?.data.chat.id ?? (unprompted ? this.#last?.chat.id : undefined);
@@ -332,7 +340,7 @@ export class SessionChannel {
     const answered = (chat: string | undefined): boolean => texted.has(chat ?? CURRENT_CHAT) || (chat === target && texted.has(CURRENT_CHAT));
     const answers = answered(target) ? [] : runAnswers(this.#ended).flatMap(taggedBubbles);
     // Steers from another chat that this run took in and never texted: each runs again, in order, ahead of the queue.
-    const unanswered = steers.filter((steer) => delivered.has(contentText(steer.content)) && steer.data.chat.id !== target && !answered(steer.data.chat.id));
+    const unanswered = steers.filter((steer) => steer.data.chat.id !== target && !answered(steer.data.chat.id));
     this.#queue.unshift(...unanswered);
     this.#ended = [];
     this.#origin = undefined;
@@ -348,7 +356,6 @@ export class SessionChannel {
     } finally {
       if (turn) await typing(this.#relay, turn.data.chat.id, false);
       for (const chat of new Set(steers.map((steer) => steer.data.chat.id))) if (chat !== turn?.data.chat.id) await typing(this.#relay, chat, false);
-      if (restarted) void typing(this.#relay, restarted.data.chat.id, true);
       this.next();
     }
   }
@@ -374,19 +381,33 @@ export class SessionChannel {
    * tool call): it names its chat, and `settled` sees that it is answered.
    */
   next(): void {
-    while (this.#pending && this.#queue.length && !this.#options.isIdle()) {
+    if (this.#idleWake) clearTimeout(this.#idleWake);
+    this.#idleWake = undefined;
+    if (!this.#queue.length) return;
+    const idle = this.#options.isIdle();
+    // Pi clears its active flag before awaiting all settled handlers. Until
+    // our handler runs, a new Message must wait rather than merely append.
+    if (this.#running && idle) return;
+    if (!this.#running && !idle) {
+      // ExtensionContext has no waitForIdle, and cancelled tree navigation
+      // has no completion event. Wait on runtime state, not event timing.
+      this.#idleWake = setTimeout(() => this.next(), 25);
+      this.#idleWake.unref();
+      return;
+    }
+    while (this.#pending && this.#queue.length && this.#running) {
       const turn = this.#queue.shift()!;
       this.#steered.push(turn);
       if (turn.data.chat.id !== this.#pending.data.chat.id) void typing(this.#relay, turn.data.chat.id, true);
-      this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
+      this.#steer(turn);
     }
     if (this.#pending || !this.#queue.length) return;
     const turn = this.#queue.shift()!;
     this.#pending = turn;
     // The person sees Pi typing while it works, steered or not; settled() stops it once the answer is sent.
     void typing(this.#relay, turn.data.chat.id, true);
-    if (!this.#options.isIdle()) {
-      this.#pi.sendUserMessage(turn.content, { deliverAs: "steer" });
+    if (this.#running) {
+      this.#steer(turn);
       return;
     }
     this.#ended = [];
@@ -398,13 +419,24 @@ export class SessionChannel {
     }
   }
   stop(): void {
+    if (this.#idleWake) clearTimeout(this.#idleWake);
+    this.#idleWake = undefined;
     this.#queue.length = 0;
     this.#pending = undefined;
+    this.#running = false;
     this.#steered.length = 0;
     this.#ended = [];
     this.#origin = undefined;
     this.#texted = new Set();
     this.#background.length = 0;
+  }
+  #steer(turn: Turn): void {
+    this.#pi.sendMessage({
+      customType: "relay-inbound",
+      content: turn.content,
+      display: true,
+      details: { event_id: turn.eventId, message_id: turn.data.id, chat_id: turn.data.chat.id },
+    }, { deliverAs: "steer" });
   }
   /** Keeps the chat of an accepted Message, across restarts, for unprompted answers. */
   #remember(data: MessageWebhookData): void {

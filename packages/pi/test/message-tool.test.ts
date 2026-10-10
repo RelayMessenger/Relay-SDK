@@ -20,7 +20,7 @@ const inbound = (id: string, chat = "chat-1") => ({
 const assistant = (...blocks: unknown[]): unknown => ({ role: "assistant", content: blocks });
 const words = (text: string) => ({ type: "text", text });
 const call = (name: string, args: Record<string, unknown>) => ({ type: "toolCall", id: "c1", name, arguments: args });
-const session = (relay: ReturnType<typeof fakeRelay>) => new SessionChannel({ sendUserMessage: vi.fn() }, { agentToken: "secret", relay: relay as unknown as Relay, isIdle: () => true });
+const session = (relay: ReturnType<typeof fakeRelay>) => new SessionChannel({ sendUserMessage: vi.fn(), sendMessage: vi.fn() }, { agentToken: "secret", relay: relay as unknown as Relay, isIdle: () => true });
 const sentTexts = (relay: ReturnType<typeof fakeRelay>) =>
   relay.chats.messages.send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0]?.value, body.message.reply_to?.message_id]);
 

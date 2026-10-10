@@ -111,6 +111,7 @@ const attachSession = (pi: ExtensionAPI): void => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
     });
   });
+  pi.on("agent_start", async () => { channel?.started(); });
   pi.on("before_agent_start", async (event) => { if (channel) addRelayHint(event.systemPromptOptions); });
   pi.on("agent_end", async (event) => { channel?.ended(event.messages); });
   pi.on("agent_settled", async () => { await channel?.settled(); });

@@ -95,7 +95,7 @@ describe("answers", () => {
   it("sends nothing when a session run ends with no words, and knows the chat it answers", async () => {
     const send = vi.fn().mockResolvedValue({});
     const relay = { chats: { messages: { send } }, messages: { retrieve: vi.fn() } } as unknown as Relay;
-    const channel = new SessionChannel({ sendUserMessage: vi.fn() }, { agentToken: "secret", relay, isIdle: () => true });
+    const channel = new SessionChannel({ sendUserMessage: vi.fn(), sendMessage: vi.fn() }, { agentToken: "secret", relay, isIdle: () => true });
     await channel.receive({ event_type: "message.received", event_id: "e", data: { direction: "inbound", id: "m", chat: { id: "one", is_group: false }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "ok", reactions: null }] } } as unknown as RelayWebhookEvent);
     expect(channel.chatId).toBe("one");
     channel.ended([{ role: "assistant", content: [], stopReason: "stop" }]);
