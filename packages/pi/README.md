@@ -170,6 +170,14 @@ sent as Pi's RPC `steer` into that turn, and the turn's answer is the reply.
 A steer Pi still holds once the run settles is taken back with `clear_queue`
 and runs as a turn of its own.
 
+Channel mode commits incoming events to a private, account-scoped SQLite inbox
+before acknowledging them. The default directory is
+`${PI_CODING_AGENT_DIR || ~/.pi/agent}/relay/channel-inbox`; `inboxDirectory`
+overrides it in `PiChannelOptions`. Only one channel process can own an inbox.
+On restart, prepared replies use the same message idempotency keys, while
+unfinished turns run again. This does not make arbitrary Pi tool effects
+exactly-once.
+
 The RPC prompt preserves ordered rich parts, `selected_values`, and `reply_to`
 as data. FULL sync still fails closed rather than discarding skipped context.
 A pin (`place`) or a shared location card (`location`) reaches Pi as one line of

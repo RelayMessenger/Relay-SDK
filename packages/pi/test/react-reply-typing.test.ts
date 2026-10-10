@@ -1,16 +1,27 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import type { MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, replyTag, sendAnswer, type PiProcess } from "../src/index.js";
 import { SessionChannel } from "../src/session.js";
 import { relayReaction, relayTools } from "../src/tools.js";
 
+let channelState: string;
+beforeEach(async () => {
+  channelState = await mkdtemp(join(tmpdir(), "relay-pi-fixture-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", channelState);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(channelState, { recursive: true, force: true });
+});
+
 const fakeRelay = () => {
   const order: string[] = [];
   const relay = {
+    baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) },
     chats: {
       messages: { send: vi.fn(async () => { order.push("send"); return {}; }) },
       startTyping: vi.fn(async () => { order.push("start"); }),
@@ -23,7 +34,7 @@ const fakeRelay = () => {
 };
 
 const inbound = (id: string, kind: "user" | "agent" = "user") => ({
-  event_type: "message.received", event_id: `e-${id}`,
+  event_type: "message.received", agent_id: "agent", event_id: `e-${id}`,
   data: { direction: "inbound", id, chat: { id: "chat-1", is_group: false }, sender_handle: { handle: "alice", kind }, parts: [{ type: "text", value: "hi", reactions: null }] },
 }) as unknown as RelayWebhookEvent & { data: MessageWebhookData };
 

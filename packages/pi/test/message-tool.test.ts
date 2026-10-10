@@ -1,12 +1,22 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { MessageWebhookData, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, RELAY_TOOLS_LINE, type PiProcess } from "../src/index.js";
 import { bubbles, SessionChannel } from "../src/session.js";
 import { relayTools } from "../src/tools.js";
+
+let channelState: string;
+beforeEach(async () => {
+  channelState = await mkdtemp(join(tmpdir(), "relay-pi-fixture-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", channelState);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(channelState, { recursive: true, force: true });
+});
 
 const fakeRelay = () => ({
   chats: { messages: { send: vi.fn().mockResolvedValue({}) }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) },
@@ -14,7 +24,7 @@ const fakeRelay = () => ({
   attachments: { create: vi.fn().mockResolvedValue({ attachment_id: "att-1" }), upload: vi.fn().mockResolvedValue(undefined), retrieve: vi.fn() },
 });
 const inbound = (id: string, chat = "chat-1") => ({
-  event_type: "message.received", event_id: `e-${id}`,
+  event_type: "message.received", agent_id: "agent", event_id: `e-${id}`,
   data: { direction: "inbound", id, chat: { id: chat, is_group: false }, sender_handle: { handle: "alice", kind: "user" }, parts: [{ type: "text", value: "hi", reactions: null }] },
 }) as unknown as RelayWebhookEvent & { data: MessageWebhookData };
 const assistant = (...blocks: unknown[]): unknown => ({ role: "assistant", content: blocks });
@@ -120,7 +130,7 @@ describe("channel delivery", () => {
   ])("suppresses final text only when message texted this channel: $chat", async ({ chat, expected }) => {
     const send = vi.fn().mockResolvedValue({});
     const event = inbound("m1");
-    const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "on it" } });
@@ -138,7 +148,7 @@ describe("review fixes", () => {
   it("still sends the channel answer when a message send did not go out", async () => {
     const send = vi.fn().mockResolvedValue({});
     const event = inbound("m1");
-    const relay = { chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
+    const relay = { baseURL: "https://relay.test", me: { retrieve: async () => ({ id: "agent" }) }, chats: { messages: { send }, startTyping: vi.fn(async () => {}), stopTyping: vi.fn(async () => {}) }, websocket: { run: async (options: { onEvent: (event: RelayWebhookEvent) => Promise<void> }) => { await options.onEvent(event); } } } as unknown as Relay;
     async function* lines(): AsyncGenerator<string> {
       yield JSON.stringify({ id: "1", type: "response", success: true });
       yield JSON.stringify({ type: "tool_execution_start", toolCallId: "c1", toolName: "message", args: { action: "send", text: "" } });
