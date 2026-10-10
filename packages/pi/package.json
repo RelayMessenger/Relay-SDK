@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/pi",
-  "version": "0.1.13-staging.0",
+  "version": "0.1.14-staging.0",
   "description": "Relay Messenger channel for Pi over Relay v1 WebSocket delivery.",
   "type": "module",
   "main": "./dist/index.js",
