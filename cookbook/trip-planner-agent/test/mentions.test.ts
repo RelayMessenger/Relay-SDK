@@ -73,4 +73,9 @@ describe("who the agent answers", () => {
     expect(authorName(ALICE)).toBe("Alice");
     expect(authorName({ ...AGENT_HANDLE, display_name: null })).toBe("tripplanner");
   });
+
+  it("names a sender with no handle instead of failing", () => {
+    expect(authorName(null)).toBe("Someone");
+    expect(authorName(undefined)).toBe("Someone");
+  });
 });

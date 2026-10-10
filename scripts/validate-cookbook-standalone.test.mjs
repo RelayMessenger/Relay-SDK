@@ -10,6 +10,7 @@ import {
   parseInstallMetadata,
   publishedArguments,
   releaseDeferredPins,
+  releaseTarballOverrides,
   standaloneChannel,
   tarballArguments,
   unlockedReleaseCandidates,
@@ -99,6 +100,22 @@ test("release: an unlocked folder installs the release's own tarball, which the 
   // The staging channel and a run without tarballs keep the registry.
   assert.deepEqual(unlockedReleaseCandidates({ channel: "staging", locked: false, dependencies: [ranged], candidates }), []);
   assert.deepEqual(unlockedReleaseCandidates({ channel: "release", locked: false, dependencies: [ranged], candidates: new Map() }), []);
+});
+
+test("release: every Relay package in an unlocked folder's tree, transitive ones too, is the release's own tarball", () => {
+  // think's tarball depends on an sdk npm does not have yet; the folder names think only.
+  const candidates = new Map([
+    ["@relaymessenger/sdk", { version: "0.5.5", path: "/r/relaymessenger-sdk-0.5.5.tgz" }],
+    ["@relaymessenger/think", { version: "0.1.7", path: "/r/relaymessenger-think-0.1.7.tgz" }],
+  ]);
+  assert.deepEqual(releaseTarballOverrides({ channel: "release", locked: false, candidates }), {
+    "@relaymessenger/sdk": "file:/r/relaymessenger-sdk-0.5.5.tgz",
+    "@relaymessenger/think": "file:/r/relaymessenger-think-0.1.7.tgz",
+  });
+  // A locked folder installs its lockfile from the seeded cache; staging and a run without tarballs keep the registry.
+  assert.deepEqual(releaseTarballOverrides({ channel: "release", locked: true, candidates }), {});
+  assert.deepEqual(releaseTarballOverrides({ channel: "staging", locked: false, candidates }), {});
+  assert.deepEqual(releaseTarballOverrides({ channel: "release", locked: false, candidates: new Map() }), {});
 });
 
 test("--tarball is repeatable and takes only .tgz paths", () => {

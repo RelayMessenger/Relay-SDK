@@ -66,7 +66,7 @@ export function webhookMessage(
     direction: "inbound",
     id: IDS.message,
     idempotency_key: null,
-    parts: [{ type: "text", value: "hello Relay" }],
+    parts: [{ type: "text", value: "hello Relay", reactions: null }],
     read_at: null,
     reply_to: null,
     sender_handle: USER_HANDLE,

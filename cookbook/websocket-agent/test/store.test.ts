@@ -68,12 +68,14 @@ const EVENT = {
     chat: { id: CHAT.id },
     id: MESSAGE.id,
     direction: "inbound",
-    sender_handle: {
+    sender_handle: null,
+    from_handle: {
       id: "01993d50-ef7b-7b37-886b-23fd80c7ec14",
       handle: "sender",
       kind: "user",
       joined_at: "2026-09-01T12:00:00Z",
       display_name: null,
+      subtitle: null,
       image_url: null,
       about: null,
       verified: false,

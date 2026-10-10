@@ -1968,7 +1968,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.10" },
     { name = "pipecat-ai", extras = ["elevenlabs"], specifier = ">=1.12,<2" },
-    { name = "relaymessenger-pipecat", git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8" },
+    { name = "relaymessenger-pipecat", specifier = ">=0.1.0" },
     { name = "websockets", specifier = ">=15" },
 ]
 
@@ -1981,9 +1981,13 @@ dev = [
 [[package]]
 name = "relaymessenger"
 version = "0.1.0"
-source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8#2e339167ba211dee3d705bf22c2ee5c8f58d73f8" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7a/89/e2849d9c46cc680aaeb92b0cc4297e9eeccc7051925d15e967703d6969c4/relaymessenger-0.1.0.tar.gz", hash = "sha256:dcb7de836affd65a467244512fe02b6ae43e88d20e9d9e78958e9dc62acf3b27", size = 230210, upload-time = "2026-10-02T16:23:17.339Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/9c/be447d1e9f4d56897be1a364a68500581b62adf3d05e09ec57af0bde7583/relaymessenger-0.1.0-py3-none-any.whl", hash = "sha256:d3ea6796dbb0f99a6b2bc84a47cc7cc09939124bd44ac33cc464f685385a1108", size = 99773, upload-time = "2026-10-02T16:23:15.759Z" },
 ]
 
 [package.optional-dependencies]
@@ -1997,12 +2001,16 @@ calls = [
 [[package]]
 name = "relaymessenger-pipecat"
 version = "0.1.0"
-source = { git = "https://github.com/RelayMessenger/Relay-SDK?subdirectory=python%2Frelaymessenger-pipecat&rev=2e339167ba211dee3d705bf22c2ee5c8f58d73f8#2e339167ba211dee3d705bf22c2ee5c8f58d73f8" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pipecat-ai" },
     { name = "relaymessenger", extra = ["calls"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/21/8f/a1f2c904a8b5b5d8004562853e5f44618f99721f607cbee62c8f93638372/relaymessenger_pipecat-0.1.0.tar.gz", hash = "sha256:d65b5e57b7b1316581021ccb343da4d352c739452fb00e0dba9000d44ff71bda", size = 225747, upload-time = "2026-10-02T16:24:55.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/df/6440a02d21dfcbf20ba6945f984369c964a92776803f147e4b7a8dfae769/relaymessenger_pipecat-0.1.0-py3-none-any.whl", hash = "sha256:2916b91d17dd5aa45f27b8610e0b60c59ab41be9a48287443e7cd747a530083b", size = 14632, upload-time = "2026-10-02T16:24:54.48Z" },
 ]
 
 [[package]]

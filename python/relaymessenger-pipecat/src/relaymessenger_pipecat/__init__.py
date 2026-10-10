@@ -1,5 +1,6 @@
 """Relay Calls for Pipecat: a transport that joins a Relay Call as the agent."""
 
+from .chat import load_chat_context, relay_chat_tools
 from .rive import RelayRiveProcessor
 from .transport import (
     RelayCallbacks,
@@ -18,4 +19,6 @@ __all__ = [
     "RelayRiveProcessor",
     "RelayTransport",
     "RelayTransportClient",
+    "load_chat_context",
+    "relay_chat_tools",
 ]

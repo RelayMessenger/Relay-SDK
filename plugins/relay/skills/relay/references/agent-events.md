@@ -17,7 +17,10 @@ first subscription closes connected agent sockets and drains pending events to
 Webhooks without changing `event_id`.
 
 Create, list, update, and delete subscriptions only through the
-`/v1/webhook-subscriptions` operations in the locked OpenAPI.
+`/v1/webhook-subscriptions` operations in the locked OpenAPI. Read one with
+`getWebhookSubscription`, `GET /v1/webhook-subscriptions/{subscriptionId}`
+(`relay.webhookSubscriptions.retrieve(subscriptionId)`, Python
+`webhook_subscriptions.retrieve(subscription_id)`).
 
 Verify Standard Webhooks over the exact raw request body. Persist the envelope
 under a unique `event_id`, commit, then return `2xx`. Process model work and
@@ -84,6 +87,39 @@ Relay records Delivered when it accepts and stores the Message, with one commit
 timestamp for every recipient. Transport acknowledgement does not create
 Delivered or Read state. Read is optional and advances only through
 `POST /v1/chats/{chatId}/read`.
+
+## Message events
+
+`message.received` carries a person's Message. These carry the agent's own
+Messages, with the same Message `data` (`id`, `chat`, `chat_id`, `direction`,
+`from_handle`, `is_from_me`, `parts`, `sent_at`, `delivered_at`, `read_at`,
+`reply_to`, `thread`):
+
+- `message.sent`: Relay committed a Message the agent sent.
+- `message.delivered`: Relay accepted and stored it for at least one
+  recipient. A Message dropped for every recipient sends none.
+- `message.read`: every recipient marked it Read.
+
+`message.failed` says a committed Message could not reach a recipient agent.
+Its `data` holds `chat_id`, `message_id`, `code`, `reason`, `detail_code` and
+`failed_at`.
+
+## Reaction events
+
+`reaction.added` (added or replaced) and `reaction.removed` carry `chat_id`,
+`message_id`, `part_index`, `reaction_type`, `custom_emoji` (set only when
+`reaction_type` is `custom`), `from_handle`, `is_from_me` and `reacted_at`.
+
+## Chat events
+
+- `chat.created`: a Chat with the agent in it was created. `data` is the Chat:
+  `id`, `display_name`, `group_chat_icon`, `handles`, `is_group`,
+  `created_at`, `updated_at`.
+- `participant.added` and `participant.removed`: `chat_id`, `participant`
+  (a Chat handle), and `added_at` or `removed_at`.
+- `chat.group_name_updated` and `chat.group_icon_updated`: `chat_id`,
+  `old_value`, `new_value` (the name or icon URL; null when removed),
+  `changed_by_handle` and `updated_at`.
 
 ## Typing
 

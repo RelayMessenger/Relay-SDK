@@ -114,13 +114,32 @@ Unmentioned group traffic, outbound self echoes,
 reactions, typing events, receipts, and membership events are durably accepted
 without starting a turn.
 
-Text, link, and media parts are rendered into agent-visible text. Media stays
-a labeled signed URL; the plugin does not upload or send media.
+Text, link, and media parts are rendered into agent-visible text. An inbound
+media part stays a labeled signed URL.
 
-Outbound support is deliberately limited to text Messages and Message reply
-references. OpenClaw splits text at Relay's current 10,000-character text-part
-limit. Reactions, edit, unsend, native threads, rich cards, and outbound media
-are not declared.
+The plugin declares text, media and reactions. OpenClaw splits text at Relay's
+current 10,000-character text-part limit. A file OpenClaw sends (`mediaUrl`, a
+URL or an allowed local path) is loaded through OpenClaw's media policy,
+uploaded to Relay and sent as its own media Message after any words. The
+shared `message` tool's `react` action reacts to a Relay Message: ❤️ 👍 👎 😂
+‼️ ❓ become Relay's tapbacks, any other emoji a custom reaction, and with no
+message named it reacts to the Message being answered. Edit, unsend and native
+threads are not declared.
+
+## Parts and tools
+
+The agent's final text carries Relay's parts as fenced blocks, read by the
+SDK's `answerMessages`, and every turn's prompt teaches them: `buttons`,
+`selection`, `form`, `rich_card`, `carousel` (2 to 10 cards), `place`,
+`payment` and `rating_request`, plus a URL alone on a line for a link card.
+Words outside a block go as a normal Message above the card; a place goes as
+its own Message after the words. A block Relay cannot use stays in the words.
+
+The plugin owns two agent tools (`contracts.tools` in `openclaw.plugin.json`),
+offered only in a turn that came from a Relay chat and acting on that chat:
+`relay_request_location` asks the person to share their location, and
+`relay_read_location` reads where everyone sharing is now. Relay refuses a
+location request in a group chat; the tool returns Relay's reason.
 
 `allowFrom` optionally limits inbound turns to exact Relay Contact IDs or
 Handles:

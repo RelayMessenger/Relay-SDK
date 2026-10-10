@@ -162,6 +162,8 @@ function messageEnvelope(input: {
     direction: "inbound",
     id: input.messageId,
     parts,
+    from_handle: handle(USER_ID, "relay_user"),
+    is_from_me: false,
     sender_handle: handle(USER_ID, "relay_user"),
   });
 }
@@ -390,6 +392,8 @@ describe("a person's swipe-reply reaches the model", () => {
       id: DIRECT_MESSAGE_ID,
       parts: [{ type: "text", value: "what did you mean by this?" }],
       reply_to: { message_id: TARGET_ID, part_index: 1 },
+      from_handle: handle(USER_ID, "relay_user"),
+      is_from_me: false,
       sender_handle: handle(USER_ID, "relay_user"),
     });
     if (target) {

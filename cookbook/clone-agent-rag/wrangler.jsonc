@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "relay-clone-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "secrets": {
+    "required": [
+      "RELAY_AGENT_TOKEN",
+      "RELAY_WEBHOOK_SECRET"
+    ]
+  },
+  "vars": {
+    "MODEL_ID": "@cf/openai/gpt-oss-120b",
+    "RELAY_AGENT_HANDLE": "your_agent_handle",
+    "RELAY_API_ORIGIN": "https://api.relayapp.im"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "vectorize": [
+    {
+      "binding": "CLONE_INDEX",
+      "index_name": "clone-sources"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RelayChat",
+        "class_name": "RelayChatAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RelayChatAgent"]
+    }
+  ]
+}

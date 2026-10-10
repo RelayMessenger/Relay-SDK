@@ -84,7 +84,7 @@ describe("Relay send Action", () => {
     const schema = toJSONSchema(sendInputSchema);
     expect(schema.type).toBe("object");
     expect(schema.properties?.kind).toMatchObject({
-      enum: ["text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel"],
+      enum: ["text", "image", "voice_memo", "link", "place", "payment", "rich_card", "carousel", "form", "rating_request", "media"],
     });
     expect(schema.oneOf).toBeUndefined();
     expect(schema.anyOf).toBeUndefined();
@@ -863,7 +863,7 @@ describe("Relay send Action: rich_card and carousel", () => {
     await expect(sending).rejects.toThrow(/at most 25 characters/u);
   });
 
-  it("takes another step after a refused card or payment, and ends the turn once a card is sent", () => {
+  it("takes another step after a send, refused or not, so the model decides whether to send more", () => {
     const settled = (output: unknown) => relayTurnSettled({
       steps: [{
         toolCalls: [{ toolCallId: "call-0", toolName: "send" }],
@@ -872,8 +872,8 @@ describe("Relay send Action: rich_card and carousel", () => {
     });
     expect(settled({ error: { name: "RelayCardRefused", message: "fix it" } })).toBe(false);
     expect(settled({ error: { name: "RelayPaymentRefused", message: "no Stripe" } })).toBe(false);
-    expect(settled({ status: "sent", kind: "rich_card" })).toBe(true);
-    expect(settled({ error: { name: "RelayAPIError", message: "down" } })).toBe(true);
+    expect(settled({ status: "sent", kind: "rich_card" })).toBe(false);
+    expect(settled({ error: { name: "RelayAPIError", message: "down" } })).toBe(false);
   });
 });
 
@@ -885,11 +885,14 @@ describe("the composing pause", () => {
     }));
   }
 
+  // Each test is its own turn: a turn's later Messages pause from its last one.
+  let turnNumber = 0;
   function typingSince(composingSince: number): RelayActionDependencies {
+    const eventId = `pause-turn-${turnNumber += 1}`;
     return {
       ...dependencies(),
       compose: undefined,
-      turn: () => ({ chatId: CHAT_ID, eventId: MESSAGE_ID, composingSince }),
+      turn: () => ({ chatId: CHAT_ID, eventId, composingSince }),
     };
   }
 
@@ -916,5 +919,20 @@ describe("the composing pause", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     expect(posts).toEqual([`/v1/chats/${CHAT_ID}/messages`]);
     await expect(sending).resolves.toMatchObject({ status: "sent" });
+  });
+
+  it("pauses again before each later Message of the same turn, counted from the Message before it", async () => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    stubMessages(posts);
+    const deps = typingSince(Date.now() - 7_000);
+    await executeRelaySend(deps, { kind: "text", text: words }, undefined, "call-1");
+    expect(posts).toHaveLength(1);
+    const second = executeRelaySend(deps, { kind: "text", text: words }, undefined, "call-2");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(posts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(posts).toHaveLength(2);
+    await expect(second).resolves.toMatchObject({ status: "sent" });
   });
 });

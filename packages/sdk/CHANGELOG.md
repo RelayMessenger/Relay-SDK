@@ -9,6 +9,16 @@ A minor release, because this is 0.x and the release breaks code written
 against the published 0.4.0 (semver 2.0.0 item 4). The version is
 `0.5.0-staging.N` on staging; the release on main publishes `0.5.0`.
 
+### Added
+
+- `answerMessages` reads a `rich_card`, `carousel` or `place` fenced block in
+  a text-only agent's answer: the card or carousel rides with the last words
+  (buttons stay under it), and the place is its own Message after them. A
+  block that is not one, or a card beside a selection, form, payment or rating
+  request block, stays in the words with an error, as other blocks do.
+  `splitCardBlocks`, `CARD_BLOCK_INSTRUCTION`, `CARD_GUIDANCE` and
+  `PLACE_BLOCK_INSTRUCTION` are exported for bridges that teach the blocks.
+
 ### Removed: breaking
 
 Relay removed the A2UI `data` part (Relay-Server PR 474): a `data` part is

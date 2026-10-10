@@ -61,4 +61,35 @@ describe("relay_chat_timing tokens", () => {
     expect(line.gateway).toEqual({ "cf-aig-log-id": "log-1", "cf-aig-step": "0" });
     expect(line.ms.model_headers).not.toBeNull();
   });
+
+  it("sums every step of a turn, so a closing step with no tool call does not hide the send step", async () => {
+    const timing = startRelayChatTiming({ instance: "i", eventId: "e" });
+    const middleware = timedRelayModel(() => timing);
+    const step = async (finishReason: string, u: ReturnType<typeof usage>) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          controller.enqueue({ type: "finish", finishReason, usage: u });
+          controller.close();
+        },
+      });
+      const wrapped = await middleware.wrapStream!({
+        doStream: async () => ({ stream }) as never,
+        doGenerate: async () => ({}) as never,
+        params: {} as never,
+        model: { modelId: "gemini-test" } as never,
+      });
+      for await (const _ of wrapped.stream) { /* drain */ }
+    };
+    // Step 1 calls the send tool; step 2 closes the turn with no tool call.
+    await step("tool-calls", usage(900, 30));
+    await step("stop", {
+      inputTokens: { total: 1300, noCache: 300, cacheRead: 1000, cacheWrite: undefined },
+      outputTokens: { total: 2, text: 2, reasoning: undefined },
+      raw: undefined,
+    });
+    const line = JSON.parse(relayChatTimingLine(timing));
+    expect(line.model_calls).toBe(2);
+    expect(line.tokens).toEqual({ input: 2500, output: 42, reasoning: 30, cached: 1900 });
+  });
 });

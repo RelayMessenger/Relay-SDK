@@ -54,6 +54,54 @@ once it is ready. When ElevenLabs ends the conversation, the bridge ends the
 Call; when the Call ends or its room closes, it closes the conversation, and a
 hang-up during startup makes `connect()` reject.
 
+## Text the person during the call
+
+An ElevenLabs agent can text the person in the Call's Relay chat through
+ElevenLabs' [client tools](https://elevenlabs.io/docs/eleven-agents/customization/tools/client-tools):
+ElevenLabs sends `client_tool_call` over the conversation, the bridge runs the
+tool with the Relay SDK and answers `client_tool_result` (`is_error` when Relay
+refuses it).
+
+1. Add the tools to the ElevenLabs agent as client tools. `relayClientTools`
+   holds each one's `tool_config` (name, description, parameters,
+   `expects_response: true`): create each with ElevenLabs'
+   [`POST /v1/convai/tools`](https://elevenlabs.io/docs/agents-platform/api-reference/tools/create)
+   and add the returned ids to the agent's `tool_ids`, or enter them in the
+   dashboard with "Wait for response" on.
+2. Pass `relayTools: true`. The bridge reads the Call's chat once, on the first
+   tool call; pass `relayTools: { chatId }` if you already have it.
+
+```ts
+import { ElevenLabsCall, relayChatContext, relayClientTools } from "@relaymessenger/elevenlabs";
+
+const call = await ElevenLabsCall.connect({
+  relay,
+  callId,
+  relayTools: { chatId },
+  elevenlabs: {
+    apiKey: process.env.ELEVENLABS_API_KEY!,
+    agentId: process.env.ELEVENLABS_AGENT_ID!,
+    // In the agent's prompt: {{relay_chat}}
+    initiationData: { dynamic_variables: { relay_chat: await relayChatContext(relay, chatId, 20) } },
+  },
+});
+```
+
+| Tool | What it sends in the chat |
+| --- | --- |
+| `send_message` | A text Message; `reply_to_message_id` sends it as a reply. |
+| `send_buttons` | 1 to 5 buttons under optional text. A tap comes back as the person's reply. |
+| `send_selection` | A list to pick from (`title`, `options`), under optional text. |
+| `send_place` | A map pin (`latitude`, `longitude`, optional `name` and `address`). |
+| `request_location` | Asks the person to share their location. |
+| `read_location` | Nothing; returns everyone sharing their location in the chat. |
+| `send_link` | A link, drawn as a card; optional text goes first in its own Message. |
+
+Other client tools reach only `onEvent`. `relayChatContext(relay, chatId, limit)`
+returns the chat's last Messages, oldest first, one line each, for the
+agent's dynamic variables. The Pipecat and LiveKit packages use the same tool
+names and arguments.
+
 ## A Rive character's mouth
 
 If the Relay agent's profile has a Rive file, the phone draws it during the

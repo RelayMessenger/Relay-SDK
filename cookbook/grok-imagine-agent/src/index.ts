@@ -55,8 +55,8 @@ try {
       if (event.event_type !== "message.received") return;
       const data = event.data;
       // A sender with no Handle is skipped.
-      if (data.direction !== "inbound" || !data.sender_handle) return;
-      const speaker = data.sender_handle.display_name?.trim() || data.sender_handle.handle;
+      if (data.direction !== "inbound" || data.is_from_me || !data.from_handle) return;
+      const speaker = data.from_handle.display_name?.trim() || data.from_handle.handle;
       // In a group, Grok reads who said it and decides whether to answer.
       const text = wordsOf(data.parts, speaker, data.chat.is_group === true);
       if (text === null) return;

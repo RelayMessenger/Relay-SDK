@@ -11,6 +11,7 @@ export const AGENT_HANDLE = {
   kind: "agent" as const,
   joined_at: "2026-09-03T12:00:00Z",
   display_name: "Trip planner",
+  subtitle: null,
   image_url: null,
   about: null,
   verified: false,
@@ -24,6 +25,7 @@ export const ALICE = {
   kind: "user" as const,
   joined_at: "2026-09-03T12:00:00Z",
   display_name: "Alice",
+  subtitle: null,
   image_url: null,
   about: null,
   verified: false,
@@ -72,6 +74,8 @@ export function inboundEvent({
       : { id: CHAT_ID, is_group: false },
     id: messageId,
     direction: "inbound",
+    from_handle: sender,
+    is_from_me: false,
     sender_handle: sender,
     parts: [
       mention === undefined

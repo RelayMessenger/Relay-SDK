@@ -282,6 +282,11 @@ The allocation and upload byte length and content type must match. Relay
 accepts any `type/subtype` media type and stores the bytes unchanged. Only
 pictures and group icons must be images.
 
+`deleteAttachment`, `DELETE /v1/attachments/{attachmentId}`
+(`relay.attachments.delete(attachmentId)`, Python `attachments.delete(attachment_id)`)
+deletes an upload the agent owns and never used. It answers `204`, or `409`
+with code `1005` when a Message or Chat references it.
+
 ## Voice memos
 
 A voice memo plays as a voice memo on the person's phone, not as a file.

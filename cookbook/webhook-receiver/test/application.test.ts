@@ -14,7 +14,7 @@ const EVENT = {
     chat: { id: "01993d50-ef7b-7b37-886b-23fd80c7ec12" },
     id: "01993d50-ef7b-7b37-886b-23fd80c7ec13",
     direction: "inbound",
-    sender_handle: {},
+    sender_handle: null,
     parts: [],
   },
 } as const;

@@ -46,6 +46,12 @@ cookbook/
   send-an-image/
   send-a-voice-memo/
   trip-planner-agent/
+  group-chat-agents/
+  clone-agent-rag/
+  grok-imagine-agent/
+  grok-voice-agent/
+  elevenlabs-voice-agent/
+  elevenlabs-agents-call/
 ```
 
 All public code is pinned to the same Relay v1 OpenAPI under
@@ -91,11 +97,10 @@ claude plugin marketplace add /absolute/path/to/Relay-SDK
 claude plugin install relay@relay-messenger --scope user
 ```
 
-Do not edit `plugins/relay` directly. Refresh and validate root discovery with:
+Do not edit `plugins/relay` directly. Refresh root discovery with:
 
 ```bash
 npm run discovery:sync
-npm run discovery:validate
 ```
 
 ## Development
