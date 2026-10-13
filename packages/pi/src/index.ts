@@ -580,3 +580,7 @@ export const typing = (relay: Relay, chatId: string, on: boolean): Promise<void>
       console.error(`Relay: typing indicator failed: ${error instanceof Error ? error.message : String(error)}`);
     });
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);
+
+/** The owner approval cards, shared with the Relay CLI. */
+export * from "./approvals.js";
+export * from "./session-approvals.js";

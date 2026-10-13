@@ -80,7 +80,7 @@ describe("native session steer admission", () => {
     const sendMessage = vi.fn();
     const pi = {
       on: (name: string, handler: (event: unknown, context: unknown) => unknown) => { hooks.set(name, handler); },
-      registerCommand: vi.fn(), registerTool: vi.fn(), sendUserMessage, sendMessage,
+      events: { on: vi.fn() }, registerCommand: vi.fn(), registerTool: vi.fn(), sendUserMessage, sendMessage,
     } as unknown as ExtensionAPI;
     let idle = false;
     try {
