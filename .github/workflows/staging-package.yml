@@ -95,7 +95,7 @@ jobs:
           fi
           git merge-base --is-ancestor "$EVENT_SHA" HEAD
           test -z "$(git status --porcelain)"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -185,7 +185,7 @@ jobs:
           git fetch --no-tags "$RUNNER_TEMP/staging-bump-commit/staging-bump.bundle" HEAD
           test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
           git checkout --detach "$RELEASE_SHA"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org/
