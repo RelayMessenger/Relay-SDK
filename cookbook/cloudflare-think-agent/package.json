@@ -46,7 +46,7 @@
     "@cloudflare/think": "0.20.1",
     "@relaymessenger/chat-sdk-adapter": "0.3.13",
     "@relaymessenger/sdk": "0.5.3",
-    "agents": "0.27.0",
+    "agents": "0.29.0",
     "ai": "7.0.107",
     "chat": "4.41.0",
     "zod": "4.6.5"
