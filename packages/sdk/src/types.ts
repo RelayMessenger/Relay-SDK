@@ -895,6 +895,136 @@ export interface RatingRequestPartResponse extends RatingRequestPart {
   reactions: Reaction[] | null;
 }
 
+/**
+ * A2UI v1.0 (https://a2ui.org). The message shapes are A2UI's own JSON
+ * schemas (`specification/v1_0/json/` in a2ui-project/A2UI):
+ * `agent_to_renderer.json` for what an agent sends to draw or change a card,
+ * `renderer_to_agent.json` for a tap (`action`).
+ */
+export type A2uiVersion = "v1.0";
+
+/**
+ * One component: `id`, the catalog's `component` name, and that component's
+ * properties, for example `{ id: "root", component: "Text", text: "Hi" }`.
+ * The surface's catalog defines them; Relay refuses what it does not define.
+ */
+export interface A2uiComponent {
+  id: string;
+  component: string;
+  [property: string]: unknown;
+}
+
+/**
+ * A2UI `createSurface`. `catalogId` is Relay's
+ * (`https://relayapp.im/a2ui/catalogs/relay/v1/catalog.json`) or the A2UI
+ * basic catalog (`https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json`).
+ */
+export interface A2uiCreateSurfaceMessage {
+  version: A2uiVersion;
+  createSurface: {
+    surfaceId: string;
+    catalogId?: string;
+    /** When true, every tap on the surface carries its data model in the message metadata. */
+    sendDataModel?: boolean;
+    components?: A2uiComponent[];
+    dataModel?: Record<string, unknown>;
+    metadata?: { extensions?: Record<string, unknown> };
+  };
+}
+
+/** A2UI `updateComponents`: adds or replaces components by `id`. */
+export interface A2uiUpdateComponentsMessage {
+  version: A2uiVersion;
+  updateComponents: {
+    surfaceId: string;
+    components: A2uiComponent[];
+  };
+}
+
+/** A2UI `updateDataModel`: sets `value` at `path` (a JSON Pointer; none, or `/`, is the whole model). A `null` value deletes the key. */
+export interface A2uiUpdateDataModelMessage {
+  version: A2uiVersion;
+  updateDataModel: {
+    surfaceId: string;
+    path?: string;
+    value: unknown;
+  };
+}
+
+/** A2UI `deleteSurface`. */
+export interface A2uiDeleteSurfaceMessage {
+  version: A2uiVersion;
+  deleteSurface: {
+    surfaceId: string;
+  };
+}
+
+/** The agent-to-renderer messages Relay's `DataPart` takes from an agent. */
+export type A2uiAgentToRendererMessage =
+  | A2uiCreateSurfaceMessage
+  | A2uiUpdateComponentsMessage
+  | A2uiUpdateDataModelMessage
+  | A2uiDeleteSurfaceMessage;
+
+/** A2UI `action`: a person's tap on a component (renderer_to_agent.json). */
+export interface A2uiAction {
+  /** The component's `action.event.name`. */
+  name: string;
+  /** The component's `action.event.userMessage`, bindings resolved. */
+  userMessage?: string;
+  surfaceId: string;
+  sourceComponentId: string;
+  /** ISO 8601. */
+  timestamp: string;
+  /** The component's `action.event.context`, bindings resolved. */
+  context: Record<string, unknown>;
+  metadata?: { extensions?: Record<string, unknown> };
+}
+
+/** A tap, as a person's app sends it in a data part. */
+export interface A2uiActionMessage {
+  version: A2uiVersion;
+  action: A2uiAction;
+}
+
+/**
+ * A card drawn with A2UI v1.0 (contract `DataPart`). Only an agent sends
+ * one: `data` is a list of agent-to-renderer messages Relay applies in order.
+ * A later updateComponents, updateDataModel or deleteSurface for a surface in
+ * the chat changes the card that drew it, in place.
+ */
+export interface DataPart {
+  type: "data";
+  media_type: "application/a2ui+json";
+  data: [A2uiAgentToRendererMessage, ...A2uiAgentToRendererMessage[]];
+}
+
+/**
+ * A data part as read (contract `DataPartResponse`). From an agent, `data` is
+ * every accepted message for each surface the part created. From a person's
+ * app, it holds `action` messages (taps), delivered only to the agent that
+ * created the surface; every other reader sees `data` empty.
+ */
+export interface DataPartResponse {
+  type: "data";
+  media_type: "application/a2ui+json";
+  data: Array<A2uiAgentToRendererMessage | A2uiActionMessage>;
+  reactions: Reaction[] | null;
+}
+
+/** A2UI `a2uiRendererCapabilities` (renderer_capabilities.json): the catalogs the Relay app draws, Relay's first. */
+export interface A2uiRendererCapabilities {
+  "v1.0": {
+    supportedCatalogIds: string[];
+  };
+}
+
+/** Message metadata on a Message event. */
+export interface MessageEventMetadata {
+  /** On `message.received`: the catalogs the reader's Relay app draws. */
+  a2uiRendererCapabilities?: A2uiRendererCapabilities;
+}
+
 export type MessagePart =
   | TextPart
   | MediaPart
@@ -909,7 +1039,8 @@ export type MessagePart =
   | FormResponsePart
   | PaymentPart
   | RatingRequestPart
-  | PlacePart;
+  | PlacePart
+  | DataPart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -1046,6 +1177,7 @@ export type MessagePartResponse =
   | LocationRequestPartResponse
   | LocationPartResponse
   | PlacePartResponse
+  | DataPartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
@@ -1096,6 +1228,7 @@ export interface SentMessage {
       | LocationRequestPartResponse
     | LocationPartResponse
     | PlacePartResponse
+    | DataPartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -1922,6 +2055,8 @@ export interface MessageWebhookData {
   /** Whether the Agent receiving this event sent this Message. Absent on events from servers before 2026-10-04. */
   is_from_me?: boolean;
   parts: MessagePartResponse[];
+  /** Message metadata. On `message.received` it carries `a2uiRendererCapabilities`. */
+  metadata?: MessageEventMetadata;
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;

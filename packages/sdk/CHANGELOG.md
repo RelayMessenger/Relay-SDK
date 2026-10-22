@@ -11,6 +11,10 @@ against the published 0.4.0 (semver 2.0.0 item 4). The version is
 
 ### Added
 
+- A2UI v1.0 cards (Relay-Server 5a860e17): `DataPart` (`type: "data"`,
+  `media_type: "application/a2ui+json"`) in `MessagePart`, `DataPartResponse`
+  in read and sent parts, the A2UI agent-to-renderer and `action` message
+  types, and `metadata.a2uiRendererCapabilities` on message events.
 - `answerMessages` reads a `rich_card`, `carousel` or `place` fenced block in
   a text-only agent's answer: the card or carousel rides with the last words
   (buttons stay under it), and the place is its own Message after them. A
