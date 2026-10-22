@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict
 from urllib.parse import quote, urlencode
 
 from .errors import RelayAPIError
-from .parts import ReactionType
+from .parts import MessageEventMetadata, ReactionType
 from .webhooks import Webhooks
 from .websocket import WebSocket
 
@@ -144,6 +144,9 @@ class MessageEvent(_MessageEventRequired, total=False):
     sent_at: Optional[str]
     delivered_at: Optional[str]
     read_at: Optional[str]
+    #: Message metadata. On ``message.received`` it carries A2UI's
+    #: ``a2uiRendererCapabilities``, the catalogs the reader's Relay app draws.
+    metadata: MessageEventMetadata
 
 
 class ContactEventContact(TypedDict):

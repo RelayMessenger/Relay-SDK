@@ -871,7 +871,10 @@ paths:
         opens it by the card's id (POST /v1/contacts/lookup with id), since the
         handle may since have changed.
 
-        The sender is the authenticated agent (system_event.actor). Each successful
+        The sender is the authenticated agent (system_event.actor). Every other
+        agent in the chat receives the share as a message.received event whose
+        data is the system Message, with system_event.type contact_card_shared
+        and the card in system_event.contact_card. Each successful
         call shares the card once. Both paths use the same per-sender and per-chat
         rate limits as sends, and the same Idempotency-Key replay: the same key and
         body return 204 again and share nothing; the same key with another chat or
@@ -4077,6 +4080,67 @@ components:
             - string
             - "null"
           format: date-time
+        reactions:
+          type:
+            - array
+            - "null"
+          description: Reactions on this message part
+          items:
+            $ref: "#/components/schemas/Reaction"
+    DataPart:
+      type: object
+      additionalProperties: false
+      description: >-
+        A card drawn with A2UI v1.0 (https://a2ui.org): from an agent, `data` is a list of A2UI agent-to-renderer messages (createSurface,
+        updateComponents, updateDataModel, deleteSurface); only an agent sends
+        those. From a person's app, `data` holds A2UI renderer-to-agent
+        `action` messages (a tap: `{"version":"v1.0","action":{...}}`) about
+        a surface in the chat; an unknown surfaceId is refused with 404. A tap
+        reaches only the agent that created its surface (A2UI "Targeted
+        Delivery"): a message holding only taps is delivered to that agent
+        alone, and every other reader sees its data part empty. createSurface's catalogId is the A2UI basic catalog
+        (`https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json`) or
+        Relay's (`https://relayapp.im/a2ui/catalogs/relay/v1/catalog.json`).
+        Relay checks each message against the A2UI v1.0 schema and its
+        surface's catalog, applies the list in order, and reports each message
+        it could not apply in the response's `a2ui_errors`, in A2UI's standard
+        validation error format; when none applied, the send is refused with
+        that status and `a2ui_errors`. A later updateComponents,
+        updateDataModel or deleteSurface for a surface in the chat changes the
+        card that drew it, in place: the send adds no message, the response
+        carries the card, and every member receives `message.upserted`. Only
+        the agent that created a surface may change it.
+      required: [type, media_type, data]
+      properties:
+        type:
+          type: string
+          enum: [data]
+        media_type:
+          type: string
+          enum: [application/a2ui+json]
+        data:
+          type: array
+          minItems: 1
+          items:
+            type: object
+    DataPartResponse:
+      type: object
+      description: >-
+        An A2UI v1.0 card: every accepted message for each surface the part
+        created, in order, exactly as sent, so every reader replays the same
+        list.
+      required: [type, media_type, data, reactions]
+      properties:
+        type:
+          type: string
+          enum: [data]
+        media_type:
+          type: string
+          enum: [application/a2ui+json]
+        data:
+          type: array
+          items:
+            type: object
         reactions:
           type:
             - array
@@ -7708,6 +7772,7 @@ components:
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/RatingRequestPartResponse"
+              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
               - $ref: "#/components/schemas/SystemPartResponse"
@@ -7896,6 +7961,26 @@ components:
         is_from_me:
           type: boolean
           description: Whether the agent receiving this event sent this message. Same value as the Message object's is_from_me.
+        metadata:
+          type: object
+          description: >-
+            Message metadata. On message.received it carries A2UI's
+            `a2uiRendererCapabilities` (renderer_capabilities.json): the
+            catalogs the Relay app draws, Relay's catalog first, as
+            `{"v1.0":{"supportedCatalogIds":["https://relayapp.im/a2ui/catalogs/relay/v1/catalog.json","https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"]}}`.
+          properties:
+            a2uiRendererCapabilities:
+              type: object
+              required: [v1.0]
+              properties:
+                v1.0:
+                  type: object
+                  required: [supportedCatalogIds]
+                  properties:
+                    supportedCatalogIds:
+                      type: array
+                      items:
+                        type: string
         parts:
           type: array
           description: Message parts (text and/or media)
@@ -7916,8 +8001,10 @@ components:
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/RatingRequestPartResponse"
+              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
+              - $ref: "#/components/schemas/SystemPartResponse"
             discriminator:
               propertyName: type
               mapping:
@@ -7936,8 +8023,10 @@ components:
                 payment_receipt: "#/components/schemas/PaymentReceiptPartResponse"
                 location_request: "#/components/schemas/LocationRequestPartResponse"
                 rating_request: "#/components/schemas/RatingRequestPartResponse"
+                data: "#/components/schemas/DataPartResponse"
                 location: "#/components/schemas/LocationPartResponse"
                 place: "#/components/schemas/PlacePartResponse"
+                system: "#/components/schemas/SystemPartResponse"
         sent_at:
           type:
             - string
@@ -7980,6 +8069,16 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ThreadOriginator"
             - type: "null"
+        is_system_message:
+          type: boolean
+          description: Whether this is a visible Chat event, as on the Message object. Today the one such event an agent
+            receives is a contact card someone else shared into the chat; its parts are one system part.
+        system_event:
+          description: The Chat event, as on the Message object. For a shared contact card, type is contact_card_shared,
+            actor is who shared it and contact_card is the card. Absent on an ordinary Message.
+          oneOf:
+            - $ref: "#/components/schemas/SystemEvent"
+            - type: "null"
     MessagePart:
       type: object
       required:
@@ -8001,6 +8100,7 @@ components:
           payment: "#/components/schemas/PaymentPart"
           place: "#/components/schemas/PlacePart"
           rating_request: "#/components/schemas/RatingRequestPart"
+          data: "#/components/schemas/DataPart"
       oneOf:
         - $ref: "#/components/schemas/TextPart"
         - $ref: "#/components/schemas/MediaPart"
@@ -8016,6 +8116,7 @@ components:
         - $ref: "#/components/schemas/PaymentPart"
         - $ref: "#/components/schemas/PlacePart"
         - $ref: "#/components/schemas/RatingRequestPart"
+        - $ref: "#/components/schemas/DataPart"
     MessageReadWebhook:
       description: Complete webhook payload for message.read events (2026-08-30 format)
       allOf:
@@ -8385,8 +8486,8 @@ components:
           items:
             type: string
         message:
-          description: The Message to send. Text, link, and media parts are supported. Voice memos use POST
-            /v1/chats/{chatId}/voicememo.
+          description: The Message to send. It takes every MessagePart type, the same as a send to an existing Chat. Voice
+            memos use POST /v1/chats/{chatId}/voicememo.
           $ref: "#/components/schemas/MessageContent"
     SendMessageResponse:
       type: object
@@ -8577,6 +8678,7 @@ components:
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/LocationRequestPartResponse"
               - $ref: "#/components/schemas/RatingRequestPartResponse"
+              - $ref: "#/components/schemas/DataPartResponse"
               - $ref: "#/components/schemas/LocationPartResponse"
               - $ref: "#/components/schemas/PlacePartResponse"
         created_at:
