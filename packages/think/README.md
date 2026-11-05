@@ -151,9 +151,9 @@ const adapter = withContactCards(withFormReplies(withCardReplies(withSelectionRe
 ## Remember a person across Chats
 
 A Think agent keeps one history per Chat. With per-person memory, it also
-remembers what a person and it said in every Chat they share: in a DM, it
-knows what was said in that person's group with it, and the other way
-around.
+remembers each person across every Chat it shares with them: in a DM, it
+knows what was said in that person's groups with it, the way another member
+of those groups would.
 
 Each person gets one `RelayPersonMemory` Durable Object, named
 `person:<personId>`, where `personId` is the person's Handle id (the same in
@@ -173,6 +173,7 @@ every Chat). It indexes their lines with the Agents SDK's
 
 ```ts
 import { Think, type TurnContext } from "@cloudflare/think";
+import Relay from "@relaymessenger/sdk";
 import { personMemory, RelayPersonMemory } from "@relaymessenger/think/memory";
 
 export { RelayPersonMemory };
@@ -181,6 +182,7 @@ export class RelayChatAgent extends Think<Env> {
   memory = personMemory(this, {
     binding: this.env.RelayPersonMemory,
     chat: () => this.currentChat(), // GET /v1/chats/{chatId}, cached
+    relay: new Relay({ apiKey: this.env.RELAY_AGENT_TOKEN }),
   });
 
   override async beforeTurn(context: TurnContext) {
@@ -196,18 +198,28 @@ export class RelayChatAgent extends Think<Env> {
 - `ingest()` stores the Chat's lines that are new since its last call. Each
   row is keyed `<chatId>:<messageId>` and reads
   `[<Chat name or DM>, <date>] <speaker>: <text>`.
-- `turn(messages)` adds one model Message before the newest one, with the
-  person's latest lines from up to 5 other Chats and up to 10 search hits on
+- `turn(messages)` adds one model Message before the newest one, with up to
+  5 of the person's other Chats, newest first, and up to 10 search hits on
   the new Message, and adds the `search_person_memory` tool. The current
-  Chat's lines are left out: the agent already has them. The system prompt
-  is not changed, so Think's frozen prompt stays cached.
+  Chat is left out: the agent already has it. The system prompt is not
+  changed, so Think's frozen prompt stays cached.
+- `relay` is optional. With it, `turn` reads each of those Chats from Relay
+  (`GET /v1/chats/{chatId}` and its 30 newest Messages), so the agent sees
+  the whole talk of a group, not only the Messages that mentioned it.
+  Messages from before the person joined are left out, and so is a Chat they
+  left. Media is named (`[Image]`), never fetched. If Relay fails for a
+  Chat, that Chat's stored lines are shown. Without `relay`, only stored
+  lines are shown, newest 20 per Chat.
 
 Who sees what:
 
-| Chat | Stored | Read |
+| Chat | Stored, for whom | Read in this Chat |
 | --- | --- | --- |
-| One person (a DM, or a group of one person and agents) | Every line: the person's, yours, and other agents' | Yes |
-| Two or more people | Each person's own lines and your replies to them, in that person's memory only. Never another person's lines. | No |
+| One person (a DM, or a group of one person and agents) | Every line (the person's, yours, other agents') for that person | Yes |
+| Two or more people | Every line for each person who is a member. A person who left or was removed gets nothing new. | No: memory is never read where another person can see the answer |
+
+So a person's DM can show what others said in a group they are in, and
+never what was said in a group before they joined or after they left.
 
 One Worker that runs several agents passes `agentId`, so each agent's memory
 of a person is its own (`person:<agentId>:<personId>`). Pass
