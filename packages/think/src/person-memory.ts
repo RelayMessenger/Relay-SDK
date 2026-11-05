@@ -7,6 +7,7 @@
 // AgentSearchProvider index (agents docs/context.md). This file is the plain
 // code both sides share; ./memory.ts is the Worker entry with the Durable
 // Object.
+import type { Message, MessagePartResponse } from "@relaymessenger/sdk";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 
 import { relayTurnMetadata } from "./stored-history.js";
@@ -22,6 +23,10 @@ export interface PersonMemoryChat {
     handle?: string | null;
     display_name?: string | null;
     status?: "active" | "left" | "removed" | null;
+    /** ISO time the Handle joined the Chat. */
+    joined_at?: string | null;
+    /** ISO time the Handle left the Chat; null while it is a member. */
+    left_at?: string | null;
     is_me?: boolean | null;
   }>;
 }
@@ -37,8 +42,6 @@ export interface PersonMemoryLine {
   speakerId?: string;
   speakerKind: "user" | "agent" | "self";
   speaker: string;
-  /** For this agent's lines: the person it answered. */
-  answers?: string;
   text: string;
 }
 
@@ -98,11 +101,7 @@ export function chatLabel(chat: PersonMemoryChat): string {
   return chat.display_name?.trim() || (chat.is_group ? "Group chat" : "DM");
 }
 
-/**
- * The Chat's lines in order, from Think's stored history. Each person's line
- * names its sender; each of this agent's lines names the person whose Message
- * it answered (the last person who spoke before it).
- */
+/** The Chat's lines in order, from Think's stored history, each naming its speaker. */
 export function personMemoryLines(
   chat: PersonMemoryChat,
   messages: readonly UIMessage[],
@@ -111,7 +110,6 @@ export function personMemoryLines(
   const me = selfName(chat);
   const handles = new Map(chat.handles.map((handle) => [handle.id, handle]));
   const lines: PersonMemoryLine[] = [];
-  let lastPerson: string | undefined;
   for (const message of messages) {
     if (message.role === "system") continue;
     const text = messageText(message);
@@ -129,7 +127,6 @@ export function personMemoryLines(
           ...base,
           speakerKind: "self",
           speaker: me,
-          ...(lastPerson ? { answers: lastPerson } : {}),
           text,
         });
       }
@@ -140,7 +137,6 @@ export function personMemoryLines(
     if (!speakerId) continue;
     const known = handles.get(speakerId);
     const kind = sender?.kind === "agent" || known?.kind === "agent" ? "agent" : "user";
-    if (kind === "user") lastPerson = speakerId;
     if (!text) continue;
     const name = sender?.display_name ?? known?.display_name ?? sender?.handle ?? known?.handle;
     lines.push({
@@ -174,14 +170,18 @@ export function chatPeople(
   return people;
 }
 
+function isMember(handle: PersonMemoryChat["handles"][number]): boolean {
+  return handle.status !== "left" && handle.status !== "removed";
+}
+
 /**
- * Which lines go to which person's memory.
+ * Which lines go to which person's memory: every line of the Chat (people's,
+ * this agent's, other agents') goes to every person who is in it, the way a
+ * person in the Chat sees it (owner, 2026-11-05: a DM knows the group talk).
  *
- * - A Chat with one person: that person gets every line, theirs, this
- *   agent's, and other agents'.
- * - A Chat with two or more people: each person gets only their own lines
- *   and this agent's answers to them. Another person's lines, and other
- *   agents' lines, go nowhere.
+ * - A Chat with one person: that person gets every line.
+ * - A Chat with two or more people: each person whose Handle is active gets
+ *   every line. A person who left or was removed gets nothing new.
  */
 export function personMemoryWrites(
   chat: PersonMemoryChat,
@@ -189,18 +189,83 @@ export function personMemoryWrites(
 ): Map<string, PersonMemoryLine[]> {
   const people = chatPeople(chat, lines);
   const writes = new Map<string, PersonMemoryLine[]>();
+  if (!lines.length) return writes;
   if (people.size === 1) {
     const [person] = people;
     writes.set(person!, [...lines]);
     return writes;
   }
-  for (const person of people) {
-    const own = lines.filter((line) =>
-      line.speakerKind === "self" ? line.answers === person : line.speakerId === person
-    );
-    if (own.length) writes.set(person, own);
+  for (const handle of chat.handles) {
+    if (handle.kind === "user" && isMember(handle)) writes.set(handle.id, [...lines]);
   }
   return writes;
+}
+
+/** The turn's person's Handle in a Chat, when they are still in it. */
+export function memberHandle(
+  chat: PersonMemoryChat,
+  personId: string,
+): PersonMemoryChat["handles"][number] | undefined {
+  const handle = chat.handles.find((entry) => entry.id === personId && entry.kind === "user");
+  return handle && isMember(handle) ? handle : undefined;
+}
+
+function partText(part: MessagePartResponse): string {
+  switch (part.type) {
+    case "text":
+      return part.value;
+    case "link":
+      return part.value;
+    case "media": {
+      const kind = part.mime_type.split("/")[0];
+      if (kind === "image") return "[Image]";
+      if (kind === "video") return "[Video]";
+      if (kind === "audio") return "[Audio]";
+      return `[File: ${part.filename}]`;
+    }
+    case "system":
+      return "";
+    default:
+      return `[${part.type.replaceAll("_", " ")}]`;
+  }
+}
+
+/**
+ * A Chat's recent Messages as Relay holds them, as memory rows oldest first,
+ * for the person `personId`: system Messages and Messages sent before the
+ * person joined are left out; media is named, never fetched.
+ * `messages` is newest first (GET /v1/chats/{chatId}/messages, order desc).
+ */
+export function relayChatRows(
+  chat: PersonMemoryChat,
+  messages: readonly Message[],
+  personId: string,
+): string[] {
+  const joinedAt = memberHandle(chat, personId)?.joined_at;
+  const joined = joinedAt ? Date.parse(joinedAt) : Number.NaN;
+  const label = chatLabel(chat);
+  const me = selfName(chat);
+  const rows: string[] = [];
+  for (const message of [...messages].reverse()) {
+    if (message.is_system_message) continue;
+    const at = message.sent_at ?? message.created_at;
+    if (!Number.isNaN(joined) && Date.parse(at) < joined) continue;
+    const text = oneLine((message.parts ?? []).map(partText).filter(Boolean).join(" "));
+    if (!text) continue;
+    const from = message.from_handle;
+    const speaker = message.is_from_me || from?.is_me
+      ? me
+      : from?.display_name?.trim() || (from?.handle ? `@${from.handle}` : "Someone");
+    rows.push(personMemoryRow(label, {
+      key: `${chat.id}:${message.id}`,
+      messageId: message.id,
+      at,
+      speakerKind: "user",
+      speaker,
+      text,
+    }));
+  }
+  return rows;
 }
 
 /**
@@ -228,7 +293,7 @@ export function personMemoryRow(label: string, line: PersonMemoryLine): string {
 
 /** What a turn reads back: other Chats' recent lines and search hits. */
 export interface PersonMemoryRecall {
-  chats: Array<{ label: string; lines: string[] }>;
+  chats: Array<{ chatId: string; label: string; lines: string[] }>;
   hits: string[];
 }
 
@@ -243,5 +308,5 @@ export function personMemoryContent(recall: PersonMemoryRecall): string | undefi
   }
   if (recall.hits.length) sections.push(`## Search hits\n${recall.hits.join("\n")}`);
   if (!sections.length) return undefined;
-  return `<person_memory>\nThis person's lines from your other chats with them, oldest first.\n\n${sections.join("\n\n")}\n</person_memory>`;
+  return `<person_memory>\nYour other chats with this person, oldest first.\n\n${sections.join("\n\n")}\n</person_memory>`;
 }

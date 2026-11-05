@@ -10,6 +10,7 @@
 //   model Message with the person's other Chats and a search tool.
 //
 // It loads `agents`, which needs the Workers runtime, so it is its own entry.
+import type Relay from "@relaymessenger/sdk";
 import { Agent, getAgentByName } from "agents";
 import { AgentSearchProvider } from "agents/context";
 import { type ModelMessage, tool, type ToolSet, type UIMessage } from "ai";
@@ -17,12 +18,14 @@ import { z } from "zod";
 
 import {
   chatLabel,
+  memberHandle,
   personMemoryContent,
   personMemoryLines,
   personMemoryName,
   personMemoryReader,
   personMemoryRow,
   personMemoryWrites,
+  relayChatRows,
   type PersonMemoryChat,
   type PersonMemoryRecall,
 } from "./person-memory.js";
@@ -36,6 +39,7 @@ export {
   personMemoryReader,
   personMemoryRow,
   personMemoryWrites,
+  relayChatRows,
   type PersonMemoryChat,
   type PersonMemoryLine,
   type PersonMemoryRecall,
@@ -45,6 +49,8 @@ export {
 export const PERSON_MEMORY_CHAT_LINES = 20;
 /** Other Chats a turn reads, most recent first. */
 export const PERSON_MEMORY_CHATS = 5;
+/** Messages of each other Chat a turn reads from Relay, when `relay` is set. */
+export const PERSON_MEMORY_RELAY_MESSAGES = 30;
 const INDEX_LABEL = "person_memory";
 
 interface StoredChat {
@@ -121,6 +127,7 @@ export class RelayPersonMemory extends Agent {
       ORDER BY updated_at DESC
       LIMIT ${PERSON_MEMORY_CHATS}
     `.map((chat) => ({
+      chatId: chat.chat_id,
       label: chat.label,
       lines: (JSON.parse(chat.recent) as Array<{ content: string }>).map((row) => row.content),
     }));
@@ -147,6 +154,12 @@ export interface PersonMemoryOptions {
   chat(): Promise<PersonMemoryChat | undefined>;
   /** Set when one Worker runs several agents: `person:<agentId>:<personId>`. */
   agentId?: string;
+  /**
+   * A Relay client (`new Relay(...)` from @relaymessenger/sdk). When set, a
+   * turn reads each other Chat's recent Messages from Relay, so it sees the
+   * whole talk of a group, not only the lines this agent took in.
+   */
+  relay?: Pick<Relay, "chats">;
 }
 
 /** What a Think agent needs from itself: its stored history. */
@@ -251,6 +264,27 @@ export function personMemory(agent: PersonMemoryAgent, options: PersonMemoryOpti
       if (!person) return undefined;
       const memory = await stub(person);
       const recall = await memory.recall(chat.id, lastUserText(messages));
+      const relay = options.relay;
+      if (relay) {
+        // Each other Chat as Relay holds it, in parallel. A Chat the person
+        // is no longer in is left out; any error keeps the stored lines.
+        const read = await Promise.all(recall.chats.map(async (stored) => {
+          try {
+            const current = await relay.chats.retrieve(stored.chatId) as PersonMemoryChat;
+            if (!memberHandle(current, person)) return undefined;
+            const page = await relay.chats.messages.list(stored.chatId, {
+              order: "desc",
+              limit: PERSON_MEMORY_RELAY_MESSAGES,
+            });
+            return { ...stored, label: chatLabel(current), lines: relayChatRows(current, page.data, person) };
+          } catch {
+            return stored;
+          }
+        }));
+        recall.chats = read.filter((entry) => entry !== undefined);
+        const shown = new Set(recall.chats.flatMap((entry) => entry.lines));
+        recall.hits = recall.hits.filter((hit) => !shown.has(hit));
+      }
       const tools: ToolSet = {
         search_person_memory: tool({
           description:
