@@ -8,6 +8,8 @@ import { RELAY_CHAT_ID_ENV, RELAY_HINT_SECTION, relayHint, runPiChannel } from "
 import { relayTools } from "./tools.js";
 import { registerRelayAdapter, relayChannelAdapter, RELAY_ADAPTER } from "./pi-channels.js";
 import { SessionChannel } from "./session.js";
+import { OwnerApprovals } from "./approvals.js";
+import { registerRelayAuthorizer, relayAuthorizer } from "./session-approvals.js";
 import { transcribeCpp } from "./voice.js";
 
 let controller: AbortController | undefined;
@@ -78,6 +80,25 @@ const sessionMode = (settings: RelaySettings): boolean => (process.env.RELAY_PI_
 const attachSession = (pi: ExtensionAPI): void => {
   let channel: SessionChannel | undefined;
   let stop: AbortController | undefined;
+  // The owner's approval card, as a pi-permission-system chain link: registered
+  // once both the channel and that extension's session are up, in either order.
+  let link: ReturnType<typeof relayAuthorizer> | undefined;
+  let permissionsSession: string | undefined;
+  let unregister: (() => void) | undefined;
+  const register = (): void => {
+    if (unregister || !link || !permissionsSession) return;
+    try {
+      unregister = registerRelayAuthorizer(permissionsSession, (ask) => link!.authorize(ask));
+    } catch (error) {
+      console.error(`Relay: the approval link was not registered: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  pi.events.on("permissions:ready", (data) => {
+    const sessionId = (data as { sessionId?: unknown } | undefined)?.sessionId;
+    if (typeof sessionId !== "string" || !sessionId) return;
+    if (sessionId !== permissionsSession) { unregister?.(); unregister = undefined; permissionsSession = sessionId; }
+    register();
+  });
   pi.on("session_start", async (_event, ctx) => {
     // Only the RPC session an app drives: a terminal Pi on the same account
     // would hold a second connection on the same token, a print or JSON run
@@ -96,9 +117,11 @@ const attachSession = (pi: ExtensionAPI): void => {
     const voice = settings.transcribeCpp;
     stop = new AbortController();
     const relay = new Relay({ apiKey: token, ...(baseURL ? { baseURL } : {}) });
+    const approvals = new OwnerApprovals({ client: relay, say: (line) => { console.error(`Relay: ${line}`); } });
     channel = new SessionChannel(pi, {
       agentToken: token,
       relay,
+      approvals,
       isIdle: () => ctx.isIdle(),
       lastChatFile: join(agentDir(), "relay-last-chat.json"),
       ...(baseURL ? { baseURL } : {}),
@@ -106,6 +129,8 @@ const attachSession = (pi: ExtensionAPI): void => {
       ...(voice ? { transcribe: transcribeCpp({ module: home(voice.module), model: home(voice.model) }) } : {}),
     });
     const current = channel;
+    link = relayAuthorizer({ approvals, fromRelay: () => current.fromRelay });
+    register();
     registerRelayTools(pi, relay, () => current.chatId, () => current.messageId, (chat) => current.latestIn(chat));
     void channel.run(stop.signal).catch((error: unknown) => {
       console.error(`Relay: the session channel stopped: ${error instanceof Error ? error.message : String(error)}`);
@@ -118,8 +143,12 @@ const attachSession = (pi: ExtensionAPI): void => {
   pi.on("session_shutdown", async () => {
     stop?.abort();
     channel?.stop();
+    unregister?.();
     stop = undefined;
     channel = undefined;
+    link = undefined;
+    unregister = undefined;
+    permissionsSession = undefined;
   });
 };
 

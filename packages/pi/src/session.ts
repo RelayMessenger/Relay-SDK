@@ -6,6 +6,7 @@ import Relay, {
 } from "@relaymessenger/sdk";
 import { inboundText, repliedContext, replyTag, sendAnswer, sendToChat, typing, wordsOf } from "./index.js";
 import { MESSAGE_TOOL } from "./tools.js";
+import type { OwnerApprovals } from "./approvals.js";
 import type { Transcribe } from "./voice.js";
 
 export interface TextBlock { readonly type: "text"; readonly text: string }
@@ -39,6 +40,8 @@ export interface SessionChannelOptions {
    * run no Message started (a helper's result) sends its words there.
    */
   readonly lastChatFile?: string;
+  /** The owner approval cards: a tap on one answers it and is not a Message for the session. */
+  readonly approvals?: Pick<OwnerApprovals, "take">;
 }
 
 /**
@@ -270,7 +273,9 @@ export class SessionChannel {
   async receive(event: RelayWebhookEvent): Promise<void> {
     const inflight = this.#inflight.get(event.event_id);
     if (inflight) return inflight;
-    if (this.#seen.has(event.event_id) || !accepts(event, this.#options.senders)) return;
+    if (this.#seen.has(event.event_id)) return;
+    if (await this.#options.approvals?.take(event)) { this.#seen.add(event.event_id); return; }
+    if (!accepts(event, this.#options.senders)) return;
     const handoff = (async () => {
       const content = await sessionContent(event.data, {
         download: (part) => this.#download(part),
@@ -292,6 +297,10 @@ export class SessionChannel {
    */
   get chatId(): string | undefined {
     return (this.#pending?.data ?? this.#background.at(-1)?.data ?? this.#last)?.chat.id;
+  }
+  /** Whether a Relay Message started or steered the run going now. */
+  get fromRelay(): boolean {
+    return this.#pending !== undefined;
   }
   /** The Message the tools react and thread to, chosen as `chatId` is. */
   get messageId(): string | undefined {

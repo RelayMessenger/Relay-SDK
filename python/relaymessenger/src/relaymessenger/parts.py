@@ -116,6 +116,155 @@ class RatingRequestPartResponse(RatingRequestPart):
     reactions: Optional[List[Dict[str, Any]]]
 
 
+#: A2UI v1.0 (https://a2ui.org). The message shapes are A2UI's own JSON
+#: schemas (``specification/v1_0/json/`` in a2ui-project/A2UI):
+#: ``agent_to_renderer.json`` for what an agent sends to draw or change a card,
+#: ``renderer_to_agent.json`` for a tap (``action``). ``createSurface``'s
+#: ``catalogId`` is Relay's
+#: (``https://relayapp.im/a2ui/catalogs/relay/v1/catalog.json``) or the A2UI
+#: basic catalog (``https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json``).
+A2uiVersion = Literal["v1.0"]
+
+
+class _A2uiComponentRequired(TypedDict):
+    id: str
+    component: str
+
+
+class A2uiComponent(_A2uiComponentRequired, total=False):
+    """One component; the surface's catalog defines its other properties,
+    which ride in the same dict (for example ``text`` on a ``Text``)."""
+
+
+class _A2uiCreateSurfaceRequired(TypedDict):
+    surfaceId: str
+
+
+class A2uiCreateSurface(_A2uiCreateSurfaceRequired, total=False):
+    catalogId: str
+    #: When True, every tap on the surface carries its data model in the message metadata.
+    sendDataModel: bool
+    components: List[Dict[str, Any]]
+    dataModel: Dict[str, Any]
+    metadata: Dict[str, Any]
+
+
+class A2uiCreateSurfaceMessage(TypedDict):
+    version: A2uiVersion
+    createSurface: A2uiCreateSurface
+
+
+class A2uiUpdateComponents(TypedDict):
+    surfaceId: str
+    components: List[Dict[str, Any]]
+
+
+class A2uiUpdateComponentsMessage(TypedDict):
+    """Adds or replaces components by ``id``."""
+
+    version: A2uiVersion
+    updateComponents: A2uiUpdateComponents
+
+
+class _A2uiUpdateDataModelRequired(TypedDict):
+    surfaceId: str
+    value: Any
+
+
+class A2uiUpdateDataModel(_A2uiUpdateDataModelRequired, total=False):
+    #: A JSON Pointer; none, or ``/``, is the whole data model. A None value deletes the key.
+    path: str
+
+
+class A2uiUpdateDataModelMessage(TypedDict):
+    version: A2uiVersion
+    updateDataModel: A2uiUpdateDataModel
+
+
+class A2uiDeleteSurface(TypedDict):
+    surfaceId: str
+
+
+class A2uiDeleteSurfaceMessage(TypedDict):
+    version: A2uiVersion
+    deleteSurface: A2uiDeleteSurface
+
+
+#: The agent-to-renderer messages Relay's ``DataPart`` takes from an agent.
+A2uiAgentToRendererMessage = Union[
+    A2uiCreateSurfaceMessage,
+    A2uiUpdateComponentsMessage,
+    A2uiUpdateDataModelMessage,
+    A2uiDeleteSurfaceMessage,
+]
+
+
+class _A2uiActionRequired(TypedDict):
+    #: The component's ``action.event.name``.
+    name: str
+    surfaceId: str
+    sourceComponentId: str
+    #: ISO 8601.
+    timestamp: str
+    #: The component's ``action.event.context``, bindings resolved.
+    context: Dict[str, Any]
+
+
+class A2uiAction(_A2uiActionRequired, total=False):
+    """A person's tap on a component (A2UI ``action``)."""
+
+    userMessage: str
+    metadata: Dict[str, Any]
+
+
+class A2uiActionMessage(TypedDict):
+    """A tap, as a person's app sends it in a data part."""
+
+    version: A2uiVersion
+    action: A2uiAction
+
+
+class DataPart(TypedDict):
+    """A card drawn with A2UI v1.0 (contract ``DataPart``). Only an agent
+    sends one: ``data`` is a non-empty list of agent-to-renderer messages Relay
+    applies in order. A later updateComponents, updateDataModel or
+    deleteSurface for a surface in the chat changes the card that drew it, in
+    place."""
+
+    type: Literal["data"]
+    media_type: Literal["application/a2ui+json"]
+    data: List[A2uiAgentToRendererMessage]
+
+
+class DataPartResponse(TypedDict):
+    """A data part as read (contract ``DataPartResponse``). From an agent,
+    ``data`` is every accepted message for each surface the part created. From
+    a person's app it holds ``action`` messages (taps), delivered only to the
+    agent that created the surface; every other reader sees ``data`` empty."""
+
+    type: Literal["data"]
+    media_type: Literal["application/a2ui+json"]
+    data: List[Union[A2uiAgentToRendererMessage, A2uiActionMessage]]
+    reactions: Optional[List[Dict[str, Any]]]
+
+
+class A2uiRendererCapabilitiesV1(TypedDict):
+    supportedCatalogIds: List[str]
+
+
+#: A2UI ``a2uiRendererCapabilities`` (renderer_capabilities.json): the
+#: catalogs the Relay app draws, Relay's first. Its one key, ``v1.0``, is not
+#: a Python name, so it is declared functionally.
+A2uiRendererCapabilities = TypedDict("A2uiRendererCapabilities", {"v1.0": A2uiRendererCapabilitiesV1})
+
+
+class MessageEventMetadata(TypedDict, total=False):
+    """Message metadata on a Message event."""
+
+    #: On ``message.received``: the catalogs the reader's Relay app draws.
+    a2uiRendererCapabilities: A2uiRendererCapabilities
+
+
 def rating_request_part() -> RatingRequestPart:
     """Send alone: {"type": "rating_request"}; words/target are server-owned."""
     return {"type": "rating_request"}
@@ -138,6 +287,7 @@ MessagePart = Union[
     PaymentPart,
     RatingRequestPart,
     PlacePart,
+    DataPart,
 ]
 
 
@@ -241,6 +391,19 @@ def payment_part(checkout_url: str) -> PaymentPart:
 
 
 __all__ = [
+    "A2uiAction",
+    "A2uiActionMessage",
+    "A2uiAgentToRendererMessage",
+    "A2uiComponent",
+    "A2uiCreateSurfaceMessage",
+    "A2uiDeleteSurfaceMessage",
+    "A2uiRendererCapabilities",
+    "A2uiUpdateComponentsMessage",
+    "A2uiUpdateDataModelMessage",
+    "A2uiVersion",
+    "DataPart",
+    "DataPartResponse",
+    "MessageEventMetadata",
     "BUTTONS_MAX_ITEMS",
     "BUTTON_LABEL_MAX_LENGTH",
     "BUTTON_URL_MAX_LENGTH",

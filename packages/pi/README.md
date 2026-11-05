@@ -64,6 +64,24 @@ its last words to the chat of the last Message, kept in
 `relay-last-chat.json` in the agent directory so it survives a restart; a turn
 typed in the session stays there.
 
+## Owner approval in session mode
+
+With [`@gotgenes/pi-permission-system`](https://www.npmjs.com/package/@gotgenes/pi-permission-system)
+loaded, a gated tool call in a run a Relay Message started is asked of the
+agent's owners with the same card the Relay CLI sends in channel mode:
+**Allow once**, **Allow for session** or **Deny**, in each owner's own chat
+with the agent. Only an owner's tap counts. No answer in 10 minutes denies
+it. Allow for session covers the patterns the permission system suggests
+for the call, until the session ends. A run typed at the app, a path or
+external-directory ask (the chain will not let a link allow those), or an
+agent no owner can be reached for is asked in the app as before.
+
+Turn it on by naming the `relay` link in the permission system's config:
+
+```json
+{ "authorizerChain": ["relay"] }
+```
+
 ## With pi-channels
 
 [pi-channels](https://github.com/espennilsen/pi/tree/main/packages/pi-channels)

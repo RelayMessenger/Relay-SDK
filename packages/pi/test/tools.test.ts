@@ -66,7 +66,7 @@ describe("tool registration", () => {
     vi.stubEnv("RELAY_PI_CHAT_ID", "chat-1");
     vi.stubEnv("RELAY_AGENT_TOKEN", "secret");
     const tools: string[] = [];
-    native({ registerTool: (tool: { name: string }) => tools.push(tool.name), registerCommand: vi.fn(), on: vi.fn() } as never);
+    native({ registerTool: (tool: { name: string }) => tools.push(tool.name), registerCommand: vi.fn(), on: vi.fn(), events: { on: vi.fn() } } as never);
     expect(tools).toEqual(["message", "relay_request_location", "relay_read_location", "relay_send_media", "relay_react"]);
   });
   it("passes the chat, token and API origin to the Pi it starts", () => {
@@ -78,7 +78,7 @@ describe("tool registration", () => {
     vi.stubEnv("RELAY_PI_CHAT_ID", "");
     vi.stubEnv("RELAY_AGENT_TOKEN", "secret");
     const tools: string[] = [];
-    native({ registerTool: (tool: { name: string }) => tools.push(tool.name), registerCommand: vi.fn(), on: vi.fn() } as never);
+    native({ registerTool: (tool: { name: string }) => tools.push(tool.name), registerCommand: vi.fn(), on: vi.fn(), events: { on: vi.fn() } } as never);
     expect(tools).toEqual([]);
   });
 });

@@ -76,7 +76,7 @@ describe("per-person memory routing", () => {
     expect(personMemoryReader(council, lines)).toBe(ADVAIT.id);
   });
 
-  it("gives each of two people only their own lines and this agent's answers to them", () => {
+  it("gives each person in a Chat with two people every line, as a member sees it", () => {
     const pair: PersonMemoryChat = {
       id: "chat-pair",
       display_name: "Launch",
@@ -91,26 +91,30 @@ describe("per-person memory routing", () => {
       said("p5", PAUL, "Paul weighs in."),
     ]);
     const writes = personMemoryWrites(pair, lines);
-    expect(writes.get(ADVAIT.id)!.map((line) => line.text)).toEqual([
+    const every = [
       "Advait asks about pricing.",
       "Answer to Advait.",
-    ]);
-    expect(writes.get(BOB.id)!.map((line) => line.text)).toEqual([
       "Bob's private salary is 90k.",
       "Answer to Bob.",
-    ]);
+      "Paul weighs in.",
+    ];
+    expect([...writes.keys()]).toEqual([ADVAIT.id, BOB.id]);
+    expect(writes.get(ADVAIT.id)!.map((line) => line.text)).toEqual(every);
+    expect(writes.get(BOB.id)!.map((line) => line.text)).toEqual(every);
     expect(personMemoryReader(pair, lines)).toBeUndefined();
   });
 
-  it("counts a person who left by their lines, so a Chat they spoke in stays shared", () => {
+  it("counts a person who left by their lines, and stores nothing new for them", () => {
     const chat: PersonMemoryChat = {
       id: "chat-left",
       is_group: true,
-      handles: [ADVAIT, { ...BOB, status: "left" }, STEVE],
+      handles: [ADVAIT, { ...BOB, status: "removed" }, STEVE],
     };
-    const lines = personMemoryLines(chat, [said("l1", BOB, "Bob before leaving.")]);
+    const lines = personMemoryLines(chat, [said("l1", BOB, "Bob before leaving."), said("l2", ADVAIT, "Bye Bob.")]);
     expect(personMemoryReader(chat, lines)).toBeUndefined();
-    expect(personMemoryWrites(chat, lines).get(ADVAIT.id)).toBeUndefined();
+    const writes = personMemoryWrites(chat, lines);
+    expect([...writes.keys()]).toEqual([ADVAIT.id]);
+    expect(writes.get(ADVAIT.id)!.map((line) => line.text)).toEqual(["Bob before leaving.", "Bye Bob."]);
   });
 
   it("stores only what this agent's sends delivered", () => {
@@ -132,7 +136,7 @@ describe("per-person memory routing", () => {
 
   it("renders nothing when there is nothing to show", () => {
     expect(personMemoryContent({ chats: [], hits: [] })).toBeUndefined();
-    expect(personMemoryContent({ chats: [{ label: "DM", lines: ["[DM, 2026-10-08] Advait: hi"] }], hits: [] }))
+    expect(personMemoryContent({ chats: [{ chatId: "chat-dm", label: "DM", lines: ["[DM, 2026-10-08] Advait: hi"] }], hits: [] }))
       .toContain("## DM\n[DM, 2026-10-08] Advait: hi");
   });
 });
