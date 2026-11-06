@@ -213,11 +213,11 @@ export const answerMessages = (answer: string): { parts: MessagePart[]; error?: 
   const split = splitAnswer(answer);
   const messages: { parts: MessagePart[]; error?: string; payment?: PaymentRequestCreateParams }[] = [];
   for (const [first, ...rest] of split.messages) {
-    if (first?.type !== "text" || first.value.length <= 10_000) {
+    if (first?.type !== "text" || first.value.length <= 65_536) {
       messages.push({ parts: first ? [first, ...rest] : rest });
       continue;
     }
-    const chunks = first.value.match(/[\s\S]{1,10000}/gu) ?? [];
+    const chunks = first.value.match(/[\s\S]{1,65536}/gu) ?? [];
     for (const [index, chunk] of chunks.entries()) {
       messages.push({ parts: [{ type: "text", value: chunk }, ...(index === chunks.length - 1 ? rest : [])] });
     }

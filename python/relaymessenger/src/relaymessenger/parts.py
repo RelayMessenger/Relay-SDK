@@ -29,7 +29,7 @@ class _TextPartRequired(TypedDict):
 
 
 class TextPart(_TextPartRequired, total=False):
-    """Plain text, 1 to 10000 characters. A mention names one chat member:
+    """Plain text, 1 to 65536 UTF-16 code units. A mention names one chat member:
     ``mention`` is their handle and ``mention_range`` the ``[start, end)`` of
     the mention in ``value``, in UTF-16 code units; without a range the mention
     covers the whole value."""

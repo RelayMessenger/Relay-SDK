@@ -23154,7 +23154,7 @@ var ConsumerLock = class {
 };
 
 // src/bridge.ts
-var MAX_RELAY_TEXT = 1e4;
+var MAX_RELAY_TEXT = 65536;
 function contactCardMeta(systemEvent, redactor2) {
   if (!isRecord3(systemEvent) || systemEvent.type !== "contact_card_shared" || !isRecord3(systemEvent.contact_card)) return {};
   const actor = isRecord3(systemEvent.actor) && typeof systemEvent.actor.handle === "string" ? systemEvent.actor.handle : null;
@@ -23911,8 +23911,8 @@ var RelayChannel = class {
     const redactedText = this.#redactor.text(text5);
     const known = [...place ? [place] : [], ...card ? [card] : []];
     const plannedMedia = (media ?? []).map(mediaPlan);
-    if (!redactedText && !buttons && !link && !payment && !selection && !form && !ratingRequest && known.length === 0 && plannedMedia.length === 0 || redactedText.length > 1e4) {
-      return failure("text must be 1-10000 UTF-16 code units after token redaction");
+    if (!redactedText && !buttons && !link && !payment && !selection && !form && !ratingRequest && known.length === 0 && plannedMedia.length === 0 || redactedText.length > 65536) {
+      return failure("text must be 1-65536 UTF-16 code units after token redaction");
     }
     const idempotencyKey = `claude-reply-${createHash4("sha256").update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`).digest("hex")}`;
     const plannedBodies = payment && !redactedText && !link && known.length === 0 && plannedMedia.length === 0 ? [] : buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, void 0, form, ratingRequest, [...plannedMedia, ...known]);
@@ -25086,7 +25086,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: {
             type: "string",
             minLength: 1,
-            maxLength: 1e4,
+            maxLength: 65536,
             description: "Plain text Relay Message. Optional only when buttons, a link or a payment are given; then the question, or the words before the link or payment, go here."
           },
           link: {

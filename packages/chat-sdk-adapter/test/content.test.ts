@@ -19,7 +19,8 @@ describe("Relay message content", () => {
     ).toBe("bold and Relay");
   });
 
-  it("chunks at the locked 10,000 UTF-16-unit part limit", () => {
+  it("chunks at the locked 65,536 UTF-16-unit part limit", () => {
+    expect(RELAY_MAX_TEXT_PART_LENGTH).toBe(65_536);
     const value = `${"a".repeat(
       RELAY_MAX_TEXT_PART_LENGTH - 1,
     )}😀tail`;

@@ -238,7 +238,7 @@ export function relaySendInputSchema(
   kind: z.enum(kinds as [RelaySendKind, ...RelaySendKind[]]),
   // Empty words are no words: the SDK builds no text part for them, and a
   // model that fills every field sends "" rather than leaving text out.
-  text: z.string().trim().max(10_000).optional().describe(
+  text: z.string().trim().max(65_536).optional().describe(
     "The words of the Message. Leave it out, or empty, when buttons carry the whole turn. With kind rich_card or "
     + "carousel, optional words shown above the card.",
   ),
@@ -289,7 +289,7 @@ export function relaySendInputSchema(
   name: z.string().trim().min(1).max(256).optional().describe("With kind place, optional: the place's name."),
   address: z.string().trim().min(1).max(256).optional().describe("With kind place, optional: the place's address."),
   prompt: z.string().trim().min(1).max(4_000).optional(),
-  caption: z.string().trim().min(1).max(10_000).optional(),
+  caption: z.string().trim().min(1).max(65_536).optional(),
   style: z.string().trim().min(1).max(500).optional(),
   // Relay's chat activity (PUT /v1/chats/{chatId}/activity): 1 to 21 visible
   // characters and one optional emoji, shown under the agent's name while it

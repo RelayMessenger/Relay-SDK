@@ -118,7 +118,7 @@ Text, link, and media parts are rendered into agent-visible text. An inbound
 media part stays a labeled signed URL.
 
 The plugin declares text, media and reactions. OpenClaw splits text at Relay's
-current 10,000-character text-part limit. A file OpenClaw sends (`mediaUrl`, a
+current 65,536-character text-part limit. A file OpenClaw sends (`mediaUrl`, a
 URL or an allowed local path) is loaded through OpenClaw's media policy,
 uploaded to Relay and sent as its own media Message after any words. The
 shared `message` tool's `react` action reacts to a Relay Message: ❤️ 👍 👎 😂

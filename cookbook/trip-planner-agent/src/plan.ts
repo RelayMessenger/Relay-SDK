@@ -34,9 +34,9 @@ export interface TripPlanner {
   plan(request: PlanRequest): Promise<TripPlan>;
 }
 
-/** Relay accepts 1-100 parts, each 1-10000 characters. */
+/** Relay accepts 1-100 parts, each 1-65536 UTF-16 code units. */
 const MAX_PARTS = 100;
-const MAX_PART_LENGTH = 10_000;
+const MAX_PART_LENGTH = 65_536;
 
 const clamp = (value: string): string =>
   value.length <= MAX_PART_LENGTH ? value : `${value.slice(0, MAX_PART_LENGTH - 1)}…`;

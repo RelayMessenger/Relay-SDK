@@ -345,8 +345,8 @@ export class RelayChannel {
     // the model's own media arguments in its place.
     const known: MessagePart[] = [...(place ? [place] : []), ...(card ? [card] : [])];
     const plannedMedia = (media ?? []).map(mediaPlan);
-    if ((!redactedText && !buttons && !link && !payment && !selection && !form && !ratingRequest && known.length === 0 && plannedMedia.length === 0) || redactedText.length > 10_000) {
-      return failure("text must be 1-10000 UTF-16 code units after token redaction");
+    if ((!redactedText && !buttons && !link && !payment && !selection && !form && !ratingRequest && known.length === 0 && plannedMedia.length === 0) || redactedText.length > 65_536) {
+      return failure("text must be 1-65536 UTF-16 code units after token redaction");
     }
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)

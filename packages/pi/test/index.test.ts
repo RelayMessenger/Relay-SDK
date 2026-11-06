@@ -59,7 +59,7 @@ describe("Pi channel", () => {
   });
   it("deduplicates concurrent replay and chunks replies", async () => {
     const event = makeEvent("same", "one"); const send = vi.fn().mockResolvedValue({}); const { relay } = relayFor([event, event], send);
-    await new PiChannel({ agentToken: "secret", relay, spawnPi: () => fakePi(records("x".repeat(10_001))) }).run();
+    await new PiChannel({ agentToken: "secret", relay, spawnPi: () => fakePi(records("x".repeat(65_537))) }).run();
     expect(send).toHaveBeenCalledTimes(2);
   });
   it("times out and stops on abort", async () => {
@@ -129,7 +129,7 @@ describe("buttons", () => {
     expect(answerMessages("```buttons\n[{\"label\": \"Open\", \"url\": \"https://a.test\"}]\n```")).toEqual([
       { parts: [{ type: "buttons", items: [{ url: "https://a.test", label: "Open" }] }] },
     ]);
-    const long = "x".repeat(10_001) + "\n\n```buttons\n[{\"label\": \"A\"}]\n```";
+    const long = "x".repeat(65_537) + "\n\n```buttons\n[{\"label\": \"A\"}]\n```";
     const messages = answerMessages(long);
     expect(messages).toHaveLength(2);
     expect(messages[1]!.parts).toEqual([{ type: "text", value: "x" }, { type: "buttons", items: [{ label: "A" }] }]);

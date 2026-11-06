@@ -85,7 +85,7 @@ const readReplyTarget = async (
 export const inboundMediaPrompt = async (
   turn: BridgeTurn, options?: Omit<InboundMediaOptions, "chatId">,
 ): Promise<{ text: string; images: string[] }> => {
-  const lines = turn.text ? [turn.text.slice(0, 10_000)] : [];
+  const lines = turn.text ? [turn.text.slice(0, 65_536)] : [];
   if (turn.replying) lines.push(replyTargetContext(turn.replying, await readReplyTarget(turn.replying, options)));
   const context = selectionReplyContext(turn.selection, turn.richMessage);
   if (context) lines.push(context);
