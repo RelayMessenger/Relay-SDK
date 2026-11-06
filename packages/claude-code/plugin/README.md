@@ -190,7 +190,7 @@ also fail and clear any surviving active turn.
 Sends plain text through `chats.messages.send` with:
 
 - `chat_id` copied from an allowlisted channel event;
-- `text` of at most 10,000 UTF-16 code units;
+- `text` of at most 65,536 UTF-16 code units;
 - a caller-selected stable `send_id`;
 - optional `buttons`, `link`, `selection`, or `payment`;
 - optional `media`, `place`, `rich_card`, or `carousel` (one of the four); and

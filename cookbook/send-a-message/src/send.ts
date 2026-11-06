@@ -24,8 +24,8 @@ export async function sendTextMessage(
   ) {
     throw new RangeError("idempotencyKey must be 1–255 characters");
   }
-  if (input.text.length < 1 || input.text.length > 10_000) {
-    throw new RangeError("text must be 1–10,000 UTF-16 code units");
+  if (input.text.length < 1 || input.text.length > 65_536) {
+    throw new RangeError("text must be 1–65,536 UTF-16 code units");
   }
 
   return relay.chats.messages.send(input.chatId, {

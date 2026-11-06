@@ -362,7 +362,7 @@ Only pictures and group icons must be images. Those are set with
 `@relaymessenger/sdk`, never through this adapter. The current attachment
 rules are at <https://docs.relayapp.im>.
 
-Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
+Relay text parts are plain text and are limited to 65,536 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message
 is limited to 100 parts.
 

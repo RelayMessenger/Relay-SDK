@@ -47,7 +47,7 @@ const TO_BUFFER_OPTIONS = {
   throwOnUnsupported: false,
 } as const;
 
-export const RELAY_MAX_TEXT_PART_LENGTH = 10_000;
+export const RELAY_MAX_TEXT_PART_LENGTH = 65_536;
 export const RELAY_MAX_MESSAGE_PARTS = 100;
 export const RELAY_MAX_ATTACHMENT_BYTES = 104_857_600;
 

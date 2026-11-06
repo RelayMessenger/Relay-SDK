@@ -12,7 +12,7 @@ import { buildOutboundMediaLoadOptions, type OutboundMediaAccess } from "opencla
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
 import type { ResolvedRelayAccount } from "./types.js";
 
-export const RELAY_TEXT_CHUNK_LIMIT = 10_000;
+export const RELAY_TEXT_CHUNK_LIMIT = 65_536;
 const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 
 export function createRelaySdkClient(

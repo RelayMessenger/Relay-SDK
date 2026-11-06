@@ -50,7 +50,7 @@ import { beyond, inputDetail, inputSummary, type ApprovalChoice, type ApprovalOu
 export const replyKey = (eventId: string): string => `codex-bridge-${eventId}`;
 
 /** The longest text Relay takes in one message part. */
-export const MAX_RELAY_TEXT = 10_000;
+export const MAX_RELAY_TEXT = 65_536;
 
 /**
  * What the bridge sends on `thread/start` and `thread/resume`: the folder and

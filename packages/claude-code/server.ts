@@ -217,7 +217,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: {
             type: "string",
             minLength: 1,
-            maxLength: 10000,
+            maxLength: 65536,
             description: "Plain text Relay Message. Optional only when buttons, a link or a payment are given; then the question, or the words before the link or payment, go here.",
           },
           link: {
