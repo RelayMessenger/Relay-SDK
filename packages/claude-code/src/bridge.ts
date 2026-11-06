@@ -13,7 +13,7 @@ import { senderIsAllowed, type AllowedSenders } from "./config.ts";
 import type { Redactor } from "./redaction.ts";
 import type { DeliveryCandidate } from "./types.ts";
 
-const MAX_RELAY_TEXT = 10_000;
+const MAX_RELAY_TEXT = 65_536;
 
 /**
  * A contact card shared into the chat (`system_event` of type

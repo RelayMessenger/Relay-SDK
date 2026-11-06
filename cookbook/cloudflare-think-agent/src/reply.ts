@@ -35,7 +35,7 @@ const paymentSchema = z.object({
 );
 
 const replySchema = z.object({
-  text: z.string().trim().min(1).max(10_000).optional(),
+  text: z.string().trim().min(1).max(65_536).optional(),
   payment: paymentSchema.optional(),
 }).strict().refine(
   (reply) => reply.text !== undefined || reply.payment !== undefined,

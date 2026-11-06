@@ -13,10 +13,10 @@ import {
 import { isRelayUuid } from "./thread-id.js";
 
 const EVENT_TYPES = new Set<string>(RELAY_WEBHOOK_EVENT_TYPES);
-// One Message may carry 100 text parts of 10,000 UTF-16 units. JSON escaping
+// One Message may carry 100 text parts of 65,536 UTF-16 units. JSON escaping
 // can expand a valid text unit to six ASCII bytes, before envelope metadata.
-// Eight MiB accepts that locked maximum while still bounding untrusted input.
-export const MAX_WEBHOOK_BODY_BYTES = 8 * 1_048_576;
+// Forty MiB accepts that locked maximum while still bounding untrusted input.
+export const MAX_WEBHOOK_BODY_BYTES = 40 * 1_048_576;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
@@ -191,7 +191,7 @@ export async function readWebhookBody(request: Request): Promise<string> {
     length += value.byteLength;
     if (length > MAX_WEBHOOK_BODY_BYTES) {
       await reader.cancel();
-      throw new RangeError("Relay webhook body exceeds 8 MiB");
+      throw new RangeError("Relay webhook body exceeds 40 MiB");
     }
     chunks.push(value);
   }
