@@ -43,6 +43,7 @@ import {
 } from "./chat-tools.js";
 import { abortableDelay, compositionDelayMs, createRelayClient, type RelayClientEnv } from "./typing.js";
 import type { RelayChatTimingPhase } from "./timing.js";
+import { plainChatText } from "./plain-text.js";
 import { withoutSearchMarkers } from "./web-search.js";
 
 /** One option of a selection: a stable value for the app, a label for the person. */
@@ -871,6 +872,8 @@ async function sendOnce(
   const relay = createRelayClient(deps.env);
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
+    // Relay shows inline Markdown only; block marks would arrive as raw "#" and "-".
+    if (input.text) input = { ...input, text: plainChatText(input.text) };
     // The ordinal survives overlap and ledger replay; completed sends alone do not.
     // An unnumbered turn has one logical send key.
     const firstSend = (callKey === undefined || callKey === "1")
