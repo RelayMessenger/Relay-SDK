@@ -336,6 +336,15 @@ describe("relayActions", () => {
     expect((actions.send as unknown as Wired).config.timeoutMs).toBe(0);
   });
 
+  it("sends a text Message without block Markdown and with its inline Markdown", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, compose: async () => {} }).send as unknown as Wired;
+    await wired.config.execute({ kind: "text", text: "### Plan\n- **pack** light\n- leave at 9" }, {});
+    expect(JSON.parse(calls[0]!.body!).message.parts).toEqual([
+      { type: "text", value: "Plan\n**pack** light\nleave at 9" },
+    ]);
+  });
+
   it("numbers each send by its place in the turn, in one step or across steps", async () => {
     const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
     const wired = relayActions(agent(), { ...OPTIONS, compose: async () => {} }).send as unknown as Wired;
