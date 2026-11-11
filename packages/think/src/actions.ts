@@ -1202,7 +1202,8 @@ const START_CALL_NOW_ONLY =
   "Call the person in this one-to-one chat now, by voice. Use it when "
   + "they ask you to call them, such as \"call me\" or \"can you call "
   + "me\". Their phone rings at once; when they answer, you talk with "
-  + "them on the call. You cannot schedule a call for later. Returns "
+  + "them on the call. They can also call you from this chat at any "
+  + "time, and you answer. You cannot schedule a call for later. Returns "
   + "ringing when their phone is ringing, or not_called with the reason "
   + "Relay gave; then tell them that reason in the chat.";
 

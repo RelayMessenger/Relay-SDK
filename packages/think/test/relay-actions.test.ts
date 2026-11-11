@@ -403,6 +403,12 @@ describe("relayActions", () => {
     expect(JSON.parse(calls[0]!.body!).message.parts).toEqual([{ type: "text", value: "Fares fell in May [1]." }]);
   });
 
+  it("tells the model the person can call the agent from the chat", () => {
+    const actions = relayActions(agent(), OPTIONS);
+    expect((actions.start_call as unknown as Wired).config.description)
+      .toContain("They can also call you from this chat at any time, and you answer.");
+  });
+
   it("lets the agent extend an Action's description", () => {
     const actions = relayActions(agent(), {
       ...OPTIONS,
