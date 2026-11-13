@@ -12,7 +12,7 @@ one place and adds the ones that had none.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, TypedDict, Union
 from urllib.parse import urlsplit
 
 from .form_types import FormPart, FormResponsePart
@@ -28,12 +28,22 @@ class _TextPartRequired(TypedDict):
     value: str
 
 
-class TextPart(_TextPartRequired, total=False):
-    """Plain text, 1 to 65536 UTF-16 code units. A mention names one chat member:
-    ``mention`` is their handle and ``mention_range`` the ``[start, end)`` of
-    the mention in ``value``, in UTF-16 code units; without a range the mention
-    covers the whole value."""
+class TextPartMention(TypedDict):
+    """One participant mentioned in a text part: their ``handle`` and the
+    ``[start, end)`` ``range`` of the mention in ``value``, in UTF-16 code units."""
 
+    handle: str
+    range: Tuple[int, int]
+
+
+class TextPart(_TextPartRequired, total=False):
+    """Plain text, 1 to 65536 UTF-16 code units. ``mentions`` names 1 to 20 chat
+    members, sorted by range start and not overlapping. The older single
+    mention is ``mention``, their handle, and ``mention_range``, the
+    ``[start, end)`` of the mention in ``value``; without a range it covers the
+    whole value. A part carries ``mentions`` or ``mention``, never both."""
+
+    mentions: List[TextPartMention]
     mention: Optional[str]
     mention_range: Optional[Tuple[int, int]]
 
@@ -313,9 +323,30 @@ class MessageContent(_MessageContentRequired, total=False):
     silent: bool
 
 
-def text_part(value: str, *, mention: Optional[str] = None, mention_range: Optional[Tuple[int, int]] = None) -> TextPart:
-    """A text part. ``mention_range`` is ``(start, end)`` in UTF-16 code units
-    and needs ``mention``; a mention without a range covers the whole value."""
+def text_part(
+    value: str,
+    *,
+    mention: Optional[str] = None,
+    mention_range: Optional[Tuple[int, int]] = None,
+    mentions: Optional[Sequence[TextPartMention]] = None,
+) -> TextPart:
+    """A text part. ``mentions`` is 1 to 20 ``{"handle", "range"}`` entries,
+    sorted and not overlapping. ``mention_range`` is ``(start, end)`` in UTF-16
+    code units and needs ``mention``; a mention without a range covers the
+    whole value. Give ``mentions`` or ``mention``, not both."""
+    if mentions is not None:
+        if mention is not None or mention_range is not None:
+            raise ValueError("Give mentions or mention, not both.")
+        if not 1 <= len(mentions) <= 20:
+            raise ValueError("mentions holds 1 to 20 entries.")
+        length = len(value.encode("utf-16-le")) // 2
+        previous_end = 0
+        for entry in mentions:
+            start, end = entry["range"]
+            if not previous_end <= start < end <= length:
+                raise ValueError("mentions ranges are sorted, do not overlap, and sit inside value, in UTF-16 code units.")
+            previous_end = end
+        return {"type": "text", "value": value, "mentions": [{"handle": entry["handle"], "range": tuple(entry["range"])} for entry in mentions]}
     if mention_range is not None:
         if mention is None:
             raise ValueError("mention_range needs mention.")
