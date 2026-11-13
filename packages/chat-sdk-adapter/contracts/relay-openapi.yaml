@@ -421,7 +421,7 @@ paths:
           description: |-
             The Chat cannot take this participant (error code `1005`): the
             Chat is not a group, the Handle is already a member, or the group
-            is full (seven Handles, the user plus six agents).
+            is full (twelve Handles, including the sender).
           content:
             application/json:
               schema:
@@ -6005,7 +6005,7 @@ components:
               $ref: "#/components/schemas/ContactRemovedEvent"
     CreateChatRequest:
       type: object
-      description: Create or reuse a Chat with at most one user and one or more agents, up to seven participants total. The authenticated sender belongs to the participant set. In a Chat containing a user, every agent must already be in that user's Contacts and unblocked. User and agent senders follow the same eligibility rule.
+      description: Create or reuse a Chat with at most one user and one or more agents, up to twelve participants total. The authenticated sender belongs to the participant set. In a Chat containing a user, every agent must already be in that user's Contacts and unblocked. User and agent senders follow the same eligibility rule.
       required:
         - from
         - to
@@ -9103,9 +9103,9 @@ components:
           description: Indicates this is a text message part
         value:
           type: string
-          description: Plain text content, measured in UTF-16 code units for mention ranges.
+          description: Plain text content, at most 65,536 UTF-16 code units, the unit mention ranges use.
           minLength: 1
-          maxLength: 10000
+          maxLength: 65536
         mention:
           type:
             - string
@@ -9122,7 +9122,33 @@ components:
               minimum: 1
           minItems: 2
           maxItems: 2
-          description: UTF-16 [start,end) range of the mention inside value.
+          description: UTF-16 [start,end) range of the mention inside value. Use mentions instead to mention more than one participant.
+        mentions:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: |
+            Participants mentioned in this text part, sorted by `range` start and not overlapping. A handle may appear more than once. Mentions require a group chat. Cannot be combined with `mention` or `mention_range`.
+          items:
+            type: object
+            additionalProperties: false
+            required: [handle, range]
+            properties:
+              handle:
+                type: string
+                minLength: 1
+                maxLength: 320
+                description: Relay Handle of a participant in this chat.
+              range:
+                type: array
+                prefixItems:
+                  - type: integer
+                    minimum: 0
+                  - type: integer
+                    minimum: 1
+                minItems: 2
+                maxItems: 2
+                description: Inclusive-exclusive [start, end) UTF-16 code-unit range of the mention in value; 0 <= start < end <= the length of value.
     TextPartResponse:
       type: object
       description: A text message part

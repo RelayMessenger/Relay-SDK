@@ -45,7 +45,9 @@ must reuse the exact key and Message body from the prepared operation.
 
 A Message contains ordered `parts`:
 
-- `text` with optional structured `mention` and UTF-16 `mention_range`;
+- `text` with optional `mentions`, 1 to 20 `{handle, range}` entries with UTF-16
+  ranges sorted and not overlapping (or the older single `mention` and
+  `mention_range`, never both);
 - `media` with exactly one uploaded `attachment_id` or remote `url`;
 - `link` with one absolute URL as the only part;
 - `buttons`: 1 to 5 buttons under the Message, beside a `text` part that asks
@@ -345,8 +347,8 @@ upload that is not complete or not audio, or a URL that fails a check.
 Reactions target a Message and part index. Built-in reactions use the named
 type; custom reactions also provide `custom_emoji`.
 
-Mentions are group-only structured text-part fields. The mentioned Handle must
-be active in the Chat.
+Mentions are group-only structured text-part fields. Every mentioned Handle
+must be active in the Chat. One text part mentions up to 20 participants.
 
 ## Delivery
 

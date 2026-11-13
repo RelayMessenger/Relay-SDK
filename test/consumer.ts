@@ -509,7 +509,7 @@ Relay.createAgent;
 // @ts-expect-error Authenticated instances require an API key.
 new Relay({ baseURL: "https://api.example.test" });
 
-// Structured mentions are a read contract, not an outgoing message field.
+// A send names each mention by handle and range; a read adds id and is_me.
 const readText: TextPartResponse = {
   type: "text", value: "relay", reactions: null,
   mentions: [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
@@ -517,11 +517,15 @@ const readText: TextPartResponse = {
 const readRange: [number, number] | undefined = readText.mentions?.[0]?.range;
 const noMentions: TextPartResponse = { ...readText, mentions: null };
 const sendText: TextPart = {
-  type: "text", value: "relay",
-  // @ts-expect-error Structured mentions are only returned on reads.
-  mentions: [],
+  type: "text", value: "relay and echo",
+  mentions: [{ handle: "relay", range: [0, 5] }, { handle: "echo", range: [10, 14] }],
 };
-void [readRange, noMentions, sendText];
+const sendReadShape: TextPart = {
+  type: "text", value: "relay",
+  // @ts-expect-error A send names a handle and a range; id and is_me come back on reads.
+  mentions: [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
+};
+void [readRange, noMentions, sendText, sendReadShape];
 
 // Button items are a label and an optional url; a tap is an ordinary text reply.
 const buttonItem: import("@relaymessenger/sdk").ButtonItem = { label: "Approve" };
