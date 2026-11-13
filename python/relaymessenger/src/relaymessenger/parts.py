@@ -346,7 +346,7 @@ def text_part(
             if not previous_end <= start < end <= length:
                 raise ValueError("mentions ranges are sorted, do not overlap, and sit inside value, in UTF-16 code units.")
             previous_end = end
-        return {"type": "text", "value": value, "mentions": [{"handle": entry["handle"], "range": tuple(entry["range"])} for entry in mentions]}
+        return {"type": "text", "value": value, "mentions": [{"handle": entry["handle"], "range": entry["range"]} for entry in mentions]}
     if mention_range is not None:
         if mention is None:
             raise ValueError("mention_range needs mention.")
