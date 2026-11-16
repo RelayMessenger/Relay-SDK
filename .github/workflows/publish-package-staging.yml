@@ -58,7 +58,7 @@ jobs:
     if: >-
       github.repository == 'RelayMessenger/Relay-SDK' &&
       github.ref == 'refs/heads/staging'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
       base: ${{ steps.commit.outputs.base }}
@@ -194,7 +194,7 @@ jobs:
   land:
     needs: [bump, sdk, chat-sdk-adapter, pi]
     if: ${{ !cancelled() && needs.bump.result == 'success' && (needs.sdk.result == 'success' || (needs.sdk.result == 'skipped' && !contains(needs.bump.outputs.changed, ',sdk,'))) && (needs.chat-sdk-adapter.result == 'success' || (needs.chat-sdk-adapter.result == 'skipped' && !contains(needs.bump.outputs.changed, ',chat-sdk-adapter,'))) && (needs.pi.result == 'success' || (needs.pi.result == 'skipped' && !contains(needs.bump.outputs.changed, ',pi,'))) }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write

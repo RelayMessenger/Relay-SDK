@@ -47,7 +47,7 @@ jobs:
     if: >-
       github.repository == 'RelayMessenger/Relay-SDK' &&
       github.ref == 'refs/heads/staging'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
       workspace: ${{ steps.resolve.outputs.workspace }}
@@ -159,7 +159,7 @@ jobs:
 
   publish:
     needs: package
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm-staging
     # No write permission of any kind: the caller grants contents: read and
