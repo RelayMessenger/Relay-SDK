@@ -22,7 +22,7 @@ jobs:
   # runs the legs whose workspace it touches plus their dependents. The
   # aggregate `validate` job below is the required check on main.
   changes:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
@@ -47,7 +47,7 @@ jobs:
     name: validate (${{ matrix.leg }})
     needs: changes
     if: ${{ needs.changes.outputs.any == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -88,7 +88,7 @@ jobs:
   validate:
     needs: [changes, validate-leg]
     if: ${{ always() }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:
@@ -114,7 +114,7 @@ jobs:
   cookbook-standalone:
     needs: changes
     if: ${{ needs.changes.outputs.release == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -137,7 +137,7 @@ jobs:
   release-dry-run:
     needs: changes
     if: ${{ needs.changes.outputs.release == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -51,7 +51,7 @@ concurrency:
 jobs:
   build:
     name: Test and build ${{ matrix.package }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -91,7 +91,7 @@ jobs:
       github.ref == 'refs/heads/main'
     needs:
       - build
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
       name: pypi
