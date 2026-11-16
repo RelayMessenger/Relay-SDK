@@ -61,8 +61,7 @@ if (openclaw === dirname(openclaw) || !existsSync(openclaw)) {
   throw new Error("could not locate the OpenClaw CLI entry");
 }
 // npm's JS entry point, run with this Node: Node refuses to spawn npm.cmd on
-// Windows without a shell (EINVAL, CVE-2024-27980), the same reason
-// scripts/agent-cli-platforms.mjs runs npm this way.
+// Windows without a shell (EINVAL, CVE-2024-27980).
 function runNpm(args, options) {
   return process.env.npm_execpath
     ? execFileSync(process.execPath, [process.env.npm_execpath, ...args], options)
