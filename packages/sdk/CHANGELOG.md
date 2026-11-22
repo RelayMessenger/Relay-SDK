@@ -11,6 +11,9 @@ against the published 0.4.0 (semver 2.0.0 item 4). The version is
 
 ### Added
 
+- Several mentions in one text part (Relay-Server 157f2396): `TextPart.mentions`,
+  1 to 20 `TextPartMention` entries (`handle` and a UTF-16 `range`), sorted and
+  not overlapping. Python `text_part(value, mentions=[...])` checks the same rules.
 - A2UI v1.0 cards (Relay-Server 5a860e17): `DataPart` (`type: "data"`,
   `media_type: "application/a2ui+json"`) in `MessagePart`, `DataPartResponse`
   in read and sent parts, the A2UI agent-to-renderer and `action` message

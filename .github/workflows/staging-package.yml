@@ -47,7 +47,7 @@ jobs:
     if: >-
       github.repository == 'RelayMessenger/Relay-SDK' &&
       github.ref == 'refs/heads/staging'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
       workspace: ${{ steps.resolve.outputs.workspace }}
@@ -66,7 +66,7 @@ jobs:
           ref: ${{ env.RELEASE_BASE }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.sha != inputs.base
         with:
           name: staging-bump-commit-${{ github.sha }}
@@ -95,7 +95,7 @@ jobs:
           fi
           git merge-base --is-ancestor "$EVENT_SHA" HEAD
           test -z "$(git status --porcelain)"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -150,7 +150,7 @@ jobs:
             cp "$IDENTITY" .release-tmp/package-staging/release-identity.json
           fi
           test -z "$(git status --porcelain)"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: relay-${{ env.RELEASE_PACKAGE }}-${{ env.RELEASE_SHA }}
           path: .release-tmp/package-staging/
@@ -159,7 +159,7 @@ jobs:
 
   publish:
     needs: package
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm-staging
     # No write permission of any kind: the caller grants contents: read and
@@ -174,7 +174,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_BASE }}
           persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.sha != inputs.base
         with:
           name: staging-bump-commit-${{ github.sha }}
@@ -185,11 +185,11 @@ jobs:
           git fetch --no-tags "$RUNNER_TEMP/staging-bump-commit/staging-bump.bundle" HEAD
           test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
           git checkout --detach "$RELEASE_SHA"
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org/
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: relay-${{ env.RELEASE_PACKAGE }}-${{ env.RELEASE_SHA }}
           path: .release-tmp/package-staging
@@ -207,7 +207,7 @@ jobs:
             --tarball "$TARBALL" \
             --package '${{ needs.package.outputs.workspace }}' \
             --receipt .release-tmp/package-staging/publish.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: relay-${{ env.RELEASE_PACKAGE }}-publish-${{ env.RELEASE_SHA }}

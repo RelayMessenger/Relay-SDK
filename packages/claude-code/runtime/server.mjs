@@ -3344,6 +3344,37 @@ var require_utils = __commonJS({
       }
       return output.join("");
     }
+    function removeDotSegmentsRelative(path) {
+      if (path === "" || path[0] === "/") {
+        return removeDotSegments(path);
+      }
+      const segments = path.split("/");
+      const last = segments.length - 1;
+      const output = [];
+      let trailingDirectory = false;
+      for (let i = 0; i <= last; i++) {
+        const segment = segments[i];
+        if (segment === "." || segment === "..") {
+          if (segment === "..") {
+            if (output.length !== 0 && output[output.length - 1] !== "..") {
+              output.pop();
+            } else {
+              output.push("..");
+            }
+          }
+          trailingDirectory = i === last;
+        } else {
+          output.push(segment);
+        }
+      }
+      if (trailingDirectory && output[output.length - 1] !== "..") {
+        output.push("");
+      }
+      if (output.length === 0 || output[0] === "" || output[0].includes(":")) {
+        output.unshift(".");
+      }
+      return output.join("/");
+    }
     var HOST_DELIMS = { "@": "%40", "/": "%2F", "?": "%3F", "#": "%23", ":": "%3A" };
     var HOST_DELIM_RE = /[@/?#:]/g;
     var HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
@@ -3604,6 +3635,7 @@ var require_utils = __commonJS({
       encodeFragment,
       escapePreservingEscapes,
       removeDotSegments,
+      removeDotSegmentsRelative,
       isIPv4,
       isUUID,
       normalizeIPv6,
@@ -3827,16 +3859,18 @@ var require_schemes = __commonJS({
 var require_fast_uri = __commonJS({
   "node_modules/fast-uri/index.js"(exports, module) {
     "use strict";
-    var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
+    var { normalizeIPv6, removeDotSegments, removeDotSegmentsRelative, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
     var VALID_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/u;
     var MALFORMED_SCHEME_ERROR = "URI scheme is malformed.";
-    function decodeValidScheme(scheme) {
-      const decodedScheme = unescape(String(scheme));
-      if (!VALID_SCHEME.test(decodedScheme)) {
+    var MALFORMED_HOST_ERROR = "URI host is malformed.";
+    var FORBIDDEN_DOMAIN_HOST_CHARACTER = /[\0-\x20"#/:<>?@[\\\]^`{|}\x7F]/u;
+    function validateScheme(scheme) {
+      const stringScheme = String(scheme);
+      if (!VALID_SCHEME.test(stringScheme)) {
         throw new TypeError(MALFORMED_SCHEME_ERROR);
       }
-      return decodedScheme;
+      return stringScheme;
     }
     function normalize(uri, options2) {
       if (typeof uri === "string") {
@@ -3873,6 +3907,9 @@ var require_fast_uri = __commonJS({
       const resolvedSchemeHandler = getSchemeHandler(options2 && options2.scheme || resolved.scheme);
       const resolvedHost = resolved.host;
       const resolvedHostIsIP = resolvedHost !== void 0 && resolvedHost !== "" && (isIPv4(resolvedHost) || normalizeIPv6(resolvedHost).isIPV6);
+      if (hasForbiddenDomainHost(resolved, options2 || {}, resolvedSchemeHandler, resolvedHostIsIP)) {
+        throw new Error(MALFORMED_HOST_ERROR);
+      }
       canonicalizeHost(resolved, options2 || {}, resolvedSchemeHandler, resolvedHostIsIP);
       const encodedASCIIHost = resolvedHost && resolvedHost.indexOf("%") !== -1 && !new RegExp("\\P{ASCII}", "u").test(resolvedHost);
       if (resolved.error && !encodedASCIIHost) {
@@ -3914,14 +3951,15 @@ var require_fast_uri = __commonJS({
             if (relative.path[0] === "/") {
               target.path = removeDotSegments(relative.path);
             } else {
-              if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
+              const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
+              if (baseHasAuthority && !base.path) {
                 target.path = "/" + relative.path;
               } else if (!base.path) {
                 target.path = relative.path;
               } else {
                 target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative.path;
               }
-              target.path = removeDotSegments(target.path);
+              target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
             target.query = relative.query;
           }
@@ -3959,12 +3997,13 @@ var require_fast_uri = __commonJS({
       const options2 = Object.assign({}, opts);
       const uriTokens = [];
       if (component.scheme) {
-        component.scheme = decodeValidScheme(component.scheme);
+        component.scheme = validateScheme(component.scheme);
       }
       const schemeHandler = getSchemeHandler(options2.scheme || component.scheme);
       if (schemeHandler && schemeHandler.serialize) schemeHandler.serialize(component, options2);
       const hasAuthority = component.userinfo !== void 0 || component.host !== void 0 || component.port !== void 0;
-      const pathNoScheme = !options2.skipEscape && component.scheme === void 0 && !hasAuthority;
+      const schemelessReference = (component.scheme === void 0 || options2.reference === "suffix") && !hasAuthority;
+      const pathNoScheme = !options2.skipEscape && schemelessReference;
       if (component.path !== void 0) {
         if (!options2.skipEscape) {
           component.path = serializePathEncoding(component.path, pathNoScheme);
@@ -3973,7 +4012,7 @@ var require_fast_uri = __commonJS({
         }
       }
       if (options2.reference !== "suffix" && component.scheme) {
-        component.scheme = decodeValidScheme(component.scheme);
+        component.scheme = validateScheme(component.scheme);
         uriTokens.push(component.scheme, ":");
       }
       const authority = recomposeAuthority(component);
@@ -3989,9 +4028,9 @@ var require_fast_uri = __commonJS({
       if (component.path !== void 0) {
         let s = component.path;
         if (!options2.absolutePath && (!schemeHandler || !schemeHandler.absolutePath)) {
-          s = removeDotSegments(s);
+          s = schemelessReference && s[0] !== "/" ? removeDotSegmentsRelative(s) : removeDotSegments(s);
         }
-        if (pathNoScheme) {
+        if (schemelessReference) {
           s = serializePathEncoding(s, true);
         }
         if (authority === void 0 && s[0] === "/" && s[1] === "/") {
@@ -4038,15 +4077,33 @@ var require_fast_uri = __commonJS({
       return hasMalformedPercentEncoding(matches[3]) || host !== void 0 && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
     }
     function canonicalizeHost(parsed, options2, schemeHandler, isIP) {
+      if (hasForbiddenDomainHost(parsed, options2, schemeHandler, isIP)) {
+        parsed.error = parsed.error || MALFORMED_HOST_ERROR;
+        return true;
+      }
       if (!options2.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options2.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
+        let url;
         try {
-          parsed.host = new URL("http://" + parsed.host).hostname;
+          url = new URL("http://" + parsed.host);
         } catch (e) {
           parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
           return true;
         }
+        if (!isHostOnlyURL(url)) {
+          parsed.error = parsed.error || MALFORMED_HOST_ERROR;
+          return true;
+        }
+        parsed.host = url.hostname;
       }
       return false;
+    }
+    function hasForbiddenDomainHost(parsed, options2, schemeHandler, isIP) {
+      return Boolean(
+        parsed.host && isIP === false && !isIPLiteral(parsed.host) && (options2.domainHost || schemeHandler && schemeHandler.domainHost) && FORBIDDEN_DOMAIN_HOST_CHARACTER.test(parsed.host)
+      );
+    }
+    function isHostOnlyURL(url) {
+      return url.username === "" && url.password === "" && url.port === "" && url.pathname === "/" && url.search === "" && url.hash === "" && url.hostname !== "";
     }
     function parseWithStatus(uri, opts) {
       const options2 = Object.assign({}, opts);
@@ -4102,9 +4159,8 @@ var require_fast_uri = __commonJS({
         parsed.query = matches[7];
         parsed.fragment = matches[8];
         if (parsed.scheme !== void 0) {
-          const decodedScheme = unescape(parsed.scheme);
-          if (VALID_SCHEME.test(decodedScheme)) {
-            parsed.scheme = decodedScheme.toLowerCase();
+          if (VALID_SCHEME.test(parsed.scheme)) {
+            parsed.scheme = parsed.scheme.toLowerCase();
           } else {
             parsed.error = parsed.error || MALFORMED_SCHEME_ERROR;
             malformedScheme = true;
@@ -4132,7 +4188,7 @@ var require_fast_uri = __commonJS({
             malformedIPLiteral = hasIPLiteralBracket && (!bracketedIPLiteral || ipv6result.error === true);
             parsed.host = isIP ? ipv6result.host : ipv6result.host.toLowerCase();
             if (malformedIPLiteral) {
-              parsed.error = parsed.error || "URI host is malformed.";
+              parsed.error = parsed.error || MALFORMED_HOST_ERROR;
               malformedAuthorityOrPort = true;
             }
           } else {
@@ -4160,7 +4216,7 @@ var require_fast_uri = __commonJS({
           if (!isIP) {
             host = normalizePercentEncoding(host.toLowerCase());
           }
-          parsed.host = reescapeHostDelimiters(host, isIP);
+          parsed.host = isIP || options2.scheme !== "null" ? reescapeHostDelimiters(host, isIP) : host;
         }
         if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
           if (parsed.path) {
@@ -18523,6 +18579,9 @@ var Protocol = class {
       this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
         const handleTaskResult = async () => {
           const taskId = request.params.taskId;
+          if (!await this._taskStore.getTask(taskId, extra.sessionId)) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
+          }
           if (this._taskMessageQueue) {
             let queuedMessage;
             while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
@@ -18553,12 +18612,12 @@ var Protocol = class {
             throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
           }
           if (!isTerminal(task.status)) {
-            await this._waitForTaskUpdate(taskId, extra.signal);
+            await this._waitForTaskUpdate(taskId, extra.signal, extra.sessionId);
             return await handleTaskResult();
           }
           if (isTerminal(task.status)) {
             const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
-            this._clearTaskQueue(taskId);
+            this._clearTaskQueue(taskId, extra.sessionId);
             return {
               ...result,
               _meta: {
@@ -18595,7 +18654,7 @@ var Protocol = class {
             throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
           }
           await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
-          this._clearTaskQueue(request.params.taskId);
+          this._clearTaskQueue(request.params.taskId, extra.sessionId);
           const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
           if (!cancelledTask) {
             throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
@@ -18723,6 +18782,19 @@ var Protocol = class {
     const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
     const capturedTransport = this._transport;
     const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
+    const sessionId = capturedTransport?.sessionId;
+    const store = this._taskStore;
+    let relatedTaskFound = true;
+    let relatedTaskLookup;
+    if (relatedTaskId && store && this._taskMessageQueue && sessionId !== void 0) {
+      relatedTaskFound = false;
+      relatedTaskLookup = (async () => {
+        if (!await store.getTask(relatedTaskId, sessionId)) {
+          throw new McpError(ErrorCode.InvalidParams, `Task not found: ${relatedTaskId}`);
+        }
+        relatedTaskFound = true;
+      })();
+    }
     if (handler === void 0) {
       const errorResponse = {
         jsonrpc: "2.0",
@@ -18732,7 +18804,10 @@ var Protocol = class {
           message: "Method not found"
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && relatedTaskLookup) {
+        const queuedError = { type: "error", message: errorResponse, timestamp: Date.now() };
+        relatedTaskLookup.then(() => this._enqueueTaskMessage(relatedTaskId, queuedError, sessionId), () => capturedTransport?.send(errorResponse)).catch((error2) => this._onerror(new Error(`Failed to send an error response: ${error2}`)));
+      } else if (relatedTaskId && this._taskMessageQueue) {
         this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -18783,7 +18858,10 @@ var Protocol = class {
       closeSSEStream: extra?.closeSSEStream,
       closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
     };
-    Promise.resolve().then(() => {
+    (relatedTaskLookup ?? Promise.resolve()).then(() => {
+      if (relatedTaskLookup && abortController.signal.aborted) {
+        throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
+      }
       if (taskCreationParams) {
         this.assertTaskHandlerCapability(request.method);
       }
@@ -18818,7 +18896,7 @@ var Protocol = class {
           ...error2["data"] !== void 0 && { data: error2["data"] }
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && this._taskMessageQueue && relatedTaskFound) {
         await this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -19298,7 +19376,7 @@ var Protocol = class {
       throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
     }
     const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+    await this._taskMessageQueue.enqueue(taskId, message, sessionId ?? this._transport?.sessionId, maxQueueSize);
   }
   /**
    * Clears the message queue for a task and rejects any pending request resolvers.
@@ -19327,12 +19405,13 @@ var Protocol = class {
    * Uses polling to check for updates at the task's configured poll interval.
    * @param taskId The task ID to wait for
    * @param signal Abort signal to cancel the wait
+   * @param sessionId Session of the request that waits, passed to the task store
    * @returns Promise that resolves when an update occurs or rejects if aborted
    */
-  async _waitForTaskUpdate(taskId, signal) {
+  async _waitForTaskUpdate(taskId, signal, sessionId) {
     let interval = this._options?.defaultTaskPollInterval ?? 1e3;
     try {
-      const task = await this._taskStore?.getTask(taskId);
+      const task = await this._taskStore?.getTask(taskId, sessionId);
       if (task?.pollInterval) {
         interval = task.pollInterval;
       }
@@ -24911,7 +24990,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.20-staging.0" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.21-staging.1" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

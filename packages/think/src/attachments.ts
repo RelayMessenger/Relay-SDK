@@ -1,5 +1,8 @@
 import type { MessengerAttachment } from "@cloudflare/think/messengers";
-import type { FilePart, ModelMessage } from "ai";
+import type Relay from "@relaymessenger/sdk";
+import type { FilePart, ModelMessage, UIMessage } from "ai";
+
+import { storedImageIds } from "./stored-history.js";
 
 // Gemini 3 Flash on Vertex accepts exactly these media types as inline data.
 // Read 2026-09-01 from the model's own Vertex reference page:
@@ -149,10 +152,11 @@ async function boundedBytes(
 async function download(
   attachment: MessengerAttachment,
   signal: AbortSignal | undefined,
+  limit = WORKER_MEMORY_ATTACHMENT_BYTES,
 ): Promise<Download> {
   if (
     attachment.size !== undefined
-    && attachment.size > WORKER_MEMORY_ATTACHMENT_BYTES
+    && attachment.size > limit
   ) {
     return { oversize: true };
   }
@@ -168,7 +172,7 @@ async function download(
         : AbortSignal.timeout(20_000),
     });
     if (!response.ok) return { oversize: false };
-    const bytes = await boundedBytes(response, WORKER_MEMORY_ATTACHMENT_BYTES);
+    const bytes = await boundedBytes(response, limit);
     return bytes ? { bytes } : { oversize: true };
   } catch {
     return { oversize: false };
@@ -288,6 +292,12 @@ async function inlineMedia(
   return { parts, unreadable };
 }
 
+function userContent(message: Extract<ModelMessage, { role: "user" }>) {
+  return typeof message.content === "string"
+    ? [{ type: "text" as const, text: message.content }]
+    : message.content;
+}
+
 /**
  * Add the inbound media to the turn's newest user Message. Google asks for the
  * text prompt before the file in the input array, so the Message Think already
@@ -304,9 +314,7 @@ export function withInboundMedia(
   for (let index = next.length - 1; index >= 0; index -= 1) {
     const message = next[index]!;
     if (message.role !== "user") continue;
-    const content = typeof message.content === "string"
-      ? [{ type: "text" as const, text: message.content }]
-      : [...message.content];
+    const content = [...userContent(message)];
     for (const document of documents) {
       content.push({
         type: "text",
@@ -322,6 +330,80 @@ export function withInboundMedia(
     content.push(...media.parts);
     next[index] = { ...message, content };
     return next;
+  }
+  return next;
+}
+
+/**
+ * Add up to three earlier images to the model request, never to Session storage.
+ * Pass the same active history path that produced `messages`, before inserting
+ * synthetic user messages (such as person memory). The newest user turn's media
+ * belongs to withInboundMedia; its bytes take priority in the shared budget.
+ */
+export async function withRecentHistoryImages(
+  messages: readonly ModelMessage[],
+  history: readonly UIMessage[],
+  relay: Pick<Relay, "attachments">,
+  signal?: AbortSignal,
+): Promise<ModelMessage[]> {
+  const next = [...messages];
+  let modelIndex = messages.length;
+  let current = true;
+  const oldest = Math.max(0, history.length - 21);
+  let remaining = WORKER_MEMORY_MESSAGE_BYTES;
+  const candidates: { index: number; id: string }[] = [];
+  for (let i = history.length - 1; i >= oldest && candidates.length < 3; i--) {
+    const row = history[i]!;
+    if (row.role !== "user") continue;
+    // A stored assistant turn can expand into several assistant/tool messages.
+    // User turns convert one-to-one, in order, with their text parts intact.
+    do { modelIndex--; } while (modelIndex >= 0 && messages[modelIndex]!.role !== "user");
+    const message = messages[modelIndex];
+    if (message?.role !== "user") break;
+    const content = userContent(message);
+    const text = row.parts.filter(part => part.type === "text");
+    const modelText = content.filter(part => part.type === "text");
+    // The current turn may also carry a context reminder or a converted document.
+    if ((!current && text.length !== modelText.length) ||
+        text.some((part, n) => part.text !== modelText[n]?.text)) break;
+    if (current) {
+      current = false;
+      for (const part of content) {
+        if (part.type === "file" && part.data instanceof Uint8Array) remaining -= part.data.byteLength;
+      }
+      continue;
+    }
+    for (const id of storedImageIds(row)) {
+      candidates.push({ index: modelIndex, id });
+      if (candidates.length === 3) break;
+    }
+  }
+
+  if (signal?.aborted || remaining <= 0) return next;
+  // Refresh at most three URLs in parallel. Stream one body at a time so an
+  // incorrect size cannot spend bytes needed by the rest of the turn.
+  const attachments = await Promise.all(candidates.map(async ({ id }) => {
+    try {
+      return await relay.attachments.retrieve(id, { signal, timeout: 20_000, maxRetries: 0 });
+    } catch {
+      return undefined;
+    }
+  }));
+  for (const [slot, attachment] of attachments.entries()) {
+    if (signal?.aborted || remaining <= 0) break;
+    if (!attachment?.download_url) continue;
+    const mediaType = inlineMediaType(attachment.content_type);
+    if (!mediaType?.startsWith("image/")) continue;
+    const result = await download({ url: attachment.download_url, size: attachment.size_bytes },
+      signal, Math.min(remaining, WORKER_MEMORY_ATTACHMENT_BYTES));
+    if (!("bytes" in result)) continue;
+    remaining -= result.bytes.byteLength;
+    const index = candidates[slot]!.index;
+    const message = next[index]!;
+    if (message.role === "user") {
+      const part: FilePart = { type: "file", data: result.bytes, mediaType, filename: attachment.filename };
+      next[index] = { ...message, content: [...userContent(message), part] };
+    }
   }
   return next;
 }

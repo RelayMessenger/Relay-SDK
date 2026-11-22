@@ -566,9 +566,22 @@ export interface Reaction {
   custom_emoji?: string | null;
 }
 
+/** One participant mentioned in a text part you send. */
+export interface TextPartMention {
+  /** Handle of a participant in this group chat. */
+  handle: string;
+  /** UTF-16 [start, end) range of the mention in value. */
+  range: [number, number];
+}
+
 export interface TextPart {
   type: "text";
   value: string;
+  /**
+   * 1 to 20 mentions, sorted by range start and not overlapping. Group chats
+   * only. Cannot be combined with mention or mention_range.
+   */
+  mentions?: TextPartMention[];
   mention?: string | null;
   mention_range?: [number, number] | null;
 }
@@ -1042,7 +1055,7 @@ export type MessagePart =
   | PlacePart
   | DataPart;
 
-export interface TextPartResponse extends TextPart {
+export interface TextPartResponse extends Omit<TextPart, "mentions"> {
   mentions?: Array<{
     id: string;
     handle: string;

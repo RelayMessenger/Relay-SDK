@@ -74,6 +74,32 @@ def test_text_part_carries_a_utf16_mention_range() -> None:
         text_part("hi", mention_range=(0, 1))
 
 
+def test_text_part_carries_several_utf16_mentions() -> None:
+    value = "@ana 👋 @ben @ana"
+    assert text_part(value, mentions=[
+        {"handle": "ana", "range": (0, 4)},
+        {"handle": "ben", "range": (8, 12)},
+        {"handle": "ana", "range": (13, 17)},
+    ]) == {"type": "text", "value": value, "mentions": [
+        {"handle": "ana", "range": (0, 4)},
+        {"handle": "ben", "range": (8, 12)},
+        {"handle": "ana", "range": (13, 17)},
+    ]}
+    for mentions in (
+        [{"handle": "ben", "range": (8, 12)}, {"handle": "ana", "range": (0, 4)}],
+        [{"handle": "ana", "range": (0, 9)}, {"handle": "ben", "range": (8, 12)}],
+        [{"handle": "ana", "range": (13, 18)}],
+        [],
+    ):
+        with pytest.raises(ValueError):
+            text_part(value, mentions=mentions)
+    with pytest.raises(ValueError):
+        text_part("a" * 21, mentions=[{"handle": "ana", "range": (index, index + 1)} for index in range(21)])
+    assert len(text_part("a" * 20, mentions=[{"handle": "ana", "range": (index, index + 1)} for index in range(20)])["mentions"]) == 20
+    with pytest.raises(ValueError):
+        text_part(value, mention="ana", mentions=[{"handle": "ana", "range": (0, 4)}])
+
+
 def test_media_part_takes_exactly_one_source() -> None:
     assert media_part(attachment_id="att") == {"type": "media", "attachment_id": "att"}
     with pytest.raises(ValueError):

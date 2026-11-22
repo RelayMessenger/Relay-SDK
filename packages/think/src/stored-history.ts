@@ -50,8 +50,7 @@ import type { LanguageModelMiddleware, UIMessage } from "ai";
  * Everything else in the webhook is the messaging platform's delivery data
  * and is not kept: the Chat's owner Handle, avatars, delivery and read
  * times, idempotency key, A2UI client capabilities, and each attachment's
- * sealed URL (it expires; src/index.ts fetches the bytes once per turn from
- * the live event, never from history). The text is not repeated here: it is
+ * sealed URL (it expires; earlier images get a fresh URL from their id). The text is not repeated here: it is
  * the Message's own parts.
  */
 export function relayTurnMetadata(
@@ -110,6 +109,18 @@ export function relayTurnMetadata(
       ...(attachments.length ? { attachments } : {}),
     },
   };
+}
+
+/** Attachment identities only; never use a URL found in stored content. */
+export function* storedImageIds(row: UIMessage): Iterable<string> {
+  const turn = record(record(row.metadata)?.turnMetadata);
+  const attachments = record(turn?.message)?.attachments;
+  if (!Array.isArray(attachments)) return;
+  for (const value of attachments) {
+    const part = record(value);
+    if (typeof part?.id === "string" && part.id &&
+        typeof part.mime_type === "string" && part.mime_type.toLowerCase().startsWith("image/")) yield part.id;
+  }
 }
 
 /**

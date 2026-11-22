@@ -23,7 +23,7 @@ export const legs = {
 };
 
 // Files no check reads.
-const notes = new Set(["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "scripts/agent-cli-platforms.md"]);
+const notes = new Set(["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md"]);
 // Workspaces whose own suites run in the release (release-run.mjs), not in CI.
 const releaseOnly = new Set(["packages/livekit", "packages/elevenlabs"]);
 

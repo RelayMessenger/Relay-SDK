@@ -148,6 +148,25 @@ const adapter = withContactCards(withFormReplies(withCardReplies(withSelectionRe
 - `withContactCards` adds a shared contact card: who shared it, and the
   card's kind, id, handle and name.
 
+## Read images from earlier messages
+
+Keep attachment IDs in history by passing `relayTurnMetadata(messenger, relayMessage)` as Think’s chat `metadata` when you receive a message. Rows without attachment IDs stay text-only.
+
+In `beforeTurn`, pass the stored history for the same turn to `withRecentHistoryImages`, before adding messages from other chats:
+
+```ts
+import { createRelayClient, inlineInboundMedia, withInboundMedia, withRecentHistoryImages } from "@relaymessenger/think";
+
+// Inside beforeTurn(context)
+const media = await inlineInboundMedia(context.messenger?.message?.attachments ?? [], context.abortSignal);
+const messages = await withRecentHistoryImages(
+  withInboundMedia(context.messages, media), this.messages, createRelayClient(this.env), context.abortSignal,
+);
+return { messages };
+```
+
+The helper checks the preceding 20 messages for up to three images, newest messages first. It uses your agent's Relay client to get fresh download URLs. Image bytes follow the text of the message that sent them. An unsupported image or a failed download leaves the text unchanged. Neither the bytes nor the fresh URLs are saved in history.
+
 ## Remember a person across Chats
 
 A Think agent keeps one history per Chat. With per-person memory, it also

@@ -62,8 +62,7 @@ function walk(path, prefix = "") {
 }
 
 // npm's JS entry point, run with this Node: Node refuses to spawn npm.cmd on
-// Windows without a shell (EINVAL, CVE-2024-27980), the same reason
-// scripts/agent-cli-platforms.mjs runs npm this way.
+// Windows without a shell (EINVAL, CVE-2024-27980).
 const npmCommand = process.env.npm_execpath
   ? [process.execPath, [process.env.npm_execpath]]
   : [process.platform === "win32" ? "npm.cmd" : "npm", []];

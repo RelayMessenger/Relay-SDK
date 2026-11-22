@@ -1,30 +1,28 @@
 name: CI
 
+# Pull requests only. Every commit on staging and main arrives through a pull
+# request (staging: every first-parent commit since 2026-10-17; main: the
+# "validate" rule), and its pull request already ran these checks on the
+# merge result. The 30-day push runs were all green duplicates.
 on:
-  push:
-    branches: [main, staging]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a pull request cancels that pull request's older run. Pushes to
-# staging and main each get their own group (the run id), so none is ever
-# cancelled or replaced while still pending: the staging and production
-# releases run from those pushes. A shared group would cancel a pending push
-# run even with cancel-in-progress off (GitHub's "queue: single" default).
+# A new push to a pull request cancels that pull request's older run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  # Picks the validate legs (scripts/ci-affected.mjs). Pushes, manual runs,
-  # and pull requests into main run every leg; a pull request into staging
+  # Picks the validate legs (scripts/ci-affected.mjs). Manual runs and pull
+  # requests into main run every leg; a pull request into staging
   # runs the legs whose workspace it touches plus their dependents. The
   # aggregate `validate` job below is the required check on main.
   changes:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
@@ -49,7 +47,7 @@ jobs:
     name: validate (${{ matrix.leg }})
     needs: changes
     if: ${{ needs.changes.outputs.any == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -61,7 +59,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -90,7 +88,7 @@ jobs:
   validate:
     needs: [changes, validate-leg]
     if: ${{ always() }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:
@@ -106,22 +104,23 @@ jobs:
   # never installs the workspace: each folder is copied outside the checkout,
   # installed from the real registry, and type-checked from its own
   # devDependencies (scripts/validate-cookbook-standalone.mjs). The branch
-  # picks the npm channel: staging (a push to it, or a pull request into it)
+  # picks the npm channel: staging (a pull request into it, or a manual run on it)
   # installs the `staging` dist-tag's builds, every other branch the `latest`
   # releases. The workspace-side half of that proof, that the same folders
   # resolve the workspace sdk inside the monorepo, runs in the cookbook leg
-  # above. It checks the registry, not this change, so it runs on pushes, on
-  # pull requests into main, and on pull requests that change root files.
+  # above. It checks the registry, not this change, so it runs on pull
+  # requests into main (the release) and on pull requests that change root
+  # files.
   cookbook-standalone:
     needs: changes
     if: ${{ needs.changes.outputs.release == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
@@ -130,7 +129,7 @@ jobs:
 
   # The production release proves itself before it can run: the same
   # derivation, packing, and `npm publish --dry-run` that release.yml performs
-  # on a push to main, here on pushes, on pull requests into main, and on
+  # on a push to main, here on pull requests into main (the release) and on
   # pull requests that change root files (the release scripts among them).
   # GitHub only dispatches a workflow that already exists on the default
   # branch, so this is the only way a change to the release is rehearsed
@@ -138,13 +137,13 @@ jobs:
   release-dry-run:
     needs: changes
     if: ${{ needs.changes.outputs.release == 'true' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org

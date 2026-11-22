@@ -6,8 +6,6 @@ import {
 import { basename, join } from "node:path";
 import { releasePackages } from "./release-packages.mjs";
 import { internalDependencies, readManifests } from "./release-derive.mjs";
-import { validateRunnerPolicy } from "./agent-cli-platforms-policy.mjs";
-import { verifyPolicyFixtures } from "./agent-cli-platforms-policy-fixtures.mjs";
 
 const rootManifest = JSON.parse(readFileSync("package.json", "utf8"));
 const pinnedNode = readFileSync(".nvmrc", "utf8").trim();
@@ -338,14 +336,8 @@ for (const script of ["sync-root-discovery.mjs", "sync-import-metadata.mjs", "va
 assert.match(staging, /git add .*\.claude-plugin\/marketplace\.json .*sources\.import-manifest\.json/u);
 assert.equal(rootManifest.scripts.postinstall, "node scripts/link-cookbook-workspaces.mjs");
 
-// Sigstore verifies an npm attestation against GitHub-hosted runner identity
-// and rejects every other runner with
-// E422 "Unsupported GitHub Actions runner" (measured 2026-09-07 on staging
-// d2e7caf). npm's OIDC trusted publishing carries the same restriction, in its
-// own words: "Trusted publishing currently supports only cloud-hosted
-// runners." Every job in this repository runs on Blacksmith (owner ruling,
-// 2026-09-07), so neither is available and every publish authenticates with a
-// token and asks for no attestation.
+// Keep the existing token-based, unattested publication contract. Moving to
+// GitHub-hosted runners does not change publish authentication or provenance.
 //
 // The negation has to be explicit at every call site, not merely absent: five
 // packages still declare "provenance": true in publishConfig, and only a CLI
@@ -363,12 +355,12 @@ for (const [source, text] of [...workflowFiles, ...scriptFiles]) {
   assert.doesNotMatch(
     text,
     /--provenance\b/u,
-    `${source} requests an npm attestation that Sigstore rejects on Blacksmith`,
+    `${source} changes the existing unattested publication contract`,
   );
   assert.doesNotMatch(
     text,
     /NPM_CONFIG_PROVENANCE/u,
-    `${source} sets NPM_CONFIG_PROVENANCE, which Blacksmith cannot satisfy`,
+    `${source} sets NPM_CONFIG_PROVENANCE instead of preserving unattested publication`,
   );
   // Only real invocations: a line that starts with the command, plus the
   // flag lines a folded YAML block continues it with. Prose that quotes
@@ -391,10 +383,14 @@ assert.match(
   "the staging publish must disable the npm attestation explicitly, so no publishConfig can re-enable it",
 );
 
-// Owner-authorized native verification exception; every other workflow stays Blacksmith-only.
-for (const [source, text] of workflowFiles) validateRunnerPolicy(source, text);
-const nativeWorkflow = workflowFiles.find(([source]) => source.endsWith("/agent-cli-platforms.yml"));
-if (nativeWorkflow) verifyPolicyFixtures(nativeWorkflow[1]);
+// Public repository jobs use standard GitHub-hosted Ubuntu runners.
+for (const [source, text] of workflowFiles) {
+  const labels = [...text.matchAll(/runs-on:\s*(\S+)/gu)].map(([, label]) => label);
+  assert.ok(labels.length > 0, `${source} declares no runner`);
+  for (const label of labels) {
+    assert.match(label, /^(?:ubuntu-24\.04|ubuntu-latest)$/u, `${source} runs on ${label} instead of a standard GitHub-hosted Ubuntu runner`);
+  }
+}
 
 // The one production release workflow. Tags record a publish and never
 // trigger one, so no workflow may listen for a tag push.
