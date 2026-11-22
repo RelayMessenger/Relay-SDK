@@ -150,7 +150,9 @@ const adapter = withContactCards(withFormReplies(withCardReplies(withSelectionRe
 
 ## Read images from earlier messages
 
-Use `withRecentHistoryImages` in `beforeTurn` when a person asks about a photo they sent earlier. Pass the stored history for the same turn, before adding messages from other chats:
+Keep attachment IDs in history by passing `relayTurnMetadata(messenger, relayMessage)` as Think’s chat `metadata` when you receive a message. Rows without attachment IDs stay text-only.
+
+In `beforeTurn`, pass the stored history for the same turn to `withRecentHistoryImages`, before adding messages from other chats:
 
 ```ts
 import { createRelayClient, inlineInboundMedia, withInboundMedia, withRecentHistoryImages } from "@relaymessenger/think";
