@@ -7,6 +7,7 @@ export {
   NO_INBOUND_MEDIA,
   inlineInboundMedia,
   withInboundMedia,
+  withRecentHistoryImages,
   type DocumentReader,
   type InboundMedia,
 } from "./attachments.js";
