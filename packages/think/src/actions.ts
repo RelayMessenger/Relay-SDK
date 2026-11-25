@@ -566,6 +566,14 @@ export interface RelayActionDependencies {
   compose?: typeof finishComposition;
   /** The idempotency keys of the Messages a turn already sent, across its retries. */
   sentParts?: { has(key: string): boolean; add(key: string): void };
+  /**
+   * Attachments already uploaded for a send key, reused across retries of that
+   * same key so image and voice-memo retries never regenerate or double-upload.
+   */
+  sentAttachments?: {
+    get(key: string): string | undefined;
+    put(key: string, attachmentId: string): void;
+  };
   timing?: (phase: RelayChatTimingPhase) => void;
   /** Whether this agent takes voice calls. When false, start_call is not offered. Absent means true. */
   voice?: boolean;
@@ -687,6 +695,13 @@ function imageFilename(contentType: string, eventId: string): string {
   return `relay-${eventId}.${extension}`;
 }
 
+interface UploadedAttachment {
+  attachmentId: string;
+  expiresAt?: string;
+}
+
+const ATTACHMENT_EXPIRY_BUFFER_MS = 30_000;
+
 async function upload(
   relay: Relay,
   input: {
@@ -696,7 +711,7 @@ async function upload(
     durationMs?: number;
   },
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<UploadedAttachment> {
   const allocation = await relay.attachments.create({
     filename: input.filename,
     content_type: input.contentType,
@@ -710,7 +725,56 @@ async function upload(
     input.bytes.slice().buffer as ArrayBuffer,
     requestOptions(signal),
   );
-  return allocation.attachment_id;
+  return {
+    attachmentId: allocation.attachment_id,
+    ...(allocation.expires_at ? { expiresAt: allocation.expires_at } : {}),
+  };
+}
+
+async function attachmentCacheKey(
+  sendKey: string,
+  kind: "image" | "voice_memo",
+  parts: readonly (string | undefined)[],
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(parts)),
+  );
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${sendKey}:${kind}:${hash}`;
+}
+
+function readCachedAttachment(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (!raw.startsWith("{")) return raw;
+  try {
+    const parsed = JSON.parse(raw) as { id?: unknown; expiresAt?: unknown };
+    if (typeof parsed.id !== "string" || !parsed.id) return undefined;
+    if (typeof parsed.expiresAt === "string") {
+      const expiresAtMs = Date.parse(parsed.expiresAt);
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now() + ATTACHMENT_EXPIRY_BUFFER_MS) {
+        return undefined;
+      }
+    }
+    return parsed.id;
+  } catch {
+    return undefined;
+  }
+}
+
+async function uploadOnce(
+  sentAttachments: RelayActionDependencies["sentAttachments"],
+  cacheKey: string,
+  make: () => Promise<UploadedAttachment>,
+): Promise<{ attachmentId: string; fromCache: boolean }> {
+  const kept = readCachedAttachment(sentAttachments?.get(cacheKey));
+  if (kept) return { attachmentId: kept, fromCache: true };
+  const uploaded = await make();
+  const stored = uploaded.expiresAt
+    ? JSON.stringify({ id: uploaded.attachmentId, expiresAt: uploaded.expiresAt })
+    : uploaded.attachmentId;
+  sentAttachments?.put(cacheKey, stored);
+  return { attachmentId: uploaded.attachmentId, fromCache: false };
 }
 
 async function sendText(
@@ -856,6 +920,140 @@ export async function executeRelaySend(
   return result;
 }
 
+function stripSearchText(value: string): string {
+  return withoutSearchMarkers(value);
+}
+
+function stripSearchTrimmed(value: string): string {
+  return withoutSearchMarkers(value).trim();
+}
+
+function sanitizeCardSearchMarkers(card: CardInput): CardInput {
+  return {
+    ...card,
+    ...(card.title !== undefined ? { title: stripSearchTrimmed(card.title) } : {}),
+    ...(card.description !== undefined ? { description: stripSearchTrimmed(card.description) } : {}),
+    ...(card.suggestions !== undefined
+      ? {
+        suggestions: card.suggestions.map((suggestion) => ({
+          ...suggestion,
+          label: stripSearchTrimmed(suggestion.label),
+        })),
+      }
+      : {}),
+  };
+}
+
+function sanitizeFormSearchMarkers(form: Omit<FormPart, "type">): Omit<FormPart, "type"> {
+  return {
+    ...form,
+    title: stripSearchTrimmed(form.title),
+    pages: form.pages.map((page) => ({
+      ...page,
+      title: stripSearchTrimmed(page.title),
+      fields: page.fields.map((field) => {
+        const base = {
+          ...field,
+          label: stripSearchTrimmed(field.label),
+          ...(field.placeholder !== undefined ? { placeholder: stripSearchTrimmed(field.placeholder) } : {}),
+        };
+        if (field.type === "select" || field.type === "picker") {
+          return {
+            ...base,
+            options: field.options.map((option) => ({
+              ...option,
+              label: stripSearchTrimmed(option.label),
+            })),
+          };
+        }
+        return base;
+      }),
+    })),
+    ...(form.splash !== undefined
+      ? {
+        splash: {
+          ...form.splash,
+          ...(form.splash.title !== undefined ? { title: stripSearchTrimmed(form.splash.title) } : {}),
+          ...(form.splash.text !== undefined ? { text: stripSearchText(form.splash.text) } : {}),
+          button_title: stripSearchTrimmed(form.splash.button_title),
+        },
+      }
+      : {}),
+    ...(form.received_message !== undefined
+      ? {
+        received_message: {
+          ...form.received_message,
+          title: stripSearchTrimmed(form.received_message.title),
+          ...(form.received_message.subtitle !== undefined
+            ? { subtitle: stripSearchTrimmed(form.received_message.subtitle) }
+            : {}),
+        },
+      }
+      : {}),
+  };
+}
+
+function sanitizeWebSearchInput(input: SendInput): SendInput {
+  switch (input.kind) {
+    case "text":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        ...(input.title !== undefined ? { title: stripSearchTrimmed(input.title) } : {}),
+        ...(input.buttons !== undefined
+          ? { buttons: input.buttons.map((button) => ({ ...button, label: stripSearchTrimmed(button.label) })) }
+          : {}),
+        ...(input.selection !== undefined
+          ? { selection: input.selection.map((option) => ({ ...option, label: stripSearchTrimmed(option.label) })) }
+          : {}),
+      };
+    case "rich_card":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        cards: input.cards.map(sanitizeCardSearchMarkers),
+      };
+    case "carousel":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        cards: input.cards.map(sanitizeCardSearchMarkers),
+      };
+    case "form":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        form: sanitizeFormSearchMarkers(input.form),
+      };
+    case "place":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        ...(input.name !== undefined ? { name: stripSearchTrimmed(input.name) } : {}),
+        ...(input.address !== undefined ? { address: stripSearchTrimmed(input.address) } : {}),
+      };
+    case "link":
+    case "media":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+      };
+    case "voice_memo":
+      return {
+        ...input,
+        text: stripSearchText(input.text),
+      };
+    case "image":
+      return {
+        ...input,
+        ...(input.caption !== undefined ? { caption: stripSearchText(input.caption) } : {}),
+      };
+    case "payment":
+    case "rating_request":
+      return input;
+  }
+}
+
 async function sendOnce(
   deps: RelayActionDependencies,
   turn: RelayTurnIdentity,
@@ -864,6 +1062,23 @@ async function sendOnce(
   signal?: AbortSignal,
   callKey?: string,
 ): Promise<SendResult> {
+  if (deps.webSearch) {
+    input = sanitizeWebSearchInput(input);
+  }
+  // Relay shows inline Markdown only; block marks would arrive as raw "#" and "-"
+  // on any kind that sends a visible chat text part.
+  if (
+    (input.kind === "text"
+      || input.kind === "link"
+      || input.kind === "place"
+      || input.kind === "rich_card"
+      || input.kind === "carousel"
+      || input.kind === "form"
+      || input.kind === "media")
+    && input.text
+  ) {
+    input = { ...input, text: plainChatText(input.text) };
+  }
   const identity: KeyedTurn = {
     ...turn,
     sendKey: relayIdempotencyKey(callKey === undefined ? turn.eventId : `${turn.eventId}:${callKey}`),
@@ -872,8 +1087,6 @@ async function sendOnce(
   const relay = createRelayClient(deps.env);
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
-    // Relay shows inline Markdown only; block marks would arrive as raw "#" and "-".
-    if (input.text) input = { ...input, text: plainChatText(input.text) };
     // The ordinal survives overlap and ledger replay; completed sends alone do not.
     // An unnumbered turn has one logical send key.
     const firstSend = (callKey === undefined || callKey === "1")
@@ -967,13 +1180,16 @@ async function sendOnce(
   try {
     if (input.kind === "image") {
       if (!deps.media?.image) throw new Error("This agent has no image model");
-      const image = await deps.media.image(input.prompt, signal);
-      assertCurrent();
-      const attachmentId = await upload(relay, {
-        bytes: image.bytes,
-        contentType: image.contentType,
-        filename: imageFilename(image.contentType, identity.eventId),
-      }, signal);
+      const cacheKey = await attachmentCacheKey(identity.sendKey, "image", [input.prompt]);
+      const { attachmentId, fromCache } = await uploadOnce(deps.sentAttachments, cacheKey, async () => {
+        const image = await deps.media!.image!(input.prompt, signal);
+        assertCurrent();
+        return await upload(relay, {
+          bytes: image.bytes,
+          contentType: image.contentType,
+          filename: imageFilename(image.contentType, identity.eventId),
+        }, signal);
+      });
       await compose(
         input.caption ?? input.prompt,
         identity.eventId,
@@ -987,12 +1203,26 @@ async function sendOnce(
           : []),
         { type: "media", attachment_id: attachmentId },
       ];
-      const result = await relay.chats.messages.send(identity.chatId, {
-        message: {
-          parts,
-          idempotency_key: identity.sendKey,
-        },
-      }, requestOptions(signal));
+      let result;
+      try {
+        result = await relay.chats.messages.send(identity.chatId, {
+          message: {
+            parts,
+            idempotency_key: identity.sendKey,
+          },
+        }, requestOptions(signal));
+      } catch (error) {
+        // Clear a cached attachment if Relay rejects it (e.g. expired or gone)
+        // so the next retry uploads a fresh one instead of repeating the failure.
+        if (
+          fromCache
+          && error instanceof RelayAPIError
+          && (error.status === 400 || error.status === 404 || error.status === 410)
+        ) {
+          deps.sentAttachments?.put(cacheKey, "");
+        }
+        throw error;
+      }
       return {
         status: "sent",
         kind: input.kind,
@@ -1000,14 +1230,17 @@ async function sendOnce(
       };
     }
     if (!deps.media?.voiceMemo) throw new Error("This agent has no voice model");
-    const voice = await deps.media.voiceMemo(input.text, input.style, signal);
-    assertCurrent();
-    const attachmentId = await upload(relay, {
-      bytes: voice.bytes,
-      contentType: voice.contentType,
-      filename: `relay-${identity.eventId}.wav`,
-      durationMs: voice.durationMs,
-    }, signal);
+    const voiceCacheKey = await attachmentCacheKey(identity.sendKey, "voice_memo", [input.text, input.style ?? ""]);
+    const { attachmentId } = await uploadOnce(deps.sentAttachments, voiceCacheKey, async () => {
+      const voice = await deps.media!.voiceMemo!(input.text, input.style, signal);
+      assertCurrent();
+      return await upload(relay, {
+        bytes: voice.bytes,
+        contentType: voice.contentType,
+        filename: `relay-${identity.eventId}.wav`,
+        durationMs: voice.durationMs,
+      }, signal);
+    });
     await compose(input.text, identity.eventId, startedAt, signal);
     assertCurrent();
     deps.setIrreversibleSend(true);
@@ -1369,9 +1602,7 @@ export function createRelayActions(
           "send",
           () => executeRelaySend(
             deps,
-            deps.webSearch && input.text !== undefined
-              ? { ...input, text: withoutSearchMarkers(input.text) }
-              : input,
+            input,
             deps.signal(context.signal),
             String(number),
           ),

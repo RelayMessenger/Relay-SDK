@@ -14,10 +14,12 @@ export {
   RELAY_DEFAULT_BASE_URL,
   relayHttpError,
   RelayApiError,
+  RelayAttachmentTooLargeError,
   RelayClient,
 } from "./client.js";
 export type {
   RelayClientOptions,
+  RelayDownloadOptions,
   RelayUploadOptions,
 } from "./client.js";
 export {

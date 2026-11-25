@@ -52,23 +52,62 @@ export interface VerifyRelayIdTokenOptions {
   nonce?: string;
   /** Seconds of clock skew to allow on `exp` and `iat`. Defaults to 60. */
   clockTolerance?: number;
+  /** Request timeout in milliseconds for OIDC discovery and JWKS fetches. Defaults to 10000. */
+  timeoutMs?: number;
   /** For tests and runtimes without a global fetch. */
   fetch?: typeof globalThis.fetch;
 }
 
-const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const DEFAULT_OIDC_TIMEOUT_MS = 10_000;
+const KEY_SET_CACHE_LIMIT = 64;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
-const keysFor = async (issuer: string, fetcher: typeof globalThis.fetch) => {
-  const cached = keySets.get(issuer);
+const assertSafeOidcUrl = (raw: string, label: string): URL => {
+  const url = new URL(raw);
+  if (url.protocol === "https:") return url;
+  if (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname)) return url;
+  throw new Error(`${label} must use HTTPS (http is allowed only for loopback).`);
+};
+
+const keySetsByFetch = new WeakMap<
+  typeof globalThis.fetch,
+  Map<string, ReturnType<typeof createRemoteJWKSet>>
+>();
+
+const keysFor = async (
+  issuer: string,
+  fetcher: typeof globalThis.fetch,
+  timeoutMs: number,
+) => {
+  assertSafeOidcUrl(issuer, "Relay OpenID issuer");
+  let cache = keySetsByFetch.get(fetcher);
+  const cached = cache?.get(issuer);
   if (cached) return cached;
-  const response = await fetcher(`${issuer}/.well-known/openid-configuration`);
+  const boundFetcher = fetcher.bind(globalThis);
+  const response = await boundFetcher(`${issuer}/.well-known/openid-configuration`, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   if (!response.ok) throw new Error(`Relay's OpenID configuration answered ${response.status}.`);
   const discovery = await response.json() as { issuer?: string; jwks_uri?: string };
   if (discovery.issuer !== issuer || !discovery.jwks_uri) {
     throw new Error("Relay's OpenID configuration does not match the issuer.");
   }
-  const keys = createRemoteJWKSet(new URL(discovery.jwks_uri), { [customFetch]: fetcher });
-  keySets.set(issuer, keys);
+  const jwksUrl = assertSafeOidcUrl(discovery.jwks_uri, "Relay OpenID jwks_uri");
+  const keys = createRemoteJWKSet(jwksUrl, {
+    [customFetch]: boundFetcher,
+    timeoutDuration: timeoutMs,
+  });
+  if (!cache) {
+    cache = new Map();
+    keySetsByFetch.set(fetcher, cache);
+  }
+  cache.delete(issuer);
+  cache.set(issuer, keys);
+  while (cache.size > KEY_SET_CACHE_LIMIT) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
   return keys;
 };
 
@@ -82,7 +121,8 @@ export async function verifyRelayIdToken(
 ): Promise<RelayIdTokenClaims> {
   const issuer = (options.issuer ?? RELAY_ISSUER).replace(/\/$/, "");
   const fetcher = options.fetch ?? globalThis.fetch;
-  const { payload } = await jwtVerify(idToken, await keysFor(issuer, fetcher), {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OIDC_TIMEOUT_MS;
+  const { payload } = await jwtVerify(idToken, await keysFor(issuer, fetcher, timeoutMs), {
     issuer,
     audience: options.clientId,
     algorithms: ["RS256"],

@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import urllib.error
 import urllib.request
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union, cast
 from urllib.parse import quote, urlencode
@@ -463,6 +466,32 @@ class ContactCard(TypedDict, total=False):
     about: Optional[str]
 
 
+MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+def _parse_retry_after(body_value: Any, header_value: Optional[str]) -> Optional[float]:
+    if isinstance(body_value, (int, float)) and not isinstance(body_value, bool):
+        value = float(body_value)
+        if math.isfinite(value) and value >= 0:
+            return value
+    if header_value is not None:
+        trimmed = header_value.strip()
+        if trimmed:
+            try:
+                value = float(trimmed)
+            except ValueError:
+                try:
+                    dt = parsedate_to_datetime(trimmed)
+                except (TypeError, ValueError, IndexError):
+                    return None
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+            if math.isfinite(value) and value >= 0:
+                return value
+    return None
+
+
 class _Transport:
     def __init__(self, api_key: str, base_url: str, timeout: float, max_retries: int, retry_base_delay: float) -> None:
         if not api_key:
@@ -485,22 +514,41 @@ class _Transport:
     def api_key(self) -> str:
         return self._api_key
 
-    def _put(self, url: str, data: bytes, headers: Mapping[str, str]) -> int:
+    def _put(self, url: str, data: bytes, headers: Mapping[str, str]) -> Tuple[int, Mapping[str, str]]:
         request = urllib.request.Request(url, data=data, method="PUT", headers=dict(headers))
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                return int(response.status)
+                return int(response.status), dict(response.headers)
         except urllib.error.HTTPError as error:
-            return int(error.code)
+            return int(error.code), dict(error.headers or {})
 
     async def upload(self, allocation: Mapping[str, Any], data: bytes) -> None:
         headers = dict(allocation.get("required_headers") or {})
-        try:
-            status = await asyncio.to_thread(self._put, str(allocation["upload_url"]), data, headers)
-        except (OSError, TimeoutError) as cause:
-            raise RelayAPIError("Relay attachment upload failed.") from cause
-        if not 200 <= status < 300:
-            raise RelayAPIError(f"Relay attachment upload failed with HTTP {status}.", status=status)
+        url = str(allocation["upload_url"])
+        attempt = 0
+        while True:
+            try:
+                status, response_headers = await asyncio.to_thread(self._put, url, data, headers)
+            except (OSError, TimeoutError) as cause:
+                if attempt >= self._max_retries:
+                    raise RelayAPIError("Relay attachment upload failed.") from cause
+                await asyncio.sleep(self._retry_base_delay * 2**attempt)
+                attempt += 1
+                continue
+            if 200 <= status < 300:
+                return
+            header = {k.lower(): v for k, v in response_headers.items()}.get("retry-after")
+            retry_after = _parse_retry_after(None, header)
+            error = RelayAPIError(
+                f"Relay attachment upload failed with HTTP {status}.",
+                status=status,
+                retry_after=retry_after,
+            )
+            if not error.retryable or attempt >= self._max_retries:
+                raise error
+            wait = min(retry_after, MAX_RETRY_AFTER_SECONDS) if retry_after is not None else self._retry_base_delay * 2**attempt
+            await asyncio.sleep(wait)
+            attempt += 1
 
     async def request(
         self,
@@ -519,7 +567,7 @@ class _Transport:
             data = json.dumps(body).encode()
         if idempotency_key:
             headers["idempotency-key"] = idempotency_key
-        may_retry = retryable or method in ("GET", "PUT", "PATCH", "DELETE") or bool(idempotency_key)
+        may_retry = retryable or method in ("GET", "PUT", "DELETE") or bool(idempotency_key)
         retries = self._max_retries if max_retries is None else max_retries
         url = f"{self.base_url}{path}"
         attempt = 0
@@ -534,20 +582,24 @@ class _Transport:
                 continue
             text = raw.decode("utf-8", "replace")
             if 200 <= status < 300:
-                return json.loads(text) if text else None
+                if status == 204 or not text:
+                    return None
+                try:
+                    return json.loads(text)
+                except ValueError as cause:
+                    raise RelayAPIError(
+                        f"Relay returned invalid JSON with HTTP {status}.",
+                        status=status,
+                        body=text,
+                    ) from cause
             try:
                 parsed: Any = json.loads(text) if text else None
             except ValueError:
                 parsed = None
             detail = parsed.get("error") if isinstance(parsed, dict) else None
             detail = detail if isinstance(detail, dict) else {}
-            retry_after: Optional[float] = detail.get("retry_after")
-            if retry_after is None:
-                header = {k.lower(): v for k, v in response_headers.items()}.get("retry-after")
-                try:
-                    retry_after = float(header) if header is not None else None
-                except ValueError:
-                    retry_after = None
+            header = {k.lower(): v for k, v in response_headers.items()}.get("retry-after")
+            retry_after = _parse_retry_after(detail.get("retry_after"), header)
             error = RelayAPIError(
                 str(detail.get("message") or f"Relay request failed with HTTP {status}."),
                 status=status,
@@ -559,7 +611,8 @@ class _Transport:
             )
             if not may_retry or not error.retryable or attempt >= retries:
                 raise error
-            await asyncio.sleep(retry_after if retry_after is not None else self._retry_base_delay * 2**attempt)
+            wait = min(retry_after, MAX_RETRY_AFTER_SECONDS) if retry_after is not None else self._retry_base_delay * 2**attempt
+            await asyncio.sleep(wait)
             attempt += 1
 
 

@@ -11,6 +11,7 @@
 //
 // It loads `agents`, which needs the Workers runtime, so it is its own entry.
 import type Relay from "@relaymessenger/sdk";
+import { RelayAPIError } from "@relaymessenger/sdk";
 import { Agent, getAgentByName } from "agents";
 import { AgentSearchProvider } from "agents/context";
 import { type ModelMessage, tool, type ToolSet, type UIMessage } from "ai";
@@ -51,7 +52,29 @@ export const PERSON_MEMORY_CHAT_LINES = 20;
 export const PERSON_MEMORY_CHATS = 5;
 /** Messages of each other Chat a turn reads from Relay, when `relay` is set. */
 export const PERSON_MEMORY_RELAY_MESSAGES = 30;
+const PERSON_MEMORY_RELAY_TIMEOUT_MS = 5_000;
 const INDEX_LABEL = "person_memory";
+
+function relayCallSignal(turnSignal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(PERSON_MEMORY_RELAY_TIMEOUT_MS);
+  return turnSignal ? AbortSignal.any([turnSignal, timeout]) : timeout;
+}
+
+function isRevokedAccessError(error: unknown): boolean {
+  if (error instanceof RelayAPIError) {
+    return error.status === 403 || error.status === 404;
+  }
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { name?: unknown; status?: unknown };
+    if (
+      (candidate.name === "RelayAPIError" || candidate.name === "RelayApiError")
+      && (candidate.status === 403 || candidate.status === 404)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 interface StoredChat {
   chat_id: string;
@@ -104,18 +127,48 @@ export class RelayPersonMemory extends Agent {
         label = excluded.label, recent = excluded.recent, updated_at = excluded.updated_at`;
   }
 
-  /** Up to 10 ranked lines for a query, without the given Chat's. */
-  async search(query: string, exceptChatId?: string): Promise<string[]> {
+  /** Remove all stored lines and search index entries for a Chat this person can no longer access. */
+  async forget(chatId: string): Promise<void> {
+    const index = this.#search();
+    this.sql`DELETE FROM relay_person_memory_chats WHERE chat_id = ${chatId}`;
+    // Ensure the FTS5 table exists before deleting matching chat keys.
+    await index.get();
+    const prefix = `${chatId}:`;
+    this.sql`DELETE FROM cf_agents_search_fts
+      WHERE label = ${INDEX_LABEL}
+        AND substr(key, 1, ${prefix.length}) = ${prefix}`;
+  }
+
+  /** Up to 10 ranked hits with their owning chatId, without the excluded Chats'. */
+  async searchEntries(
+    query: string,
+    exceptChatIds?: string | readonly string[],
+  ): Promise<Array<{ chatId: string; content: string }>> {
     const found = await this.#search().search(query);
     if (!found) return [];
+    const excluded = new Set(
+      exceptChatIds === undefined
+        ? []
+        : typeof exceptChatIds === "string"
+        ? [exceptChatIds]
+        : exceptChatIds,
+    );
     // AgentSearchProvider renders each hit as `[<key>]\n<content>`, hits
     // joined by a blank line; a stored row is always one line.
     return found.split("\n\n").flatMap((hit) => {
       const match = /^\[([^\]]*)\]\n(.*)$/su.exec(hit);
       if (!match) return [];
-      if (exceptChatId && match[1]!.startsWith(`${exceptChatId}:`)) return [];
-      return [match[2]!];
+      const key = match[1]!;
+      const separator = key.indexOf(":");
+      const chatId = separator >= 0 ? key.slice(0, separator) : key;
+      if (excluded.has(chatId)) return [];
+      return [{ chatId, content: match[2]! }];
     });
+  }
+
+  /** Up to 10 ranked lines for a query, without the given Chat's. */
+  async search(query: string, exceptChatId?: string | readonly string[]): Promise<string[]> {
+    return (await this.searchEntries(query, exceptChatId)).map((entry) => entry.content);
   }
 
   /** The person's other Chats, most recent first, and hits for the query. */
@@ -171,7 +224,10 @@ export interface PersonMemoryAgent {
   ): T[];
 }
 
-type PersonMemoryStub = Pick<RelayPersonMemory, "remember" | "recall" | "search">;
+type PersonMemoryStub = Pick<RelayPersonMemory, "remember" | "recall" | "search"> & {
+  forget?: RelayPersonMemory["forget"];
+  searchEntries?: RelayPersonMemory["searchEntries"];
+};
 
 export interface PersonMemory {
   readonly enabled: boolean;
@@ -186,7 +242,10 @@ export interface PersonMemory {
    * model Message before the newest, and the `search_person_memory` tool.
    * Returns nothing in a Chat with two or more people.
    */
-  turn(messages: ModelMessage[]): Promise<{ messages: ModelMessage[]; tools: ToolSet } | undefined>;
+  turn(
+    messages: ModelMessage[],
+    signal?: AbortSignal,
+  ): Promise<{ messages: ModelMessage[]; tools: ToolSet } | undefined>;
 }
 
 const OFF: PersonMemory = {
@@ -257,40 +316,113 @@ export function personMemory(agent: PersonMemoryAgent, options: PersonMemoryOpti
       }
       cursor.write(chat.id, fresh.at(-1)!.key);
     },
-    async turn(messages) {
+    async turn(messages, signal) {
       const chat = await options.chat();
       if (!chat) return undefined;
       const person = personMemoryReader(chat, personMemoryLines(chat, agent.messages));
       if (!person) return undefined;
       const memory = await stub(person);
-      const recall = await memory.recall(chat.id, lastUserText(messages));
       const relay = options.relay;
+      const queryText = lastUserText(messages);
+      const recall = await memory.recall(chat.id, relay ? "" : queryText);
+      const excludedChatIds = new Set<string>([chat.id]);
+      const verifiedChatIds = new Set<string>();
+
+      const purgeChat = async (targetChatId: string): Promise<void> => {
+        excludedChatIds.add(targetChatId);
+        try {
+          await memory.forget?.(targetChatId);
+        } catch {
+          // Best-effort purge; excludedChatIds still blocks it for this turn.
+        }
+      };
+
+      const verifyMembership = async (
+        targetChatId: string,
+        turnSignal?: AbortSignal,
+      ): Promise<{ status: "allowed"; chat: PersonMemoryChat } | { status: "denied" } | { status: "transient" }> => {
+        if (!relay) return { status: "transient" };
+        try {
+          const current = await relay.chats.retrieve(targetChatId, {
+            signal: relayCallSignal(turnSignal),
+            maxRetries: 0,
+          }) as PersonMemoryChat;
+          if (!memberHandle(current, person)) {
+            await purgeChat(targetChatId);
+            return { status: "denied" };
+          }
+          return { status: "allowed", chat: current };
+        } catch (error) {
+          if (isRevokedAccessError(error)) {
+            await purgeChat(targetChatId);
+            return { status: "denied" };
+          }
+          return { status: "transient" };
+        }
+      };
+
+      const verifiedSearch = async (query: string, turnSignal?: AbortSignal): Promise<string[]> => {
+        if (!query.trim()) return [];
+        if (!relay) return await memory.search(query, chat.id);
+        if (!memory.searchEntries) return await memory.search(query, [...excludedChatIds]);
+        const entries = await memory.searchEntries(query, [...excludedChatIds]);
+        const unverified = [...new Set(
+          entries
+            .map((entry) => entry.chatId)
+            .filter((chatId) => !verifiedChatIds.has(chatId) && !excludedChatIds.has(chatId)),
+        )];
+        await Promise.all(unverified.map(async (targetChatId) => {
+          const verdict = await verifyMembership(targetChatId, turnSignal);
+          if (verdict.status === "allowed") verifiedChatIds.add(targetChatId);
+        }));
+        return entries
+          .filter((entry) => !excludedChatIds.has(entry.chatId))
+          .map((entry) => entry.content);
+      };
+
       if (relay) {
         // Each other Chat as Relay holds it, in parallel. A Chat the person
-        // is no longer in is left out; any error keeps the stored lines.
+        // is no longer in, or one returning 403/404, is excluded and purged;
+        // transient network/5xx errors keep the stored lines.
         const read = await Promise.all(recall.chats.map(async (stored) => {
+          const verdict = await verifyMembership(stored.chatId, signal);
+          if (verdict.status === "denied") return undefined;
+          if (verdict.status === "transient") return stored;
           try {
-            const current = await relay.chats.retrieve(stored.chatId) as PersonMemoryChat;
-            if (!memberHandle(current, person)) return undefined;
             const page = await relay.chats.messages.list(stored.chatId, {
               order: "desc",
               limit: PERSON_MEMORY_RELAY_MESSAGES,
+            }, {
+              signal: relayCallSignal(signal),
+              maxRetries: 0,
             });
-            return { ...stored, label: chatLabel(current), lines: relayChatRows(current, page.data, person) };
-          } catch {
+            verifiedChatIds.add(stored.chatId);
+            return {
+              ...stored,
+              label: chatLabel(verdict.chat),
+              lines: relayChatRows(verdict.chat, page.data, person),
+            };
+          } catch (error) {
+            if (isRevokedAccessError(error)) {
+              await purgeChat(stored.chatId);
+              return undefined;
+            }
             return stored;
           }
         }));
         recall.chats = read.filter((entry) => entry !== undefined);
         const shown = new Set(recall.chats.flatMap((entry) => entry.lines));
-        recall.hits = recall.hits.filter((hit) => !shown.has(hit));
+        const hits = await verifiedSearch(queryText, signal);
+        recall.hits = hits.filter((hit) => !shown.has(hit));
       }
       const tools: ToolSet = {
         search_person_memory: tool({
           description:
             "Search what this person and you said in your other chats with them. Returns up to 10 matching lines.",
           inputSchema: z.object({ query: z.string().trim().min(1).max(200) }),
-          execute: async ({ query }) => ({ lines: await memory.search(query, chat.id) }),
+          execute: async ({ query }, toolOptions) => ({
+            lines: await verifiedSearch(query, toolOptions?.abortSignal ?? signal),
+          }),
         }),
       };
       const content = personMemoryContent(recall);

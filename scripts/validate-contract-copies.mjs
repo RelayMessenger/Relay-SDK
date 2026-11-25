@@ -17,9 +17,6 @@ assert.ok(
 );
 const copies = [
   "contracts/relay-v1-openapi.yaml",
-  "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
-  "packages/openclaw/contracts/relay-openapi.yaml",
-  "cookbook/cloudflare-think-agent/contracts/relay-openapi.yaml",
 ];
 
 for (const path of copies) {

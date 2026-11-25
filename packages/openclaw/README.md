@@ -234,8 +234,8 @@ and the exact `@relaymessenger/sdk` registry integrity, source
 commit `1bbcb486b4a91860ee3527ce95d015883e4cc1ae`, REST operations, and WebSocket
 frames consumed by the plugin.
 
-Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
-requires the locked digest above. Set `RELAY_SERVER_SOURCE_DIR` to an exact
+Public CI hashes the checked-in `contracts/relay-v1-openapi.yaml` contract at
+the repository root and requires the locked digest above. Set `RELAY_SERVER_SOURCE_DIR` to an exact
 checkout of the Server commit above to additionally prove that the fixture bytes
 match committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.

@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/think",
-  "version": "0.1.13-staging.2",
+  "version": "0.1.14-staging.3",
   "description": "The Relay agent runtime for Cloudflare Think: calls, reactions, replies, locations, payments, typing, history and per-person memory.",
   "keywords": [
     "relay",
@@ -42,6 +42,16 @@
       "import": "./dist/memory.js",
       "default": "./dist/memory.js"
     },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
+    },
+    "./clone": {
+      "types": "./dist/clone.d.ts",
+      "import": "./dist/clone.js",
+      "default": "./dist/clone.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -57,16 +67,17 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
+    "types": "wrangler types -c wrangler.test.jsonc",
     "build": "rm -rf dist && node scripts/build.mjs && tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit",
+    "check": "npm run types && tsc --noEmit",
     "test": "vitest run --config vitest.config.ts && vitest run --config vitest.workerd.config.ts",
     "test:all": "npm run check && npm run build && npm test",
     "pack:types": "node scripts/consumer-types.mjs",
     "prepack": "npm run check && npm test && npm run build"
   },
   "dependencies": {
-    "@relaymessenger/chat-sdk-adapter": "0.3.18-staging.0",
-    "@relaymessenger/sdk": "0.5.7-staging.0",
+    "@relaymessenger/chat-sdk-adapter": "0.3.19-staging.2",
+    "@relaymessenger/sdk": "0.5.8-staging.1",
     "mdast-util-from-markdown": "^2.1.0",
     "mdast-util-gfm": "^3.1.0",
     "micromark-extension-gfm": "^3.0.0"

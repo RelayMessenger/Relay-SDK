@@ -34,9 +34,10 @@ function sourceFiles() {
     .sort();
 }
 
+const workspaceOpenapiPath = join(root, "..", "..", "contracts", "relay-v1-openapi.yaml");
 const openapiPath =
   process.env.RELAY_OPENAPI_PATH
-  ?? join(root, "contracts", "relay-openapi.yaml");
+  ?? workspaceOpenapiPath;
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
@@ -178,7 +179,7 @@ test("hashes the mandatory canonical OpenAPI bytes against the lock", () => {
   } else {
     assert.equal(
       resolve(openapiPath),
-      join(root, "contracts", "relay-openapi.yaml"),
+      workspaceOpenapiPath,
     );
   }
   const digest = createHash("sha256")
@@ -269,7 +270,7 @@ test("keeps the package release guard monorepo-bound and staging-only", () => {
   assert.match(guard, /provenance:\s*true/u);
   assert.match(
     read("scripts/verify-contract-provenance.mjs"),
-    /contracts", "relay-openapi\.yaml/u,
+    /"contracts", "relay-v1-openapi\.yaml"/u,
   );
   assert.match(
     read("scripts/release-validate.mjs"),

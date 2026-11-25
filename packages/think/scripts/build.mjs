@@ -15,7 +15,7 @@ const external = [
 await build({
   // The entries share their modules through chunks, so a class such as
   // RelayPaymentRefused is one class whichever entry it is imported from.
-  entryPoints: ["index", "actions", "memory"].map((name) => new URL(`../src/${name}.ts`, import.meta.url).pathname),
+  entryPoints: ["index", "actions", "memory", "worker", "clone"].map((name) => new URL(`../src/${name}.ts`, import.meta.url).pathname),
   outdir: new URL("../dist", import.meta.url).pathname,
   bundle: true,
   splitting: true,

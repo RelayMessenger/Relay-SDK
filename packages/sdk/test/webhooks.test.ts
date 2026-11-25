@@ -234,4 +234,31 @@ describe("signWebhookHeaders", () => {
     expect(() => verifyWebhookSignature(secret, `${body} `, headers)).toThrow(WebhookVerificationError);
     expect(() => verifyWebhookSignature(`whsec_${Buffer.from("other-secret").toString("base64")}`, body, headers)).toThrow(WebhookVerificationError);
   });
+
+  it("looks up plain-object webhook headers case-insensitively", () => {
+    const body = JSON.stringify({ event_id: "evt_mixed", hello: "world" });
+    const signed = signWebhookHeaders(secret, { id: "evt_mixed", body });
+    const mixedCase = {
+      "Webhook-Id": signed["webhook-id"],
+      "WEBHOOK-TIMESTAMP": signed["webhook-timestamp"],
+      "Webhook-Signature": signed["webhook-signature"],
+    };
+    expect(() => verifyWebhookSignature(secret, body, mixedCase)).not.toThrow();
+    const client = new Relay({ apiKey: "token", webhookSecret: secret });
+    expect(client.webhooks.unwrap(body, { headers: mixedCase })).toEqual({ event_id: "evt_mixed", hello: "world" });
+  });
+
+  it("supports custom timestamp tolerance and verifies signed non-JSON payloads", () => {
+    const body = "{not-valid-json";
+    const ts = new Date(1_700_000_000 * 1_000);
+    const headers = signWebhookHeaders(secret, { id: "evt_nonjson", body, timestamp: ts });
+    expect(() => verifyWebhookSignature(secret, body, headers, {
+      nowSeconds: 1_700_000_050,
+      toleranceSeconds: 60,
+    })).not.toThrow();
+    expect(() => verifyWebhookSignature(secret, body, headers, {
+      nowSeconds: 1_700_000_061,
+      toleranceSeconds: 60,
+    })).toThrow(WebhookVerificationError);
+  });
 });

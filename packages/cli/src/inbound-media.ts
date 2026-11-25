@@ -13,13 +13,58 @@ export interface InboundMediaOptions {
   mediaDir?: string;
   context?: ConfigContext;
   fetch?: typeof globalThis.fetch;
+  maxBytes?: number;
 }
 
 export type DownloadedMedia =
   | { ok: true; path: string; filename: string; mime_type: string }
   | { ok: false; filename: string; error: string };
 
+const MAX_INBOUND_MEDIA_BYTES = 104_857_600;
+
 const safeName = (name: string): string => name.replace(/[^a-zA-Z0-9._-]/gu, "_").replace(/^\.+/u, "_") || "attachment";
+
+const readBoundedBytes = async (response: Response, maxBytes: number): Promise<Uint8Array> => {
+  const lengthHeader = response.headers.get("content-length");
+  if (lengthHeader !== null && lengthHeader.trim() !== "") {
+    const declared = Number(lengthHeader);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Media exceeds maximum size of ${maxBytes} bytes (${declared} bytes).`);
+    }
+  }
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new Error(`Media exceeds maximum size of ${maxBytes} bytes (${bytes.byteLength} bytes).`);
+    }
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Media exceeds maximum size of ${maxBytes} bytes.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+};
 
 /** External media URLs do not receive the Relay bearer token. */
 export const downloadInboundMedia = async (
@@ -27,9 +72,13 @@ export const downloadInboundMedia = async (
 ): Promise<DownloadedMedia[]> => {
   if (parts.length === 0) return [];
   const env = options.context?.env ?? process.env;
+  const maxBytes = options.maxBytes ?? MAX_INBOUND_MEDIA_BYTES;
   const files: DownloadedMedia[] = [];
   for (const part of parts) {
     try {
+      if (part.size_bytes !== undefined && part.size_bytes > maxBytes) {
+        throw new Error(`Media exceeds maximum size of ${maxBytes} bytes (${part.size_bytes} bytes).`);
+      }
       const mediaDir = resolve(options.mediaDir ?? env.RELAY_MEDIA_DIR ?? join(dirname(configPath(options.context)), "media"));
       const path = join(mediaDir, safeName(options.chatId), `${safeName(part.id)}-${safeName(part.filename)}`);
       const destination = await preparePrivateDestination(path, "Relay media", options.context?.platform);
@@ -44,7 +93,7 @@ export const downloadInboundMedia = async (
         if (url.origin === new URL(options.apiURL).origin) headers.set("authorization", `Bearer ${options.token}`);
         const response = await (options.fetch ?? globalThis.fetch)(url, { headers, signal: AbortSignal.timeout(120_000) });
         if (!response.ok) throw new Error(`Media download failed (${response.status}).`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
+        const bytes = await readBoundedBytes(response, maxBytes);
         const temporary = await openPrivateTemp(destination, ".media");
         try {
           try { await temporary.handle.writeFile(bytes); await temporary.handle.sync(); }
@@ -54,7 +103,9 @@ export const downloadInboundMedia = async (
         } finally { await removeTemp(temporary.path); }
       }
       files.push({ ok: true, path, filename: part.filename, mime_type: part.mime_type });
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[relay] Failed to download inbound media ${part.id} (${part.filename.replace(/[\r\n]/gu, " ")}): ${reason}`);
       files.push({ ok: false, filename: part.filename, error: "Media could not be downloaded." });
     }
   }
@@ -76,7 +127,9 @@ const readReplyTarget = async (
       signal: AbortSignal.timeout(30_000),
     });
     return response.ok ? await response.json() as Message : undefined;
-  } catch {
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[relay] Failed to read reply target ${replyTo.message_id}: ${reason}`);
     return undefined;
   }
 };

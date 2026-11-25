@@ -1,3 +1,7 @@
+import {
+  verifyWebhookSignature as verifySdkWebhookSignature,
+  WebhookVerificationError as SdkWebhookVerificationError,
+} from "@relaymessenger/sdk";
 import type { RelayCredential } from "./credentials.js";
 import { resolveRelayCredential } from "./credentials.js";
 
@@ -19,8 +23,6 @@ export class WebhookVerificationError extends Error {
     this.name = "WebhookVerificationError";
   }
 }
-
-const DEFAULT_TOLERANCE_SECONDS = 5 * 60;
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const normalized = value.trim();
@@ -59,17 +61,9 @@ export function decodeWebhookSecret(
   }
 }
 
-function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left[index]! ^ right[index]!;
-  }
-  return difference === 0;
-}
-
 /**
- * Verify Relay's current Standard Webhooks v1 signature over the exact body.
+ * Verify Relay's current Standard Webhooks v1 signature over the exact body,
+ * delegating HMAC and timestamp verification to `@relaymessenger/sdk`.
  */
 export async function verifyWebhookSignature(input: {
   headers: Pick<Headers, "get">;
@@ -86,57 +80,22 @@ export async function verifyWebhookSignature(input: {
     );
   }
 
-  const parsedTimestamp = Number(timestamp);
-  if (
-    !Number.isSafeInteger(parsedTimestamp) ||
-    parsedTimestamp < 0
-  ) {
-    throw new WebhookVerificationError("invalid webhook-timestamp");
-  }
-  const now =
-    input.options?.nowSeconds ?? Math.floor(Date.now() / 1_000);
-  const tolerance =
-    input.options?.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
-  if (
-    !Number.isFinite(tolerance) ||
-    tolerance < 0 ||
-    Math.abs(now - parsedTimestamp) > tolerance
-  ) {
-    throw new WebhookVerificationError(
-      "webhook-timestamp outside tolerance",
-    );
-  }
-
-  const secret = await resolveRelayCredential(
+  const secret = (await resolveRelayCredential(
     input.secret,
     "Relay webhook signing secret",
-  );
-  const key = await crypto.subtle.importKey(
-    "raw",
-    decodeWebhookSecret(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-  const content = `${id}.${timestamp}.${input.payload}`;
-  const expected = new Uint8Array(
-    await crypto.subtle.sign(
-      "HMAC",
-      key,
-      new TextEncoder().encode(content),
-    ),
-  );
+  )).trim();
+  // Validate the deployment secret before verification so malformed secrets
+  // always surface as WebhookSecretError rather than a delivery 401.
+  decodeWebhookSecret(secret);
 
-  for (const candidate of signatures.split(/\s+/)) {
-    const [version, encoded] = candidate.split(",", 2);
-    if (version !== "v1" || !encoded) continue;
-    let provided: Uint8Array;
-    try {
-      provided = decodeBase64(encoded);
-    } catch {
-      continue;
+  try {
+    verifySdkWebhookSignature(secret, input.payload, input.headers, input.options);
+  } catch (error) {
+    if (error instanceof SdkWebhookVerificationError) {
+      throw new WebhookVerificationError(error.message);
     }
-    if (constantTimeEqual(expected, provided)) return;
+    throw new WebhookSecretError(
+      error instanceof Error ? error.message : String(error),
+    );
   }
-  throw new WebhookVerificationError("no matching v1 signature");
 }

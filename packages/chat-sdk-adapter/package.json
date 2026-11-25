@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/chat-sdk-adapter",
-  "version": "0.3.18-staging.0",
+  "version": "0.3.19-staging.2",
   "description": "Vendor-official Relay adapter for Vercel Chat SDK.",
   "keywords": [
     "relay",
@@ -22,7 +22,7 @@
   "type": "module",
   "sideEffects": false,
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22.3"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,7 +47,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit",
+    "check": "npm run wrangler:types && tsc --noEmit",
     "test": "npm run test:unit && npm run test:workerd",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
@@ -63,7 +63,7 @@
   },
   "dependencies": {
     "@chat-adapter/shared": "4.41.0",
-    "@relaymessenger/sdk": "0.5.7-staging.0"
+    "@relaymessenger/sdk": "0.5.8-staging.1"
   },
   "devDependencies": {
     "@chat-adapter/state-memory": "4.41.0",

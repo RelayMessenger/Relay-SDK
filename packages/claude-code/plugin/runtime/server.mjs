@@ -20966,8 +20966,22 @@ var ignore = () => {
 
 // node_modules/@relaymessenger/sdk/dist/webhooks.js
 var import_standardwebhooks = __toESM(require_dist2(), 1);
+var DEFAULT_TOLERANCE_SECONDS = 5 * 60;
+var isHeadersLike = (headers) => typeof headers.get === "function";
 var requiredHeaders = (headers) => {
-  const get = (name) => headers instanceof Headers ? headers.get(name) : headers[name];
+  let get;
+  if (isHeadersLike(headers)) {
+    get = (name) => headers.get(name);
+  } else {
+    const normalized = /* @__PURE__ */ new Map();
+    for (const [key, value] of Object.entries(headers)) {
+      const lower = key.toLowerCase();
+      if (value != null && (!normalized.has(lower) || normalized.get(lower) == null)) {
+        normalized.set(lower, value);
+      }
+    }
+    get = (name) => normalized.get(name);
+  }
   const id = get("webhook-id");
   const timestamp = get("webhook-timestamp");
   const signature = get("webhook-signature");
@@ -20980,8 +20994,40 @@ var requiredHeaders = (headers) => {
     "webhook-signature": signature
   };
 };
-var verifyWebhookSignature = (secret, body, headers) => {
-  new import_standardwebhooks.Webhook(secret).verify(body, requiredHeaders(headers));
+var constantTimeEqual = (left, right) => {
+  if (left.length !== right.length)
+    return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+};
+var verifyWebhookSignature = (secret, body, headers, options2) => {
+  const required2 = requiredHeaders(headers);
+  const id = required2["webhook-id"];
+  const timestamp = required2["webhook-timestamp"];
+  const signatures = required2["webhook-signature"];
+  const parsedTimestamp = Number(timestamp);
+  if (!Number.isSafeInteger(parsedTimestamp) || parsedTimestamp < 0) {
+    throw new import_standardwebhooks.WebhookVerificationError("Invalid webhook-timestamp.");
+  }
+  const now = options2?.nowSeconds ?? Math.floor(Date.now() / 1e3);
+  const tolerance = options2?.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
+  if (!Number.isFinite(tolerance) || tolerance < 0 || Math.abs(now - parsedTimestamp) > tolerance) {
+    throw new import_standardwebhooks.WebhookVerificationError("webhook-timestamp outside tolerance.");
+  }
+  const computed = new import_standardwebhooks.Webhook(secret).sign(id, new Date(parsedTimestamp * 1e3), body);
+  const expected = new TextEncoder().encode(computed.split(",", 2)[1] ?? "");
+  const encoder = new TextEncoder();
+  for (const candidate of signatures.split(/\s+/u)) {
+    const [version2, encoded] = candidate.split(",", 2);
+    if (version2 !== "v1" || !encoded)
+      continue;
+    if (constantTimeEqual(encoder.encode(encoded), expected))
+      return;
+  }
+  throw new import_standardwebhooks.WebhookVerificationError("No matching v1 signature found.");
 };
 var Webhooks = class {
   #secret;
@@ -21660,6 +21706,28 @@ var runWebSocket = async (baseURL, agentToken, options2) => {
 };
 
 // node_modules/@relaymessenger/sdk/dist/client.js
+var MAX_RETRY_AFTER_SECONDS = 60;
+var parseRetryAfterSeconds = (bodyValue, headerValue) => {
+  if (typeof bodyValue === "number" && Number.isFinite(bodyValue) && bodyValue >= 0) {
+    return bodyValue;
+  }
+  if (headerValue !== null) {
+    const trimmed = headerValue.trim();
+    if (trimmed !== "") {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric) && numeric >= 0)
+        return numeric;
+      if (Number.isNaN(numeric)) {
+        const parsedDate = Date.parse(trimmed);
+        if (Number.isFinite(parsedDate)) {
+          return Math.max(0, (parsedDate - Date.now()) / 1e3);
+        }
+      }
+    }
+  }
+  return void 0;
+};
+var retryWaitMs = (retryAfterSeconds, baseDelayMs, attempt) => retryAfterSeconds !== void 0 ? Math.min(retryAfterSeconds, MAX_RETRY_AFTER_SECONDS) * 1e3 : baseDelayMs * 2 ** attempt;
 var delay = async (milliseconds, signal) => {
   if (milliseconds <= 0)
     return;
@@ -21698,7 +21766,8 @@ var Transport = class {
         url.searchParams.set(name, String(value));
     }
     const maxRetries = request.options?.maxRetries ?? this.#maxRetries;
-    const mayRetry = request.retryable === true || request.method === "GET" || request.method === "PUT" || request.method === "PATCH" || request.method === "DELETE" || request.idempotencyKey !== void 0;
+    const headerIdempotencyKey = new Headers(request.options?.headers).get("idempotency-key")?.trim();
+    const mayRetry = request.retryable === true || request.method === "GET" || request.method === "PUT" || request.method === "DELETE" || request.idempotencyKey !== void 0 || Boolean(headerIdempotencyKey);
     for (let attempt = 0; ; attempt += 1) {
       const timeout = request.options?.timeout ?? this.#timeout;
       const timeoutSignal = AbortSignal.timeout(timeout);
@@ -21737,7 +21806,13 @@ var Transport = class {
         if (response.status === 204)
           return void 0;
         const text6 = await response.text();
-        return text6 ? JSON.parse(text6) : void 0;
+        if (!text6)
+          return void 0;
+        try {
+          return JSON.parse(text6);
+        } catch (cause) {
+          throw new RelayAPIError(`Relay returned invalid JSON with HTTP ${response.status}.`, { status: response.status, body: text6, cause });
+        }
       }
       const text5 = await response.text();
       let body;
@@ -21746,39 +21821,62 @@ var Transport = class {
       } catch {
         body = void 0;
       }
-      const retryAfter = body?.error?.retry_after ?? Number(response.headers.get("retry-after") ?? NaN);
+      const retryAfter = parseRetryAfterSeconds(body?.error?.retry_after, response.headers.get("retry-after"));
       const error2 = new RelayAPIError(body?.error?.message ?? `Relay request failed with HTTP ${response.status}.`, {
         status: response.status,
         ...body?.error?.code === void 0 ? {} : { code: body.error.code },
         ...body?.trace_id === void 0 ? {} : { traceId: body.trace_id },
         ...body?.error?.doc_url === void 0 ? {} : { docURL: body.error.doc_url },
-        ...Number.isFinite(retryAfter) ? { retryAfter } : {},
+        ...retryAfter !== void 0 ? { retryAfter } : {},
         body: body ?? text5
       });
       if (!mayRetry || !error2.retryable || attempt >= maxRetries)
         throw error2;
-      const wait2 = Number.isFinite(retryAfter) ? retryAfter * 1e3 : this.#retryBaseDelayMs * 2 ** attempt;
-      await delay(wait2, request.options?.signal);
+      await delay(retryWaitMs(retryAfter, this.#retryBaseDelayMs, attempt), request.options?.signal);
     }
   }
   async upload(allocation, data, options2 = {}) {
+    const method = (allocation.http_method || "PUT").toUpperCase();
+    const maxRetries = options2.maxRetries ?? this.#maxRetries;
+    const isStream = typeof ReadableStream !== "undefined" && data instanceof ReadableStream;
+    const mayRetry = method === "PUT" && !isStream;
     const headers = new Headers(allocation.required_headers);
     for (const [name, value] of new Headers(options2.headers)) {
       headers.set(name, value);
     }
-    let response;
-    try {
-      response = await this.#fetch(allocation.upload_url, {
-        method: "PUT",
-        headers,
-        body: data,
-        ...options2.signal ? { signal: options2.signal } : {}
+    for (let attempt = 0; ; attempt += 1) {
+      const timeout = options2.timeout ?? this.#timeout;
+      const timeoutSignal = AbortSignal.timeout(timeout);
+      const signal = options2.signal ? AbortSignal.any([options2.signal, timeoutSignal]) : timeoutSignal;
+      let response;
+      try {
+        response = await this.#fetch(allocation.upload_url, {
+          method,
+          headers,
+          body: data,
+          signal
+        });
+      } catch (cause) {
+        if (options2.signal?.aborted)
+          throw cause;
+        if (isAbortError(cause) && !timeoutSignal.aborted)
+          throw cause;
+        const error3 = new RelayAPIError(timeoutSignal.aborted ? `Relay attachment upload timed out after ${timeout}ms.` : "Relay attachment upload failed.", { cause });
+        if (!mayRetry || attempt >= maxRetries)
+          throw error3;
+        await delay(this.#retryBaseDelayMs * 2 ** attempt, options2.signal);
+        continue;
+      }
+      if (response.ok)
+        return;
+      const retryAfter = parseRetryAfterSeconds(void 0, response.headers.get("retry-after"));
+      const error2 = new RelayAPIError(`Relay attachment upload failed with HTTP ${response.status}.`, {
+        status: response.status,
+        ...retryAfter !== void 0 ? { retryAfter } : {}
       });
-    } catch (cause) {
-      throw new RelayAPIError("Relay attachment upload failed.", { cause });
-    }
-    if (!response.ok) {
-      throw new RelayAPIError(`Relay attachment upload failed with HTTP ${response.status}.`, { status: response.status });
+      if (!mayRetry || !error2.retryable || attempt >= maxRetries)
+        throw error2;
+      await delay(retryWaitMs(retryAfter, this.#retryBaseDelayMs, attempt), options2.signal);
     }
   }
   runWebSocket(options2) {
@@ -23605,6 +23703,8 @@ function mediaInputs(value) {
   }
   return inputs;
 }
+var MAX_UPLOAD_BYTES = 104857600;
+var UPLOAD_CACHE_MAX = 256;
 var MediaUploader = class {
   #uploaded = /* @__PURE__ */ new Map();
   #relay;
@@ -23625,10 +23725,21 @@ var MediaUploader = class {
   async #upload(path, given, replyKey, index) {
     const info = await stat(path);
     if (!info.isFile()) throw new Error(`media path ${path} is not a file`);
+    if (info.size < 1) throw new Error(`media file ${path} is empty`);
+    if (info.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`media file ${path} exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes (${info.size} bytes)`);
+    }
     const data = await readFile(path);
+    if (data.byteLength < 1 || data.byteLength > MAX_UPLOAD_BYTES) {
+      throw new Error(`media file ${path} exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes (${data.byteLength} bytes)`);
+    }
     const cacheKey = `${replyKey}\0${index}\0${createHash3("sha256").update(data).digest("hex")}`;
     const known = this.#uploaded.get(cacheKey);
-    if (known) return known;
+    if (known) {
+      this.#uploaded.delete(cacheKey);
+      this.#uploaded.set(cacheKey, known);
+      return known;
+    }
     const filename = basename(path);
     const extension2 = /\.([^.]+)$/u.exec(filename)?.[1]?.toLowerCase();
     const contentType = given ?? (extension2 && Object.hasOwn(EXTENSIONS, extension2) ? EXTENSIONS[extension2] : void 0);
@@ -23639,7 +23750,13 @@ var MediaUploader = class {
       size_bytes: data.byteLength
     });
     await this.#relay.attachments.upload(allocation, new Uint8Array(data));
+    this.#uploaded.delete(cacheKey);
     this.#uploaded.set(cacheKey, allocation.attachment_id);
+    while (this.#uploaded.size > UPLOAD_CACHE_MAX) {
+      const oldest = this.#uploaded.keys().next();
+      if (oldest.done) break;
+      this.#uploaded.delete(oldest.value);
+    }
     return allocation.attachment_id;
   }
 };
@@ -24990,7 +25107,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.21-staging.1" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.22-staging.2" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

@@ -4,8 +4,8 @@ import { findExecutable } from "./runtime-sniff.js";
 import type Relay from "@relaymessenger/sdk";
 import { query, type CanUseTool, type PermissionResult, type PermissionUpdate, type SpawnOptions, type SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { platformCommand, spawnCommand } from "./spawn-command.js";
-import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
-import { replacesLiveTurn } from "./bridge-turn.js";
+import { codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
+import { runBridgeEventLoop, startBridgeTyping, type BridgeChatLane } from "./bridge-lanes.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
 import { denialMessage, inputCard, type ApprovalChoice, type OwnerApprovals } from "./approvals.js";
@@ -173,12 +173,6 @@ const failureLine = (error: unknown, stderr: string): string => {
 interface LiveTurn {
   control: AbortController;
   dropped: boolean;
-  fromAgent: boolean;
-}
-
-interface ChatLane {
-  chain: Promise<void>;
-  live?: LiveTurn | undefined;
 }
 
 /**
@@ -186,25 +180,23 @@ interface ChatLane {
  * current turn; an agent's waits for it (`replacesLiveTurn`).
  */
 export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> => {
-  const answered = new Set<string>();
-  const lanes = new Map<string, ChatLane>();
   const ask = input.query ?? query;
   const spawner = claudeSpawn(input.claude.executable, input.platform);
   const permission = claudePermission(input.approvals);
 
-  const answerOne = async (turn: BridgeTurn, lane: ChatLane, started: () => void): Promise<void> => {
-    const mine: LiveTurn = { control: new AbortController(), dropped: false, fromAgent: turn.fromAgent };
+  const answerOne = async (turn: BridgeTurn, lane: BridgeChatLane<LiveTurn>, started: () => void): Promise<void> => {
+    const mine: LiveTurn = { control: new AbortController(), dropped: false };
     lane.live = mine;
+    lane.liveFromAgent = turn.fromAgent;
     const abort = (): void => mine.control.abort();
     input.signal.addEventListener("abort", abort, { once: true });
     if (input.signal.aborted) abort();
-    let typing = false;
+    let stopTyping: (() => Promise<void>) | undefined;
     try {
       let answer = "";
       try {
         if (mine.control.signal.aborted) return;
-        try { await input.client.chats.startTyping(turn.chatId); typing = true; }
-        catch { /* The answer matters more than the typing indicator. */ }
+        stopTyping = await startBridgeTyping(input.client, turn.chatId);
         if (mine.control.signal.aborted) return;
         const resume = input.threads.get(turn.chatId);
         const media = await inboundMediaPrompt(turn, input.media);
@@ -261,45 +253,19 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
       }
     } finally {
       input.signal.removeEventListener("abort", abort);
-      if (typing) {
-        try { await input.client.chats.stopTyping(turn.chatId); } catch { /* As above. */ }
-      }
-      if (lane.live === mine) lane.live = undefined;
+      if (stopTyping) await stopTyping();
+      if (lane.live === mine) { lane.live = undefined; lane.liveFromAgent = undefined; }
     }
   };
 
-  await input.client.websocket.run({
+  await runBridgeEventLoop<LiveTurn>({
+    client: input.client,
+    approvals: input.approvals,
     signal: input.signal,
-    onEvent: async (event) => {
-      // A tap on an approval card answers a prompt; it is not a message to answer.
-      if (await input.approvals.take(event)) return;
-      const turn = bridgeTurn(event);
-      if (!turn || answered.has(turn.eventId) || input.signal.aborted) return;
-      answered.add(turn.eventId);
-      input.say(`@${turn.sender}  ${turn.text.replace(/\s+/gu, " ").slice(0, 160)}`);
-      const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
-      lanes.set(turn.chatId, lane);
-      const live = lane.live;
-      const replacing = live !== undefined && replacesLiveTurn(turn, live);
-      if (live !== undefined && replacing) {
-        live.dropped = true;
-        live.control.abort();
-      }
-      let ready!: () => void;
-      const handed = new Promise<void>((resolve) => { ready = resolve; });
-      lane.chain = lane.chain.then(() => answerOne(turn, lane, ready))
-        .catch(() => undefined).finally(() => { ready(); });
-      // A message that waits behind the live turn is taken now, so the turn
-      // it waits for does not hold this connection for every other chat.
-      if (live !== undefined && !replacing) ready();
-      await handed;
-    },
-    onFullSync: async () => {
-      // This process keeps no copy of any chat, so there is nothing to rebuild.
-      // Throwing here would not stop the bridge: the SDK closes the socket and
-      // reconnects, Relay re-issues the same FULL sync, and no message is ever
-      // answered again. Acknowledge it and answer the new ones.
-      input.say("Claude Code was away longer than Relay keeps its messages. It answers the new ones from now on.");
-    },
+    say: input.say,
+    label: "Claude Code",
+    ignoreWhenAborted: true,
+    interrupt: (live) => { live.control.abort(); },
+    answer: answerOne,
   });
 };

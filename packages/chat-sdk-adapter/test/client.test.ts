@@ -9,6 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   RelayApiError,
+  RelayAttachmentTooLargeError,
   RelayClient,
   type RelayPaymentRequest,
 } from "../src/index.js";
@@ -247,6 +248,7 @@ describe("RelayClient error mapping", () => {
     const { fetchMock } = harness(() => jsonResponse(body, status));
     return new RelayClient({
       fetch: fetchMock as typeof fetch,
+      maxRetries: 0,
       token: "token",
     });
   }
@@ -475,4 +477,117 @@ it("rejects a non-UUID payment request id before calling Relay, and maps an unco
     .catch((thrown: unknown) => thrown);
   expect(error).toBeInstanceOf(PermissionError);
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+describe("RelayClient resilience and bounded downloads", () => {
+  it("retries transient 5xx, 429, and network failures on safe/idempotent requests with timeout", async () => {
+    let calls = 0;
+    const signals: Array<AbortSignal | undefined> = [];
+    const client = new RelayClient({
+      token: "test",
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        calls += 1;
+        signals.push(init?.signal ?? undefined);
+        if (calls === 1) throw new TypeError("socket reset");
+        if (calls === 2) {
+          return new Response(JSON.stringify({ error: { message: "busy" } }), {
+            status: 429,
+            headers: { "retry-after": "0" },
+          });
+        }
+        return jsonResponse({ id: IDS.chat, is_group: false, handles: [] });
+      }) as typeof fetch,
+    });
+    const chat = await client.getChat(IDS.chat);
+    expect(chat.id).toBe(IDS.chat);
+    expect(calls).toBe(3);
+    expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+
+    // Non-idempotent POST (react) is not retried on 503.
+    let postCalls = 0;
+    const noRetryPost = new RelayClient({
+      token: "test",
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+      fetch: (async () => {
+        postCalls += 1;
+        return jsonResponse({ error: { message: "down" } }, 503);
+      }) as typeof fetch,
+    });
+    await expect(noRetryPost.react({
+      messageId: IDS.message,
+      operation: "add",
+      type: "like",
+    })).rejects.toBeInstanceOf(NetworkError);
+    expect(postCalls).toBe(1);
+
+    // Request timeout aborts a hanging fetch.
+    const hanging = new RelayClient({
+      token: "test",
+      maxRetries: 0,
+      timeoutMs: 25,
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_res, rej) => {
+        init?.signal?.addEventListener("abort", () => rej(init.signal!.reason), { once: true });
+      })) as typeof fetch,
+    });
+    await expect(hanging.getChat(IDS.chat)).rejects.toMatchObject({
+      message: expect.stringContaining("timed out"),
+    });
+  });
+
+  it("streams downloadAttachment with bounded byte limit and cancels oversized bodies before buffering", async () => {
+    let chunksPulled = 0;
+    let canceled = false;
+    const client = new RelayClient({
+      token: "test",
+      maxRetries: 0,
+      fetch: (async () => new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksPulled += 1;
+          controller.enqueue(new Uint8Array(100));
+        },
+        cancel() {
+          canceled = true;
+        },
+      }))) as typeof fetch,
+    });
+
+    await expect(client.downloadAttachment({
+      attachmentId: IDS.attachment,
+      url: "https://cdn.example.test/huge",
+      maxBytes: 250,
+    })).rejects.toBeInstanceOf(RelayAttachmentTooLargeError);
+    expect(canceled).toBe(true);
+    expect(chunksPulled).toBeLessThanOrEqual(4);
+
+    // Content-Length pre-check rejects immediately without reading chunks.
+    let precheckCanceled = false;
+    const headerOversize = new RelayClient({
+      token: "test",
+      maxRetries: 0,
+      fetch: (async () => new Response(new ReadableStream<Uint8Array>({
+        cancel() { precheckCanceled = true; },
+      }), { headers: { "content-length": "9999" } })) as typeof fetch,
+    });
+    await expect(headerOversize.downloadAttachment({
+      url: "https://cdn.example.test/header-huge",
+      maxBytes: 250,
+    })).rejects.toBeInstanceOf(RelayAttachmentTooLargeError);
+    expect(precheckCanceled).toBe(true);
+
+    // Enforces timeoutMs and caller signal on downloadAttachment.
+    const slowDownload = new RelayClient({
+      token: "test",
+      maxRetries: 0,
+      fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_res, rej) => {
+        init?.signal?.addEventListener("abort", () => rej(init.signal!.reason), { once: true });
+      })) as typeof fetch,
+    });
+    await expect(slowDownload.downloadAttachment({
+      url: "https://cdn.example.test/slow",
+      timeoutMs: 25,
+    })).rejects.toBeInstanceOf(NetworkError);
+  });
 });

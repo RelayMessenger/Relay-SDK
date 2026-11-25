@@ -7,6 +7,7 @@ import {
   ResourceNotFoundError,
   ValidationError,
 } from "@chat-adapter/shared";
+import { Relay as SdkRelay, RelayAPIError } from "@relaymessenger/sdk";
 import type { RelayCredential } from "./credentials.js";
 import {
   resolveRelayCredential,
@@ -32,11 +33,51 @@ import type {
 
 export const RELAY_DEFAULT_BASE_URL = "https://api.relayapp.im";
 
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_AFTER_SECONDS = 60;
+const DEFAULT_MAX_DOWNLOAD_BYTES = 104_857_600;
+
 export interface RelayClientOptions {
   /** Relay Agent Token or a resolver evaluated for every Relay API call. */
   token?: RelayCredential;
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Request timeout in milliseconds. Defaults to 15000. */
+  timeoutMs?: number;
+  /** Maximum retry attempts for transient failures. Defaults to 2. */
+  maxRetries?: number;
+  /** Base delay in milliseconds for exponential backoff. Defaults to 250. */
+  retryBaseDelayMs?: number;
+  /** Maximum byte size for `downloadAttachment`. Defaults to 104857600 (100 MiB). */
+  maxDownloadBytes?: number;
+}
+
+export interface RelayDownloadOptions {
+  attachmentId?: string;
+  url: string;
+  maxBytes?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export class RelayAttachmentTooLargeError extends ValidationError {
+  readonly maxBytes: number;
+  readonly actualBytes: number | undefined;
+
+  constructor(label: string, maxBytes: number, actualBytes?: number) {
+    super(
+      "relay",
+      actualBytes !== undefined
+        ? `Relay attachment ${label} exceeds maximum download size of ${maxBytes} bytes (${actualBytes} bytes)`
+        : `Relay attachment ${label} exceeds maximum download size of ${maxBytes} bytes`,
+    );
+    this.name = "RelayAttachmentTooLargeError";
+    this.maxBytes = maxBytes;
+    this.actualBytes = actualBytes;
+  }
 }
 
 export interface RelayUploadOptions {
@@ -87,7 +128,9 @@ function errorDetails(
     const code =
       typeof error.code === "string"
         ? error.code
-        : `http_${status}`;
+        : typeof error.code === "number"
+          ? String(error.code)
+          : `http_${status}`;
     const message =
       typeof error.message === "string"
         ? error.message
@@ -106,19 +149,139 @@ function errorDetails(
 /**
  * `retry_after` is published by the Relay error contract as an integer number
  * of seconds and is "Only present on 429 rate limit errors"
- * (`contracts/relay-openapi.yaml`, `ErrorDetail.retry_after`).
+ * (`contracts/relay-v1-openapi.yaml`, `ErrorDetail.retry_after`).
  */
-function retryAfterSeconds(body: unknown): number | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const record = body as Record<string, unknown>;
-  const error =
-    typeof record.error === "object" && record.error !== null
-      ? (record.error as Record<string, unknown>)
-      : record;
-  const value = error.retry_after;
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
+function retryAfterSeconds(
+  body: unknown,
+  headerValue?: string | null,
+): number | undefined {
+  if (typeof body === "object" && body !== null) {
+    const record = body as Record<string, unknown>;
+    const error =
+      typeof record.error === "object" && record.error !== null
+        ? (record.error as Record<string, unknown>)
+        : record;
+    const value = error.retry_after;
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  if (headerValue !== undefined && headerValue !== null) {
+    const trimmed = headerValue.trim();
+    if (trimmed !== "") {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+      if (Number.isNaN(numeric)) {
+        const parsedDate = Date.parse(trimmed);
+        if (Number.isFinite(parsedDate)) {
+          return Math.max(0, (parsedDate - Date.now()) / 1_000);
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function retryWaitMs(
+  retryAfter: number | undefined,
+  baseDelayMs: number,
+  attempt: number,
+): number {
+  return retryAfter !== undefined
+    ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1_000
+    : baseDelayMs * 2 ** attempt;
+}
+
+async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return;
+  if (signal?.aborted) throw signal.reason;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function readBoundedArrayBuffer(
+  response: Response,
+  maxBytes: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
+  const lengthHeader = response.headers.get("content-length");
+  if (lengthHeader !== null && lengthHeader.trim() !== "") {
+    const declared = Number(lengthHeader);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw new RelayAttachmentTooLargeError(label, maxBytes, declared);
+    }
+  }
+  if (!response.body) {
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > maxBytes) {
+      throw new RelayAttachmentTooLargeError(label, maxBytes, buffer.byteLength);
+    }
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
     : undefined;
+  // Prevent unhandled rejection if aborted fires after normal completion.
+  aborted?.catch(() => {});
+  try {
+    while (true) {
+      if (signal?.aborted) throw signal.reason;
+      const readPromise = reader.read();
+      const { done, value } = aborted
+        ? await Promise.race([readPromise, aborted])
+        : await readPromise;
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new RelayAttachmentTooLargeError(label, maxBytes);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
 }
 
 const RESOURCE_BY_COLLECTION: Record<string, string> = {
@@ -159,6 +322,7 @@ export function relayHttpError(options: {
   body: unknown;
   path: string;
   status: number;
+  retryAfter?: number;
 }): AdapterError {
   const { body, path, status } = options;
   const details = errorDetails(body, status);
@@ -179,7 +343,10 @@ export function relayHttpError(options: {
       );
     }
     case 429:
-      return new AdapterRateLimitError("relay", retryAfterSeconds(body));
+      return new AdapterRateLimitError(
+        "relay",
+        options.retryAfter ?? retryAfterSeconds(body),
+      );
     default:
       if (status >= 500) {
         return new NetworkError("relay", details.message);
@@ -193,13 +360,39 @@ export function relayHttpError(options: {
   }
 }
 
+function mapSdkError(error: unknown, path: string): never {
+  if (error instanceof RelayAPIError) {
+    if (error.status === undefined) {
+      throw new NetworkError(
+        "relay",
+        error.message,
+        error.cause instanceof Error ? error.cause : undefined,
+      );
+    }
+    throw relayHttpError({
+      body: error.body,
+      path,
+      status: error.status,
+      ...(error.retryAfter !== undefined ? { retryAfter: error.retryAfter } : {}),
+    });
+  }
+  throw error;
+}
+
 /**
- * Minimal client for only the locked Relay v1 operations used by the adapter.
+ * Minimal client for the locked Relay v1 operations used by the adapter,
+ * delegating HTTP transport, auth, timeouts, and retries to `@relaymessenger/sdk`.
  */
 export class RelayClient {
   readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly token: RelayCredential | undefined;
+  private readonly timeoutMs: number;
+  private readonly downloadTimeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseDelayMs: number;
+  private readonly maxDownloadBytes: number;
+  private readonly staticSdk: SdkRelay | undefined;
 
   constructor(options: RelayClientOptions = {}) {
     validateStaticCredential(options.token, "Relay Agent Token");
@@ -223,37 +416,50 @@ export class RelayClient {
     }
     // workerd's host fetch requires its global receiver.
     this.fetchImpl = selected.bind(globalThis);
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.downloadTimeoutMs = options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryBaseDelayMs =
+      options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.maxDownloadBytes =
+      options.maxDownloadBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
+    if (typeof options.token === "string") {
+      this.staticSdk = this.buildSdk(options.token);
+    }
   }
 
-  private async request<T>(
-    path: string,
-    init: RequestInit,
-  ): Promise<T> {
+  private buildSdk(apiKey: string): SdkRelay {
+    const sdkFetch: typeof fetch = (input, init) =>
+      this.fetchImpl(input instanceof URL ? input.toString() : input, init);
+    return new SdkRelay({
+      apiKey,
+      baseURL: this.baseUrl,
+      fetch: sdkFetch,
+      maxRetries: this.maxRetries,
+      timeout: this.timeoutMs,
+      retryBaseDelayMs: this.retryBaseDelayMs,
+    });
+  }
+
+  private async sdk(): Promise<SdkRelay> {
+    if (this.staticSdk) return this.staticSdk;
     const token = await resolveRelayCredential(
       this.token,
       "Relay Agent Token",
     );
-    let response: Response;
+    return this.buildSdk(token);
+  }
+
+  private async run<T>(
+    path: string,
+    operation: (sdk: SdkRelay) => Promise<T>,
+  ): Promise<T> {
+    const sdk = await this.sdk();
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...Object.fromEntries(new Headers(init.headers).entries()),
-        },
-      });
+      return await operation(sdk);
     } catch (error) {
-      throw new NetworkError(
-        "relay",
-        "Network error calling the Relay API",
-        error instanceof Error ? error : undefined,
-      );
+      return mapSdkError(error, path);
     }
-    const body = await parseResponseBody(response);
-    if (!response.ok) {
-      throw relayHttpError({ body, path, status: response.status });
-    }
-    return body as T;
   }
 
   async sendMessage(options: {
@@ -281,10 +487,11 @@ export class RelayClient {
     if (options.replyTo) {
       assertRelayUuid(options.replyTo.messageId, "reply message ID");
     }
-    return this.request<RelaySendMessageResponse>(
-      `/v1/chats/${encodeURIComponent(options.chatId)}/messages`,
-      {
-        body: JSON.stringify({
+    const path = `/v1/chats/${encodeURIComponent(options.chatId)}/messages`;
+    return this.run(path, (sdk) =>
+      sdk.chats.messages.send(
+        options.chatId,
+        {
           message: {
             parts: options.parts,
             ...(options.replyTo
@@ -298,13 +505,11 @@ export class RelayClient {
                 }
               : {}),
           },
-        }),
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": options.idempotencyKey,
         },
-        method: "POST",
-      },
+        {
+          headers: { "Idempotency-Key": options.idempotencyKey },
+        },
+      ),
     );
   }
 
@@ -316,22 +521,16 @@ export class RelayClient {
     type: RelayReactionType;
   }): Promise<void> {
     assertRelayUuid(options.messageId, "messageId");
-    await this.request<void>(
-      `/v1/messages/${encodeURIComponent(options.messageId)}/reactions`,
-      {
-        body: JSON.stringify({
-          operation: options.operation,
-          type: options.type,
-          ...(options.customEmoji
-            ? { custom_emoji: options.customEmoji }
-            : {}),
-          ...(options.partIndex !== undefined
-            ? { part_index: options.partIndex }
-            : {}),
-        }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      },
+    const path = `/v1/messages/${encodeURIComponent(options.messageId)}/reactions`;
+    await this.run(path, (sdk) =>
+      sdk.messages.addReaction(options.messageId, {
+        operation: options.operation,
+        type: options.type,
+        ...(options.customEmoji ? { custom_emoji: options.customEmoji } : {}),
+        ...(options.partIndex !== undefined
+          ? { part_index: options.partIndex }
+          : {}),
+      }),
     );
   }
 
@@ -343,16 +542,14 @@ export class RelayClient {
     body: RelayCreatePaymentRequest,
     options: { idempotencyKey?: string } = {},
   ): Promise<RelayPaymentRequest> {
-    return this.request<RelayPaymentRequest>("/v1/payment_requests", {
-      body: JSON.stringify(body),
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.idempotencyKey
-          ? { "Idempotency-Key": options.idempotencyKey }
-          : {}),
-      },
-      method: "POST",
-    });
+    return this.run("/v1/payment_requests", (sdk) =>
+      sdk.paymentRequests.create(
+        body,
+        options.idempotencyKey
+          ? { idempotencyKey: options.idempotencyKey }
+          : undefined,
+      ),
+    );
   }
 
   async listPaymentRequests(options: {
@@ -360,35 +557,30 @@ export class RelayClient {
     limit?: number;
     status?: RelayPaymentStatus;
   } = {}): Promise<RelayPaymentRequestList> {
-    const query = new URLSearchParams();
-    if (options.cursor) query.set("cursor", options.cursor);
-    if (options.limit !== undefined) query.set("limit", String(options.limit));
-    if (options.status) query.set("status", options.status);
-    const suffix = query.size ? `?${query.toString()}` : "";
-    return this.request<RelayPaymentRequestList>(
-      `/v1/payment_requests${suffix}`,
-      { method: "GET" },
+    const query = {
+      ...(options.cursor ? { cursor: options.cursor } : {}),
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      ...(options.status ? { status: options.status } : {}),
+    };
+    return this.run("/v1/payment_requests", (sdk) =>
+      sdk.paymentRequests.list(query),
     );
   }
 
   async getPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
     assertRelayUuid(paymentRequestId, "paymentRequestId");
-    return this.request<RelayPaymentRequest>(
-      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}`,
-      { method: "GET" },
+    const path = `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}`;
+    return this.run(path, (sdk) =>
+      sdk.paymentRequests.retrieve(paymentRequestId),
     );
   }
 
   /** Cancel a request that has not been paid; the card changes in place. */
   async cancelPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
     assertRelayUuid(paymentRequestId, "paymentRequestId");
-    return this.request<RelayPaymentRequest>(
-      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}/cancel`,
-      {
-        body: "{}",
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      },
+    const path = `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}/cancel`;
+    return this.run(path, (sdk) =>
+      sdk.paymentRequests.cancel(paymentRequestId),
     );
   }
 
@@ -401,10 +593,8 @@ export class RelayClient {
    */
   async requestLocation(chatId: string): Promise<RelayLocationRequestResponse> {
     assertRelayUuid(chatId, "chatId");
-    return this.request<RelayLocationRequestResponse>(
-      `/v1/chats/${encodeURIComponent(chatId)}/location/request`,
-      { method: "POST" },
-    );
+    const path = `/v1/chats/${encodeURIComponent(chatId)}/location/request`;
+    return this.run(path, (sdk) => sdk.chats.location.request(chatId));
   }
 
   /**
@@ -414,34 +604,38 @@ export class RelayClient {
    */
   async getLocation(chatId: string): Promise<RelayChatLocation> {
     assertRelayUuid(chatId, "chatId");
-    return this.request<RelayChatLocation>(
-      `/v1/chats/${encodeURIComponent(chatId)}/location`,
-      { method: "GET" },
-    );
+    const path = `/v1/chats/${encodeURIComponent(chatId)}/location`;
+    return this.run(path, (sdk) => sdk.chats.location.retrieve(chatId));
   }
 
   async setTyping(chatId: string, active: boolean): Promise<void> {
     assertRelayUuid(chatId, "chatId");
-    await this.request<void>(
-      `/v1/chats/${encodeURIComponent(chatId)}/typing`,
-      { method: active ? "POST" : "DELETE" },
+    const path = `/v1/chats/${encodeURIComponent(chatId)}/typing`;
+    await this.run(path, (sdk) =>
+      active ? sdk.chats.startTyping(chatId) : sdk.chats.stopTyping(chatId),
     );
   }
 
-  async markChatRead(chatId: string): Promise<void> {
+  async markChatRead(
+    chatId: string,
+    options?: { maxRetries?: number },
+  ): Promise<void> {
     assertRelayUuid(chatId, "chatId");
-    await this.request<void>(
-      `/v1/chats/${encodeURIComponent(chatId)}/read`,
-      { method: "POST" },
+    const path = `/v1/chats/${encodeURIComponent(chatId)}/read`;
+    await this.run(path, (sdk) =>
+      sdk.chats.markAsRead(
+        chatId,
+        options?.maxRetries !== undefined
+          ? { maxRetries: options.maxRetries }
+          : undefined,
+      ),
     );
   }
 
   async getChat(chatId: string): Promise<RelayChat> {
     assertRelayUuid(chatId, "chatId");
-    return this.request<RelayChat>(
-      `/v1/chats/${encodeURIComponent(chatId)}`,
-      { method: "GET" },
-    );
+    const path = `/v1/chats/${encodeURIComponent(chatId)}`;
+    return this.run(path, (sdk) => sdk.chats.retrieve(chatId));
   }
 
   async getMessages(options: {
@@ -450,31 +644,33 @@ export class RelayClient {
     limit?: number;
   }): Promise<RelayGetMessagesResult> {
     assertRelayUuid(options.chatId, "chatId");
-    const query = new URLSearchParams();
-    if (options.cursor) query.set("cursor", options.cursor);
+    let limit: number | undefined;
     if (options.limit !== undefined) {
-      const limit = Math.trunc(options.limit);
+      limit = Math.trunc(options.limit);
       if (limit < 1 || limit > 100) {
         throw new ValidationError(
           "relay",
           "Relay message history limit must be between 1 and 100",
         );
       }
-      query.set("limit", String(limit));
     }
-    const suffix = query.size ? `?${query.toString()}` : "";
-    return this.request<RelayGetMessagesResult>(
-      `/v1/chats/${encodeURIComponent(options.chatId)}/messages${suffix}`,
-      { method: "GET" },
+    const path = `/v1/chats/${encodeURIComponent(options.chatId)}/messages`;
+    const page = await this.run(path, (sdk) =>
+      sdk.chats.messages.list(options.chatId, {
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      }),
     );
+    return {
+      messages: page.data,
+      next_cursor: page.nextCursor,
+    };
   }
 
   async getMessage(messageId: string): Promise<RelayMessage> {
     assertRelayUuid(messageId, "messageId");
-    return this.request<RelayMessage>(
-      `/v1/messages/${encodeURIComponent(messageId)}`,
-      { method: "GET" },
-    );
+    const path = `/v1/messages/${encodeURIComponent(messageId)}`;
+    return this.run(path, (sdk) => sdk.messages.retrieve(messageId));
   }
 
   /**
@@ -486,31 +682,28 @@ export class RelayClient {
    */
   async getAttachment(attachmentId: string): Promise<RelayAttachment> {
     assertRelayUuid(attachmentId, "attachmentId");
-    return this.request<RelayAttachment>(
-      `/v1/attachments/${encodeURIComponent(attachmentId)}`,
-      { method: "GET" },
-    );
+    const path = `/v1/attachments/${encodeURIComponent(attachmentId)}`;
+    return this.run(path, (sdk) => sdk.attachments.retrieve(attachmentId));
   }
 
   async allocateAttachment(
     options: Omit<RelayUploadOptions, "body"> & { sizeBytes: number },
   ): Promise<RelayAttachmentAllocation> {
-    return this.request<RelayAttachmentAllocation>("/v1/attachments", {
-      body: JSON.stringify({
+    return this.run("/v1/attachments", (sdk) =>
+      sdk.attachments.create({
         filename: options.filename,
-        content_type: options.contentType,
+        content_type: options.contentType as Parameters<
+          SdkRelay["attachments"]["create"]
+        >[0]["content_type"],
         size_bytes: options.sizeBytes,
         ...(options.durationMs !== undefined
           ? { duration_ms: options.durationMs }
           : {}),
-        ...(options.width !== undefined &&
-        options.height !== undefined
+        ...(options.width !== undefined && options.height !== undefined
           ? { width: options.width, height: options.height }
           : {}),
       }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
+    );
   }
 
   async uploadAttachment(
@@ -522,42 +715,48 @@ export class RelayClient {
         "Relay attachments must contain 1–104857600 bytes",
       );
     }
-    const allocation = await this.allocateAttachment({
-      contentType: options.contentType,
-      ...(options.durationMs !== undefined
-        ? { durationMs: options.durationMs }
-        : {}),
-      filename: options.filename,
-      ...(options.height !== undefined ? { height: options.height } : {}),
-      sizeBytes: options.body.byteLength,
-      ...(options.width !== undefined ? { width: options.width } : {}),
-    });
-
-    let response: Response;
+    const sdk = await this.sdk();
+    let allocation: RelayAttachmentAllocation;
     try {
-      response = await this.fetchImpl(allocation.upload_url, {
-        body: options.body,
-        headers: allocation.required_headers,
-        method: allocation.http_method,
+      allocation = await sdk.attachments.create({
+        filename: options.filename,
+        content_type: options.contentType as Parameters<
+          SdkRelay["attachments"]["create"]
+        >[0]["content_type"],
+        size_bytes: options.body.byteLength,
+        ...(options.durationMs !== undefined
+          ? { duration_ms: options.durationMs }
+          : {}),
+        ...(options.width !== undefined && options.height !== undefined
+          ? { width: options.width, height: options.height }
+          : {}),
       });
     } catch (error) {
-      throw new NetworkError(
-        "relay",
-        "Network error uploading bytes to Relay attachment storage",
-        error instanceof Error ? error : undefined,
-      );
+      return mapSdkError(error, "/v1/attachments");
     }
-    if (!response.ok) {
-      const body = await parseResponseBody(response);
-      const details = errorDetails(body, response.status);
-      throw new RelayApiError(
-        response.status,
-        details.code,
-        details.message,
-        body,
-      );
+
+    try {
+      await sdk.attachments.upload(allocation, options.body);
+      return allocation;
+    } catch (error) {
+      if (error instanceof RelayAPIError) {
+        if (error.status === undefined) {
+          throw new NetworkError(
+            "relay",
+            error.message,
+            error.cause instanceof Error ? error.cause : undefined,
+          );
+        }
+        const details = errorDetails(error.body, error.status);
+        throw new RelayApiError(
+          error.status,
+          details.code,
+          details.message,
+          error.body,
+        );
+      }
+      throw error;
     }
-    return allocation;
   }
 
   /**
@@ -568,32 +767,74 @@ export class RelayClient {
    * minutes after Relay minted it. A download after that window fails with
    * HTTP 404; `getAttachment` mints a replacement.
    */
-  async downloadAttachment(options: {
-    attachmentId?: string;
-    url: string;
-  }): Promise<ArrayBuffer> {
+  async downloadAttachment(options: RelayDownloadOptions): Promise<ArrayBuffer> {
     const label = options.attachmentId ?? options.url;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(options.url);
-    } catch (error) {
-      throw new NetworkError(
-        "relay",
-        `Network error downloading Relay attachment ${label}`,
-        error instanceof Error ? error : undefined,
-      );
+    const maxBytes = options.maxBytes ?? this.maxDownloadBytes;
+    const timeoutMs = options.timeoutMs ?? this.downloadTimeoutMs;
+
+    for (let attempt = 0; ; attempt += 1) {
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
+      let response: Response;
+      try {
+        response = await this.fetchImpl(options.url, { signal });
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        if (isAbortError(error) && !timeoutSignal.aborted) throw error;
+        if (attempt < this.maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt, options.signal);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Timed out downloading Relay attachment ${label} after ${timeoutMs}ms`
+            : `Network error downloading Relay attachment ${label}`,
+          error instanceof Error ? error : undefined,
+        );
+      }
+      if (!response.ok) {
+        const body = await parseResponseBody(response);
+        const retryAfter = retryAfterSeconds(
+          body,
+          response.headers.get("retry-after"),
+        );
+        if (isRetryableStatus(response.status) && attempt < this.maxRetries) {
+          await delay(
+            retryWaitMs(retryAfter, this.retryBaseDelayMs, attempt),
+            options.signal,
+          );
+          continue;
+        }
+        const details = errorDetails(body, response.status);
+        throw new RelayApiError(
+          response.status,
+          details.code,
+          `Failed to download Relay attachment ${label}: `
+            + `HTTP ${response.status}`,
+          body,
+        );
+      }
+      try {
+        return await readBoundedArrayBuffer(response, maxBytes, label, signal);
+      } catch (error) {
+        if (error instanceof RelayAttachmentTooLargeError) throw error;
+        if (options.signal?.aborted) throw error;
+        if (isAbortError(error) && !timeoutSignal.aborted) throw error;
+        if (attempt < this.maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt, options.signal);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Timed out downloading Relay attachment ${label} after ${timeoutMs}ms`
+            : `Network error downloading Relay attachment ${label}`,
+          error instanceof Error ? error : undefined,
+        );
+      }
     }
-    if (!response.ok) {
-      const body = await parseResponseBody(response);
-      const details = errorDetails(body, response.status);
-      throw new RelayApiError(
-        response.status,
-        details.code,
-        `Failed to download Relay attachment ${label}: `
-          + `HTTP ${response.status}`,
-        body,
-      );
-    }
-    return await response.arrayBuffer();
   }
 }

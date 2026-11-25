@@ -175,6 +175,7 @@ delivery design.
 ## Validate
 
 ```sh
+npm run types
 npm run types:check
 npm run check
 npm run test:unit
@@ -219,8 +220,8 @@ This revision is tested against:
 - Relay API `v1`
 - Relay webhook payload version `2026-08-30`
 
-The byte-identical Server OpenAPI fixture is under
-[`contracts/`](contracts/).
+The canonical Server OpenAPI contract lives at `contracts/relay-v1-openapi.yaml`
+in the repository root.
 
 ## Documentation
 

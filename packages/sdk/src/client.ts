@@ -113,6 +113,40 @@ interface ErrorBody {
   trace_id?: string;
 }
 
+const MAX_RETRY_AFTER_SECONDS = 60;
+
+const parseRetryAfterSeconds = (
+  bodyValue: unknown,
+  headerValue: string | null,
+): number | undefined => {
+  if (typeof bodyValue === "number" && Number.isFinite(bodyValue) && bodyValue >= 0) {
+    return bodyValue;
+  }
+  if (headerValue !== null) {
+    const trimmed = headerValue.trim();
+    if (trimmed !== "") {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+      if (Number.isNaN(numeric)) {
+        const parsedDate = Date.parse(trimmed);
+        if (Number.isFinite(parsedDate)) {
+          return Math.max(0, (parsedDate - Date.now()) / 1_000);
+        }
+      }
+    }
+  }
+  return undefined;
+};
+
+const retryWaitMs = (
+  retryAfterSeconds: number | undefined,
+  baseDelayMs: number,
+  attempt: number,
+): number =>
+  retryAfterSeconds !== undefined
+    ? Math.min(retryAfterSeconds, MAX_RETRY_AFTER_SECONDS) * 1_000
+    : baseDelayMs * 2 ** attempt;
+
 const delay = async (milliseconds: number, signal?: AbortSignal): Promise<void> => {
   if (milliseconds <= 0) return;
   await new Promise<void>((resolve, reject) => {
@@ -157,12 +191,15 @@ class Transport {
       if (value !== undefined) url.searchParams.set(name, String(value));
     }
     const maxRetries = request.options?.maxRetries ?? this.#maxRetries;
+    const headerIdempotencyKey = new Headers(request.options?.headers)
+      .get("idempotency-key")
+      ?.trim();
     const mayRetry = request.retryable === true
       || request.method === "GET"
       || request.method === "PUT"
-      || request.method === "PATCH"
       || request.method === "DELETE"
-      || request.idempotencyKey !== undefined;
+      || request.idempotencyKey !== undefined
+      || Boolean(headerIdempotencyKey);
 
     for (let attempt = 0; ; attempt += 1) {
       const timeout = request.options?.timeout ?? this.#timeout;
@@ -208,7 +245,15 @@ class Transport {
         }
         if (response.status === 204) return undefined as T;
         const text = await response.text();
-        return (text ? JSON.parse(text) : undefined) as T;
+        if (!text) return undefined as T;
+        try {
+          return JSON.parse(text) as T;
+        } catch (cause) {
+          throw new RelayAPIError(
+            `Relay returned invalid JSON with HTTP ${response.status}.`,
+            { status: response.status, body: text, cause },
+          );
+        }
       }
 
       const text = await response.text();
@@ -218,8 +263,10 @@ class Transport {
       } catch {
         body = undefined;
       }
-      const retryAfter = body?.error?.retry_after
-        ?? Number(response.headers.get("retry-after") ?? NaN);
+      const retryAfter = parseRetryAfterSeconds(
+        body?.error?.retry_after,
+        response.headers.get("retry-after"),
+      );
       const error = new RelayAPIError(
         body?.error?.message
           ?? `Relay request failed with HTTP ${response.status}.`,
@@ -230,15 +277,15 @@ class Transport {
           ...(body?.error?.doc_url === undefined
             ? {}
             : { docURL: body.error.doc_url }),
-          ...(Number.isFinite(retryAfter) ? { retryAfter } : {}),
+          ...(retryAfter !== undefined ? { retryAfter } : {}),
           body: body ?? text,
         },
       );
       if (!mayRetry || !error.retryable || attempt >= maxRetries) throw error;
-      const wait = Number.isFinite(retryAfter)
-        ? retryAfter * 1_000
-        : this.#retryBaseDelayMs * 2 ** attempt;
-      await delay(wait, request.options?.signal);
+      await delay(
+        retryWaitMs(retryAfter, this.#retryBaseDelayMs, attempt),
+        request.options?.signal,
+      );
     }
   }
 
@@ -247,25 +294,61 @@ class Transport {
     data: BodyInit,
     options: RequestOptions = {},
   ): Promise<void> {
+    const method = (allocation.http_method || "PUT").toUpperCase();
+    const maxRetries = options.maxRetries ?? this.#maxRetries;
+    const isStream = typeof ReadableStream !== "undefined" && data instanceof ReadableStream;
+    const mayRetry = method === "PUT" && !isStream;
     const headers = new Headers(allocation.required_headers);
     for (const [name, value] of new Headers(options.headers)) {
       headers.set(name, value);
     }
-    let response: Response;
-    try {
-      response = await this.#fetch(allocation.upload_url, {
-        method: "PUT",
-        headers,
-        body: data,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-    } catch (cause) {
-      throw new RelayAPIError("Relay attachment upload failed.", { cause });
-    }
-    if (!response.ok) {
-      throw new RelayAPIError(
+
+    for (let attempt = 0; ; attempt += 1) {
+      const timeout = options.timeout ?? this.#timeout;
+      const timeoutSignal = AbortSignal.timeout(timeout);
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
+
+      let response: Response;
+      try {
+        response = await this.#fetch(allocation.upload_url, {
+          method,
+          headers,
+          body: data,
+          signal,
+        });
+      } catch (cause) {
+        if (options.signal?.aborted) throw cause;
+        if (isAbortError(cause) && !timeoutSignal.aborted) throw cause;
+        const error = new RelayAPIError(
+          timeoutSignal.aborted
+            ? `Relay attachment upload timed out after ${timeout}ms.`
+            : "Relay attachment upload failed.",
+          { cause },
+        );
+        if (!mayRetry || attempt >= maxRetries) throw error;
+        await delay(this.#retryBaseDelayMs * 2 ** attempt, options.signal);
+        continue;
+      }
+
+      if (response.ok) return;
+
+      const retryAfter = parseRetryAfterSeconds(
+        undefined,
+        response.headers.get("retry-after"),
+      );
+      const error = new RelayAPIError(
         `Relay attachment upload failed with HTTP ${response.status}.`,
-        { status: response.status },
+        {
+          status: response.status,
+          ...(retryAfter !== undefined ? { retryAfter } : {}),
+        },
+      );
+      if (!mayRetry || !error.retryable || attempt >= maxRetries) throw error;
+      await delay(
+        retryWaitMs(retryAfter, this.#retryBaseDelayMs, attempt),
+        options.signal,
       );
     }
   }
