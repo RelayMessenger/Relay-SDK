@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/think",
-  "version": "0.1.14-staging.1",
+  "version": "0.1.14-staging.2",
   "description": "The Relay agent runtime for Cloudflare Think: calls, reactions, replies, locations, payments, typing, history and per-person memory.",
   "keywords": [
     "relay",
@@ -76,8 +76,8 @@
     "prepack": "npm run check && npm test && npm run build"
   },
   "dependencies": {
-    "@relaymessenger/chat-sdk-adapter": "0.3.19-staging.1",
-    "@relaymessenger/sdk": "0.5.8-staging.0",
+    "@relaymessenger/chat-sdk-adapter": "0.3.19-staging.2",
+    "@relaymessenger/sdk": "0.5.8-staging.1",
     "mdast-util-from-markdown": "^2.1.0",
     "mdast-util-gfm": "^3.1.0",
     "micromark-extension-gfm": "^3.0.0"

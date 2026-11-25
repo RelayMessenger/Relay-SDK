@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/pi",
-  "version": "0.1.18-staging.1",
+  "version": "0.1.18-staging.2",
   "description": "Relay Messenger channel for Pi over Relay v1 WebSocket delivery.",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,7 +33,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@relaymessenger/sdk": "0.5.8-staging.0"
+    "@relaymessenger/sdk": "0.5.8-staging.1"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.86.0",
