@@ -3,48 +3,18 @@
  *
  * Every Relay object here is `@relaymessenger/sdk`'s own type under the name
  * this adapter has always exported, so a part or field the server adds
- * reaches the adapter with the SDK, never by a second hand-written copy. The
- * import is type-only: the SDK adds nothing to the adapter's runtime.
+ * reaches the adapter with the SDK, never by a second hand-written copy.
  */
+import { RELAY_WEBHOOK_EVENT_TYPES as SDK_WEBHOOK_EVENT_TYPES } from "@relaymessenger/sdk";
 import type * as Sdk from "@relaymessenger/sdk";
 
 export const RELAY_API_VERSION = "v1" as const;
 export const RELAY_WEBHOOK_VERSION = "2026-08-30" as const;
 
 /**
- * The webhook event types, kept as a runtime list here so the adapter never
- * loads the SDK at runtime. The type check below refuses any drift from the
- * SDK's own list.
+ * The canonical webhook event types re-exported from `@relaymessenger/sdk`.
  */
-export const RELAY_WEBHOOK_EVENT_TYPES = [
-  "message.sent",
-  "message.received",
-  "message.read",
-  "message.delivered",
-  "message.failed",
-  "reaction.added",
-  "reaction.removed",
-  "participant.added",
-  "participant.removed",
-  "chat.created",
-  "chat.group_name_updated",
-  "chat.group_icon_updated",
-  "chat.typing_indicator.started",
-  "chat.typing_indicator.stopped",
-  "contact.added",
-  "contact.removed",
-  "call.created",
-  "call.updated",
-  "call.ended",
-  "payment.succeeded",
-  "payment.canceled",
-  "payment.expired",
-  "location.sharing.started",
-  "location.sharing.stopped",
-  "rating.created",
-  "rating.updated",
-  "rating.deleted",
-] as const;
+export const RELAY_WEBHOOK_EVENT_TYPES = SDK_WEBHOOK_EVENT_TYPES;
 
 export type RelayWebhookEventType =
   (typeof RELAY_WEBHOOK_EVENT_TYPES)[number];

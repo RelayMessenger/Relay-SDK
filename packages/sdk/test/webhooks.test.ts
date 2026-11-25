@@ -247,4 +247,18 @@ describe("signWebhookHeaders", () => {
     const client = new Relay({ apiKey: "token", webhookSecret: secret });
     expect(client.webhooks.unwrap(body, { headers: mixedCase })).toEqual({ event_id: "evt_mixed", hello: "world" });
   });
+
+  it("supports custom timestamp tolerance and verifies signed non-JSON payloads", () => {
+    const body = "{not-valid-json";
+    const ts = new Date(1_700_000_000 * 1_000);
+    const headers = signWebhookHeaders(secret, { id: "evt_nonjson", body, timestamp: ts });
+    expect(() => verifyWebhookSignature(secret, body, headers, {
+      nowSeconds: 1_700_000_050,
+      toleranceSeconds: 60,
+    })).not.toThrow();
+    expect(() => verifyWebhookSignature(secret, body, headers, {
+      nowSeconds: 1_700_000_061,
+      toleranceSeconds: 60,
+    })).toThrow(WebhookVerificationError);
+  });
 });

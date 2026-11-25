@@ -42,6 +42,16 @@
       "import": "./dist/memory.js",
       "default": "./dist/memory.js"
     },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
+    },
+    "./clone": {
+      "types": "./dist/clone.d.ts",
+      "import": "./dist/clone.js",
+      "default": "./dist/clone.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

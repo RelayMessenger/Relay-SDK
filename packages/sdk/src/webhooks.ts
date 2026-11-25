@@ -9,15 +9,27 @@ import type {
 
 export { WebhookVerificationError };
 
+export interface VerifyWebhookSignatureOptions {
+  nowSeconds?: number;
+  toleranceSeconds?: number;
+}
+
 export type WebhookHeaders =
-  | Headers
+  | Pick<Headers, "get">
   | Record<string, string | null | undefined>;
+
+const DEFAULT_TOLERANCE_SECONDS = 5 * 60;
+
+const isHeadersLike = (
+  headers: WebhookHeaders,
+): headers is Pick<Headers, "get"> =>
+  typeof (headers as Pick<Headers, "get">).get === "function";
 
 const requiredHeaders = (
   headers: WebhookHeaders,
 ): Record<string, string> => {
   let get: (name: string) => string | null | undefined;
-  if (headers instanceof Headers) {
+  if (isHeadersLike(headers)) {
     get = (name) => headers.get(name);
   } else {
     const normalized = new Map<string, string | null | undefined>();
@@ -44,6 +56,15 @@ const requiredHeaders = (
   };
 };
 
+const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index]! ^ right[index]!;
+  }
+  return difference === 0;
+};
+
 /** The three Standard Webhooks headers for one delivery: `webhook-id`,
  * `webhook-timestamp` (unix seconds) and `webhook-signature` (`v1,<base64
  * HMAC-SHA256 over id.timestamp.body>`), signed with a `whsec_` secret. Relay
@@ -65,8 +86,40 @@ export const verifyWebhookSignature = (
   secret: string,
   body: string | Buffer,
   headers: WebhookHeaders,
+  options?: VerifyWebhookSignatureOptions,
 ): void => {
-  new Webhook(secret).verify(body, requiredHeaders(headers));
+  const required = requiredHeaders(headers);
+  const id = required["webhook-id"]!;
+  const timestamp = required["webhook-timestamp"]!;
+  const signatures = required["webhook-signature"]!;
+
+  const parsedTimestamp = Number(timestamp);
+  if (!Number.isSafeInteger(parsedTimestamp) || parsedTimestamp < 0) {
+    throw new WebhookVerificationError("Invalid webhook-timestamp.");
+  }
+  const now = options?.nowSeconds ?? Math.floor(Date.now() / 1_000);
+  const tolerance = options?.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
+  if (
+    !Number.isFinite(tolerance)
+    || tolerance < 0
+    || Math.abs(now - parsedTimestamp) > tolerance
+  ) {
+    throw new WebhookVerificationError("webhook-timestamp outside tolerance.");
+  }
+
+  const computed = new Webhook(secret).sign(
+    id,
+    new Date(parsedTimestamp * 1_000),
+    body,
+  );
+  const expected = new TextEncoder().encode(computed.split(",", 2)[1] ?? "");
+  const encoder = new TextEncoder();
+  for (const candidate of signatures.split(/\s+/u)) {
+    const [version, encoded] = candidate.split(",", 2);
+    if (version !== "v1" || !encoded) continue;
+    if (constantTimeEqual(encoder.encode(encoded), expected)) return;
+  }
+  throw new WebhookVerificationError("No matching v1 signature found.");
 };
 
 export class Webhooks {

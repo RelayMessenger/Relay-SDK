@@ -49,6 +49,7 @@ export {
   WebhookVerificationError,
   signWebhookHeaders,
   verifyWebhookSignature,
+  type VerifyWebhookSignatureOptions,
   type WebhookHeaders,
 } from "./webhooks.js";
 export {

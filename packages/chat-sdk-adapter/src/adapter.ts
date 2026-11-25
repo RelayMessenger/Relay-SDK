@@ -85,7 +85,7 @@ export const RELAY_ADAPTER_NAME = "relay";
 
 /**
  * Bounds on the forward walk that serves a backward `fetchMessages`. The page
- * size is the contract's maximum (`contracts/relay-openapi.yaml`, `getMessages`
+ * size is the contract's maximum (`contracts/relay-v1-openapi.yaml`, `getMessages`
  * `limit` maximum 100), so the walk reaches the tail in the fewest requests
  * Relay allows.
  */

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = resolve(root, "src");
-const sourceFiles = (await readdir(sourceRoot))
+const sourceFiles = (await readdir(sourceRoot, { recursive: true }))
   .filter((name) => extname(name) === ".ts" && !name.endsWith(".test.ts"));
 const source = (
   await Promise.all(
