@@ -64,6 +64,15 @@ function isRevokedAccessError(error: unknown): boolean {
   if (error instanceof RelayAPIError) {
     return error.status === 403 || error.status === 404;
   }
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { name?: unknown; status?: unknown };
+    if (
+      (candidate.name === "RelayAPIError" || candidate.name === "RelayApiError")
+      && (candidate.status === 403 || candidate.status === 404)
+    ) {
+      return true;
+    }
+  }
   return false;
 }
 

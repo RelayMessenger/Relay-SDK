@@ -28,8 +28,25 @@ export interface FakeRelayData {
   messages: Record<string, Message[]>;
   /** Per-chat HTTP status errors thrown as RelayAPIError (e.g. 403, 404, 503). */
   errors?: Record<string, number>;
+  /** Throw a foreign RelayAPIError-shaped error (not instanceof Think's copy of RelayAPIError). */
+  foreignErrors?: Record<string, number>;
   /** Every call throws, the way a Relay outage does. */
   throws?: boolean;
+}
+
+function makeFakeRelayError(data: FakeRelayData, chatId: string): Error | undefined {
+  const status = data.errors?.[chatId];
+  if (status !== undefined) {
+    return new RelayAPIError(`Relay returned ${status}`, { status });
+  }
+  const foreignStatus = data.foreignErrors?.[chatId];
+  if (foreignStatus !== undefined) {
+    const err = new Error(`Foreign Relay returned ${foreignStatus}`) as Error & { status: number };
+    err.name = "RelayAPIError";
+    err.status = foreignStatus;
+    return err;
+  }
+  return undefined;
 }
 
 /** A stand-in for the @relaymessenger/sdk client's `chats`, reading `data`. */
@@ -39,10 +56,8 @@ function fakeRelay(data: FakeRelayData, calls: string[]): Pick<Relay, "chats"> {
       retrieve: async (chatId: string, options?: { signal?: AbortSignal }) => {
         calls.push(`retrieve ${chatId}${options?.signal instanceof AbortSignal ? " signal" : ""}`);
         if (data.throws) throw new Error("Relay is down");
-        const status = data.errors?.[chatId];
-        if (status !== undefined) {
-          throw new RelayAPIError(`Relay returned ${status}`, { status });
-        }
+        const fakeErr = makeFakeRelayError(data, chatId);
+        if (fakeErr) throw fakeErr;
         const chat = data.chats[chatId];
         if (!chat) throw new RelayAPIError(`404 ${chatId}`, { status: 404 });
         return chat;
@@ -55,10 +70,8 @@ function fakeRelay(data: FakeRelayData, calls: string[]): Pick<Relay, "chats"> {
         ) => {
           calls.push(`list ${chatId} ${query.order} ${query.limit}${options?.signal instanceof AbortSignal ? " signal" : ""}`);
           if (data.throws) throw new Error("Relay is down");
-          const status = data.errors?.[chatId];
-          if (status !== undefined) {
-            throw new RelayAPIError(`Relay returned ${status}`, { status });
-          }
+          const fakeErr = makeFakeRelayError(data, chatId);
+          if (fakeErr) throw fakeErr;
           const newest = [...(data.messages[chatId] ?? [])]
             .sort((a, b) => (b.sent_at ?? b.created_at).localeCompare(a.sent_at ?? a.created_at));
           return { data: newest.slice(0, query.limit ?? 50) };

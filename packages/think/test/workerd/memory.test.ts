@@ -298,6 +298,25 @@ describe("a DM reads the shared groups from Relay", () => {
     expect(await ginaMem.search("saffron", GINA_DM.id)).toEqual([]);
   });
 
+  it("drops and forgets a chat on a cross-package RelayAPIError-shaped 403", async () => {
+    const HANK = { id: "user-hank", handle: "hank", kind: "user" as const, display_name: "Hank" };
+    const REVOKED: PersonMemoryChat = {
+      id: "chat-foreign-403",
+      display_name: "Secret Room",
+      is_group: true,
+      handles: [handle(HANK), handle(STEVE)],
+    };
+    const HANK_DM: PersonMemoryChat = { id: "chat-hank-dm", is_group: false, handles: [handle(HANK), handle(STEVE)] };
+    await (await agent(REVOKED)).seed(REVOKED, [said("f1", HANK, "Top secret launch date.")]);
+    const prompt = await (await agent(HANK_DM)).turn(
+      HANK_DM,
+      said("hd1", HANK, "What was the launch date?"),
+      { chats: {}, messages: {}, foreignErrors: { [REVOKED.id]: 403 } },
+    );
+    expect(prompt).not.toContain("Secret Room");
+    expect(prompt).not.toContain("Top secret launch date.");
+  });
+
   it("falls back to the stored lines when Relay fails", async () => {
     const CLUB: PersonMemoryChat = {
       id: "chat-club",

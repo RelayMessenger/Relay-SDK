@@ -349,7 +349,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/adapter.ts",
       "source_sha256": "5cf9ae13db199cdffa265b7499712a250cdaf0b28fcf47f8435806245fbeb8d2",
-      "destination_sha256": "7eeb8d9a041cc1dfcfd903b1080ae12d2a5d93837c696dceff4ff8561d602ceb",
+      "destination_sha256": "5f6fa894ea0b42c27f93376b4dd3b9c4abc820b2d364febb894af7b68895776e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
