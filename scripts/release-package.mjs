@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { releaseEntry } from "./release-packages.mjs";
+import { PUBLISH_PROPAGATION } from "./verify-npm-registry-integrity.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -207,7 +208,10 @@ async function verifyRegistry() {
     );
     let installed = false;
     let lastFailure = "";
-    for (let attempt = 1; attempt <= 6; attempt += 1) {
+    // npm can expose package metadata minutes before its tarball CDN serves
+    // the .tgz without 404; share the repository's PUBLISH_PROPAGATION budget.
+    const { maxAttempts, retryDelayMs } = PUBLISH_PROPAGATION;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const result = spawnSync(npm, [
         "install",
         "--no-audit",
@@ -220,8 +224,9 @@ async function verifyRegistry() {
         break;
       }
       lastFailure = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-      if (attempt < 6) {
-        await new Promise((wait) => setTimeout(wait, 5_000));
+      if (attempt < maxAttempts) {
+        say(`registry install for ${spec} has not converged yet (attempt ${attempt}/${maxAttempts}); retrying`);
+        await new Promise((wait) => setTimeout(wait, retryDelayMs));
       }
     }
     assert.equal(
