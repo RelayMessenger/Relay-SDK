@@ -32,7 +32,7 @@ interface OpenApiDocument {
 describe("locked Relay Server contract", () => {
   it("carries optional Chat activity without inventing an agent event", async () => {
     const document = parse(await readFile(
-      new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8",
+      new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8",
     )) as OpenApiDocument;
     const handle = {
       id: "agent", handle: "fixture", kind: "agent",
@@ -93,7 +93,7 @@ describe("locked Relay Server contract", () => {
 
   it("uses the exact canonical Server OpenAPI", async () => {
     const source = await readFile(
-      new URL("../contracts/relay-openapi.yaml", import.meta.url),
+      new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url),
     );
     expect(createHash("sha256").update(source).digest("hex")).toBe(
       OPENAPI_SHA,
@@ -101,7 +101,7 @@ describe("locked Relay Server contract", () => {
   });
 
   it("carries selection prompts and metadata separately through request and event contracts", async () => {
-    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const document = parse(await readFile(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.SelectionPart).toHaveProperty("additionalProperties", false);
     expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title"]);
@@ -134,7 +134,7 @@ describe("locked Relay Server contract", () => {
   });
 
   it("carries the payment part, its read-back fields, the receipt and the payment request routes", async () => {
-    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const document = parse(await readFile(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.PaymentPart).toHaveProperty("additionalProperties", false);
     expect(schemas.PaymentPart).toHaveProperty("required", ["type", "checkout_url"]);
@@ -167,7 +167,7 @@ describe("locked Relay Server contract", () => {
   });
 
   it("carries the location parts, both location events and the two location routes", async () => {
-    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const document = parse(await readFile(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.LocationRequestPartResponse).toHaveProperty("required", ["type", "reactions"]);
     expect(schemas.LocationPartResponse).toHaveProperty("required", ["type", "state", "began_at", "ends_at", "ended_at", "reactions"]);
@@ -185,7 +185,7 @@ describe("locked Relay Server contract", () => {
 
   it("caps both recipient arrays at six without changing generic admission APIs", async () => {
     const document = parse(await readFile(
-      new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8",
+      new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8",
     )) as OpenApiDocument;
     for (const schema of ["CreateChatRequest", "SendMessageRequest"]) {
       expect(document.components.schemas[schema]).toHaveProperty("properties.to.maxItems", 6);
@@ -199,7 +199,7 @@ describe("locked Relay Server contract", () => {
   it("pins only public methods the adapter calls", async () => {
     const document = parse(
       await readFile(
-        new URL("../contracts/relay-openapi.yaml", import.meta.url),
+        new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url),
         "utf8",
       ),
     ) as OpenApiDocument;
@@ -256,7 +256,7 @@ describe("locked Relay Server contract", () => {
   it("keeps API/webhook versions and every event synchronized", async () => {
     const document = parse(
       await readFile(
-        new URL("../contracts/relay-openapi.yaml", import.meta.url),
+        new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url),
         "utf8",
       ),
     ) as OpenApiDocument;

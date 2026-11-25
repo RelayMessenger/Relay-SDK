@@ -267,8 +267,9 @@ This package was rewritten against:
 - Relay webhook payload version `2026-08-30`
 - `chat@4.41.0`
 
-The byte-identical Server OpenAPI copy is retained under `contracts/` for
-reproducible contract tests and is excluded from the npm package.
+The canonical Server OpenAPI contract lives at `contracts/relay-v1-openapi.yaml`
+in the repository root for reproducible contract tests and is excluded from the
+npm package.
 
 ## Supported surface
 

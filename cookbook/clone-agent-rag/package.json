@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "ingest": "tsx scripts/ingest.ts",
     "types": "wrangler types",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run types && tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

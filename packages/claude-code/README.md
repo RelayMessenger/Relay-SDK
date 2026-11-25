@@ -321,9 +321,9 @@ npm run contract:check -- --openapi /path/to/contracts/developer/openapi.yaml
 ```bash
 npm ci
 npm run check
+npm run build
 npm test
 npm run contract:check -- --openapi /path/to/openapi.yaml
-npm run build
 npm run pack:smoke
 npm run claude:validate
 ```

@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy && wrangler deploy --env alan && wrangler deploy --env grace",
     "types": "wrangler types --strict-vars=false",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run types && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dry-run": "wrangler deploy --dry-run && wrangler deploy --env alan --dry-run && wrangler deploy --env grace --dry-run",
     "test:all": "npm run check && npm test && npm run dry-run"

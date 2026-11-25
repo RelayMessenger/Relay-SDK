@@ -31,9 +31,10 @@
     "artifact:check": "node scripts/artifact-check.mjs",
     "prepack": "npm run verify",
     "start": "node runtime/server.mjs",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:protocol": "vitest run test/protocol.test.ts",
-    "verify": "npm run check && npm run test && npm run contract:check && npm run build && npm run artifact:check",
+    "verify": "npm run check && npm run build && npm run test && npm run contract:check && npm run artifact:check",
     "pack:smoke": "npm run prepack && node scripts/pack-smoke.mjs",
     "claude:validate": "claude plugin validate . --strict && claude plugin validate ./plugin --strict && claude plugin validate ./plugin/commands --strict",
     "release:validate": "npm run pack:smoke && npm run claude:validate"
