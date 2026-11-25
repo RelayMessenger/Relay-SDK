@@ -6,6 +6,7 @@ import { Think, action } from "@cloudflare/think";
 import { z } from "zod";
 
 import { relayActions } from "../src/actions";
+import type { SearchSourcesEnv, SpeakGateEnv } from "../src/clone";
 
 const myOwnTools = {
   lookup_order: action({
@@ -18,10 +19,16 @@ const myOwnTools = {
 type ReadmeEnv = Cloudflare.Env & {
   RELAY_AGENT_TOKEN: string;
   RELAY_API_ORIGIN?: string;
+  AI?: Ai;
+  CLONE_INDEX?: VectorizeIndex;
 };
 
 export class ReadmeAgent extends Think<ReadmeEnv> {
   override getActions() {
+    const speakEnv: SpeakGateEnv = this.env;
+    const searchEnv: SearchSourcesEnv = this.env;
+    void speakEnv;
+    void searchEnv;
     return { ...relayActions(this, { env: this.env, ctx: this.ctx }), ...myOwnTools };
   }
 }

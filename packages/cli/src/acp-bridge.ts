@@ -16,8 +16,8 @@ import {
 import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
 import type { AcpSessionStore } from "./acp-threads.js";
-import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
-import { replacesLiveTurn } from "./bridge-turn.js";
+import { codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
+import { runBridgeEventLoop, startBridgeTyping, type BridgeChatLane } from "./bridge-lanes.js";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -488,19 +488,6 @@ export interface AcpBridgeInput {
   env?: NodeJS.ProcessEnv;
 }
 
-/** One line of what arrived, short enough to read at a glance. */
-const arrival = (turn: BridgeTurn): string =>
-  `@${turn.sender}  ${turn.text.replace(/\s+/gu, " ").slice(0, 160)}`;
-
-/** What one chat has running, and what is waiting behind it. */
-interface ChatLane {
-  /** Turns in one chat run one after another, in the order the messages arrived. */
-  chain: Promise<void>;
-  live?: LiveTurn | undefined;
-  /** Whether the live turn answers another agent (`replacesLiveTurn`). */
-  liveFromAgent?: boolean | undefined;
-}
-
 /**
  * Answers every message that arrives until the signal stops it.
  *
@@ -512,8 +499,6 @@ interface ChatLane {
  * (`replacesLiveTurn`).
  */
 export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
-  const answered = new Set<string>();
-  const lanes = new Map<string, ChatLane>();
   let session: Promise<AcpAgent> | undefined;
   let sessionGone = false;
   /** The ACP session each chat is holding open in the agent running now. */
@@ -613,15 +598,8 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     return id;
   };
 
-  const answerOne = async (turn: BridgeTurn, lane: ChatLane, started: () => void): Promise<void> => {
-    let typing = false;
-    try { await input.client.chats.startTyping(turn.chatId); typing = true; }
-    catch { /* The answer matters more than the typing indicator. */ }
-    const stopTyping = async (): Promise<void> => {
-      if (!typing) return;
-      typing = false;
-      try { await input.client.chats.stopTyping(turn.chatId); } catch { /* As above. */ }
-    };
+  const answerOne = async (turn: BridgeTurn, lane: BridgeChatLane<LiveTurn>, started: () => void): Promise<void> => {
+    const stopTyping = await startBridgeTyping(input.client, turn.chatId);
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
     let failure: unknown;
@@ -662,44 +640,17 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     }
   };
 
-  await input.client.websocket.run({
+  await runBridgeEventLoop<LiveTurn>({
+    client: input.client,
+    approvals: input.approvals,
     signal: input.signal,
-    onEvent: async (event) => {
-      // A tap on an approval card answers a prompt; it is not a message to answer.
-      if (await input.approvals.take(event)) return;
-      const turn = bridgeTurn(event);
-      if (!turn || answered.has(turn.eventId)) return;
-      answered.add(turn.eventId);
-      input.say(arrival(turn));
-      const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
-      lanes.set(turn.chatId, lane);
-      const live = lane.live;
-      const replacing = live !== undefined && replacesLiveTurn(turn, { fromAgent: lane.liveFromAgent === true });
-      if (live !== undefined && replacing) {
-        live.dropped = true;
-        for (const stop of waiting.get(live.sessionId) ?? []) stop.abort();
-        try { await (await acpAgent()).client.cancel({ sessionId: live.sessionId }); }
-        catch { /* The turn ended by itself, which is the same outcome. */ }
-      }
-      let ready!: () => void;
-      const handed = new Promise<void>((resolve) => { ready = resolve; });
-      // Nothing may be thrown here: a failure would close the connection, and
-      // the agent failing to answer one message is not a reason to stop.
-      lane.chain = lane.chain.then(() => answerOne(turn, lane, ready)).catch(() => undefined).finally(() => { ready(); });
-      // A message that waits behind the live turn is taken now, so the turn
-      // it waits for does not hold this connection for every other chat.
-      if (live !== undefined && !replacing) ready();
-      // Relay is told the message is handled once the agent is working on it.
-      // The rest of the turn does not hold this connection, because every other
-      // chat's messages, and the next message in this one, arrive down it.
-      await handed;
+    say: input.say,
+    label: input.label,
+    interrupt: async (live) => {
+      for (const stop of waiting.get(live.sessionId) ?? []) stop.abort();
+      try { await (await acpAgent()).client.cancel({ sessionId: live.sessionId }); }
+      catch { /* The turn ended by itself, which is the same outcome. */ }
     },
-    onFullSync: async () => {
-      // This process keeps no copy of any chat, so there is nothing to rebuild.
-      // Throwing here would not stop the bridge: the SDK closes the socket and
-      // reconnects, Relay re-issues the same FULL sync, and no message is ever
-      // answered again. Acknowledge it and answer the new ones.
-      input.say(`${input.label} was away longer than Relay keeps its messages. It answers the new ones from now on.`);
-    },
+    answer: answerOne,
   });
 };

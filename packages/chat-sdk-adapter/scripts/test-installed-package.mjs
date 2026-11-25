@@ -66,6 +66,28 @@ for (const forbidden of [
   }
 }
 
+const sdkPackDir = resolve(artifacts, "sdk-pack");
+mkdirSync(sdkPackDir, { recursive: true });
+execFileSync(
+  "npm",
+  [
+    "pack",
+    "--ignore-scripts",
+    "--pack-destination",
+    sdkPackDir,
+  ],
+  { cwd: resolve(root, "../sdk"), stdio: "inherit" },
+);
+const sdkManifest = JSON.parse(
+  readFileSync(resolve(root, "../sdk/package.json"), "utf8"),
+);
+const sdkTarball = resolve(
+  sdkPackDir,
+  `${sdkManifest.name
+    .replace(/^@/, "")
+    .replaceAll("/", "-")}-${sdkManifest.version}.tgz`,
+);
+
 writeFileSync(
   resolve(consumer, "package.json"),
   JSON.stringify(
@@ -74,8 +96,12 @@ writeFileSync(
       type: "module",
       dependencies: {
         "@relaymessenger/chat-sdk-adapter": `file:${tarball}`,
+        "@relaymessenger/sdk": `file:${sdkTarball}`,
         chat: manifest.devDependencies.chat,
         typescript: "7.0.2",
+      },
+      overrides: {
+        "@relaymessenger/sdk": `file:${sdkTarball}`,
       },
     },
     null,

@@ -20966,9 +20966,11 @@ var ignore = () => {
 
 // node_modules/@relaymessenger/sdk/dist/webhooks.js
 var import_standardwebhooks = __toESM(require_dist2(), 1);
+var DEFAULT_TOLERANCE_SECONDS = 5 * 60;
+var isHeadersLike = (headers) => typeof headers.get === "function";
 var requiredHeaders = (headers) => {
   let get;
-  if (headers instanceof Headers) {
+  if (isHeadersLike(headers)) {
     get = (name) => headers.get(name);
   } else {
     const normalized = /* @__PURE__ */ new Map();
@@ -20992,8 +20994,40 @@ var requiredHeaders = (headers) => {
     "webhook-signature": signature
   };
 };
-var verifyWebhookSignature = (secret, body, headers) => {
-  new import_standardwebhooks.Webhook(secret).verify(body, requiredHeaders(headers));
+var constantTimeEqual = (left, right) => {
+  if (left.length !== right.length)
+    return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+};
+var verifyWebhookSignature = (secret, body, headers, options2) => {
+  const required2 = requiredHeaders(headers);
+  const id = required2["webhook-id"];
+  const timestamp = required2["webhook-timestamp"];
+  const signatures = required2["webhook-signature"];
+  const parsedTimestamp = Number(timestamp);
+  if (!Number.isSafeInteger(parsedTimestamp) || parsedTimestamp < 0) {
+    throw new import_standardwebhooks.WebhookVerificationError("Invalid webhook-timestamp.");
+  }
+  const now = options2?.nowSeconds ?? Math.floor(Date.now() / 1e3);
+  const tolerance = options2?.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
+  if (!Number.isFinite(tolerance) || tolerance < 0 || Math.abs(now - parsedTimestamp) > tolerance) {
+    throw new import_standardwebhooks.WebhookVerificationError("webhook-timestamp outside tolerance.");
+  }
+  const computed = new import_standardwebhooks.Webhook(secret).sign(id, new Date(parsedTimestamp * 1e3), body);
+  const expected = new TextEncoder().encode(computed.split(",", 2)[1] ?? "");
+  const encoder = new TextEncoder();
+  for (const candidate of signatures.split(/\s+/u)) {
+    const [version2, encoded] = candidate.split(",", 2);
+    if (version2 !== "v1" || !encoded)
+      continue;
+    if (constantTimeEqual(encoder.encode(encoded), expected))
+      return;
+  }
+  throw new import_standardwebhooks.WebhookVerificationError("No matching v1 signature found.");
 };
 var Webhooks = class {
   #secret;
