@@ -952,7 +952,7 @@ describe("sentAttachments upload-once on retry", () => {
           upload_url: "https://upload.example/image",
           download_url: "https://api.example.test/attachment",
           http_method: "PUT",
-          expires_at: "2026-10-14T12:00:00Z",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
           required_headers: { "content-type": "image/png" },
         });
       }
@@ -1022,7 +1022,7 @@ describe("sentAttachments upload-once on retry", () => {
           upload_url: "https://upload.example/voice",
           download_url: "https://api.example.test/voice",
           http_method: "PUT",
-          expires_at: "2026-10-14T12:00:00Z",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
           required_headers: { "content-type": "audio/x-wav" },
         });
       }
@@ -1067,5 +1067,191 @@ describe("sentAttachments upload-once on retry", () => {
     await Promise.all(tasks);
     expect({ synthesized, allocated, uploaded }).toEqual({ synthesized: 1, allocated: 1, uploaded: 1 });
     expect(voiceBodies).toEqual([{ attachment_id: ATTACHMENT_ID }]);
+  });
+
+  it("never reuses a cached attachment across different kinds, prompts, or call keys", async () => {
+    let nextId = 0;
+    const allocatedIds: string[] = [];
+    const sentMedia: string[] = [];
+    const voiceMedia: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/v1/attachments")) {
+        nextId += 1;
+        const id = `01993d50-ef7b-7b37-886b-23fd80c7000${nextId}`;
+        allocatedIds.push(id);
+        return Response.json({
+          attachment_id: id,
+          upload_url: `https://upload.example/${id}`,
+          download_url: `https://api.example.test/${id}`,
+          http_method: "PUT",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          required_headers: { "content-type": "application/octet-stream" },
+        });
+      }
+      if (url.startsWith("https://upload.example/")) return new Response(null, { status: 200 });
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/messages`)) {
+        const body = JSON.parse(String(init.body)) as { message: { parts: Array<{ attachment_id?: string }> } };
+        const media = body.message.parts.find((part) => part.attachment_id);
+        if (media?.attachment_id) sentMedia.push(media.attachment_id);
+        return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      }
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/voicememo`)) {
+        const body = JSON.parse(String(init.body)) as { attachment_id: string };
+        voiceMedia.push(body.attachment_id);
+        return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+    const kept = new Map<string, string>();
+    const tasks: Promise<void>[] = [];
+    let failFirst = true;
+    const deps: RelayActionDependencies = {
+      ...dependencies([], undefined, tasks),
+      sentAttachments: {
+        get: (key) => kept.get(key),
+        put: (key, id) => kept.set(key, id),
+      },
+      compose: async () => {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error("interrupted after tower upload");
+        }
+      },
+    };
+    // Attempt 1 uploads "tiny tower" under callKey "1", then fails before POST.
+    await expect(executeRelaySend(deps, { kind: "image", prompt: "tiny tower" }, undefined, "1"))
+      .rejects.toThrow("interrupted after tower upload");
+    // Same callKey "1", different prompt: must NOT reuse the tower upload.
+    await expect(executeRelaySend(deps, { kind: "image", prompt: "red car" }, undefined, "1"))
+      .resolves.toMatchObject({ status: "sent", kind: "image" });
+    // Same callKey "1", different kind (voice_memo): must NOT reuse any image upload.
+    await expect(executeRelaySend(deps, { kind: "voice_memo", text: "hi there" }, undefined, "1"))
+      .resolves.toMatchObject({ status: "terminal_ambiguous", kind: "voice_memo" });
+    // Different callKey "2", same original prompt: must upload its own attachment.
+    await expect(executeRelaySend(deps, { kind: "image", prompt: "tiny tower" }, undefined, "2"))
+      .resolves.toMatchObject({ status: "sent", kind: "image" });
+    await Promise.all(tasks);
+
+    expect(allocatedIds).toHaveLength(4);
+    expect(sentMedia).toEqual([allocatedIds[1], allocatedIds[3]]);
+    expect(voiceMedia).toEqual([allocatedIds[2]]);
+  });
+
+  it("re-uploads when a cached attachment has expired or Relay rejects it, and caches nothing on failure", async () => {
+    let nextId = 0;
+    let sendAttempt = 0;
+    let failUpload = true;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/v1/attachments")) {
+        nextId += 1;
+        const id = `01993d50-ef7b-7b37-886b-23fd80c8000${nextId}`;
+        // Allocation #2 is already expired; #3 and #4 are valid.
+        const expiresAt = nextId === 2
+          ? new Date(Date.now() - 60_000).toISOString()
+          : new Date(Date.now() + 3_600_000).toISOString();
+        return Response.json({
+          attachment_id: id,
+          upload_url: `https://upload.example/${id}`,
+          download_url: `https://api.example.test/${id}`,
+          http_method: "PUT",
+          expires_at: expiresAt,
+          required_headers: { "content-type": "image/png" },
+        });
+      }
+      if (url.startsWith("https://upload.example/")) {
+        if (failUpload) {
+          return new Response("upload rejected", { status: 400 });
+        }
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/messages`)) {
+        sendAttempt += 1;
+        if (sendAttempt === 1) {
+          return Response.json({ error: { code: "not_found", message: "attachment gone" } }, { status: 404 });
+        }
+        return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+    const kept = new Map<string, string>();
+    let failComposeOnce = false;
+    const deps: RelayActionDependencies = {
+      ...dependencies(),
+      sentAttachments: {
+        get: (key) => kept.get(key),
+        put: (key, id) => kept.set(key, id),
+      },
+      compose: async () => {
+        if (failComposeOnce) {
+          failComposeOnce = false;
+          throw new Error("compose interrupted");
+        }
+      },
+    };
+    const image: SendInput = { kind: "image", prompt: "sunset" };
+
+    // 1. Failed upload leaves nothing cached.
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow();
+    expect(kept.size).toBe(0);
+    failUpload = false;
+
+    // 2. Upload #2 succeeds with past expires_at, then compose throws; retry ignores expired entry and uploads #3.
+    failComposeOnce = true;
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow("compose interrupted");
+    expect(kept.size).toBe(1);
+
+    // 3. Upload #3 replaces expired #2, then compose throws so #3 is cached; next retry uses #3 and hits 404,
+    // which clears the cached entry so retry #4 uploads fresh #4 and succeeds.
+    failComposeOnce = true;
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow("compose interrupted");
+    expect(nextId).toBe(3);
+
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow("attachment gone");
+    await expect(executeRelaySend(deps, image, undefined, "1")).resolves.toMatchObject({ status: "sent", messageId: SENT_ID });
+    expect(nextId).toBe(4);
+  });
+
+  it("still regenerates and uploads on retry when sentAttachments is omitted", async () => {
+    let generated = 0;
+    let allocated = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/v1/attachments")) {
+        allocated += 1;
+        return Response.json({
+          attachment_id: ATTACHMENT_ID,
+          upload_url: "https://upload.example/image",
+          download_url: "https://api.example.test/attachment",
+          http_method: "PUT",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+          required_headers: { "content-type": "image/png" },
+        });
+      }
+      if (url === "https://upload.example/image") return new Response(null, { status: 200 });
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/messages`)) return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+    let failOnce = true;
+    const deps: RelayActionDependencies = {
+      ...dependencies(),
+      media: {
+        image: async () => {
+          generated += 1;
+          return { bytes: new Uint8Array([137, 80, 78, 71]), contentType: "image/png" };
+        },
+      },
+      compose: async () => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("interrupted");
+        }
+      },
+    };
+    const image: SendInput = { kind: "image", prompt: "no cache" };
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow("interrupted");
+    await expect(executeRelaySend(deps, image, undefined, "1")).resolves.toMatchObject({ status: "sent" });
+    expect({ generated, allocated }).toEqual({ generated: 2, allocated: 2 });
   });
 });

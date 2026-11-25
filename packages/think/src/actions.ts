@@ -695,6 +695,13 @@ function imageFilename(contentType: string, eventId: string): string {
   return `relay-${eventId}.${extension}`;
 }
 
+interface UploadedAttachment {
+  attachmentId: string;
+  expiresAt?: string;
+}
+
+const ATTACHMENT_EXPIRY_BUFFER_MS = 30_000;
+
 async function upload(
   relay: Relay,
   input: {
@@ -704,7 +711,7 @@ async function upload(
     durationMs?: number;
   },
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<UploadedAttachment> {
   const allocation = await relay.attachments.create({
     filename: input.filename,
     content_type: input.contentType,
@@ -718,19 +725,56 @@ async function upload(
     input.bytes.slice().buffer as ArrayBuffer,
     requestOptions(signal),
   );
-  return allocation.attachment_id;
+  return {
+    attachmentId: allocation.attachment_id,
+    ...(allocation.expires_at ? { expiresAt: allocation.expires_at } : {}),
+  };
+}
+
+async function attachmentCacheKey(
+  sendKey: string,
+  kind: "image" | "voice_memo",
+  parts: readonly (string | undefined)[],
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify(parts)),
+  );
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${sendKey}:${kind}:${hash}`;
+}
+
+function readCachedAttachment(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (!raw.startsWith("{")) return raw;
+  try {
+    const parsed = JSON.parse(raw) as { id?: unknown; expiresAt?: unknown };
+    if (typeof parsed.id !== "string" || !parsed.id) return undefined;
+    if (typeof parsed.expiresAt === "string") {
+      const expiresAtMs = Date.parse(parsed.expiresAt);
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now() + ATTACHMENT_EXPIRY_BUFFER_MS) {
+        return undefined;
+      }
+    }
+    return parsed.id;
+  } catch {
+    return undefined;
+  }
 }
 
 async function uploadOnce(
   sentAttachments: RelayActionDependencies["sentAttachments"],
-  sendKey: string,
-  make: () => Promise<string>,
-): Promise<string> {
-  const kept = sentAttachments?.get(sendKey);
-  if (kept) return kept;
-  const attachmentId = await make();
-  sentAttachments?.put(sendKey, attachmentId);
-  return attachmentId;
+  cacheKey: string,
+  make: () => Promise<UploadedAttachment>,
+): Promise<{ attachmentId: string; fromCache: boolean }> {
+  const kept = readCachedAttachment(sentAttachments?.get(cacheKey));
+  if (kept) return { attachmentId: kept, fromCache: true };
+  const uploaded = await make();
+  const stored = uploaded.expiresAt
+    ? JSON.stringify({ id: uploaded.attachmentId, expiresAt: uploaded.expiresAt })
+    : uploaded.attachmentId;
+  sentAttachments?.put(cacheKey, stored);
+  return { attachmentId: uploaded.attachmentId, fromCache: false };
 }
 
 async function sendText(
@@ -1136,7 +1180,8 @@ async function sendOnce(
   try {
     if (input.kind === "image") {
       if (!deps.media?.image) throw new Error("This agent has no image model");
-      const attachmentId = await uploadOnce(deps.sentAttachments, identity.sendKey, async () => {
+      const cacheKey = await attachmentCacheKey(identity.sendKey, "image", [input.prompt]);
+      const { attachmentId, fromCache } = await uploadOnce(deps.sentAttachments, cacheKey, async () => {
         const image = await deps.media!.image!(input.prompt, signal);
         assertCurrent();
         return await upload(relay, {
@@ -1158,12 +1203,26 @@ async function sendOnce(
           : []),
         { type: "media", attachment_id: attachmentId },
       ];
-      const result = await relay.chats.messages.send(identity.chatId, {
-        message: {
-          parts,
-          idempotency_key: identity.sendKey,
-        },
-      }, requestOptions(signal));
+      let result;
+      try {
+        result = await relay.chats.messages.send(identity.chatId, {
+          message: {
+            parts,
+            idempotency_key: identity.sendKey,
+          },
+        }, requestOptions(signal));
+      } catch (error) {
+        // Clear a cached attachment if Relay rejects it (e.g. expired or gone)
+        // so the next retry uploads a fresh one instead of repeating the failure.
+        if (
+          fromCache
+          && error instanceof RelayAPIError
+          && (error.status === 400 || error.status === 404 || error.status === 410)
+        ) {
+          deps.sentAttachments?.put(cacheKey, "");
+        }
+        throw error;
+      }
       return {
         status: "sent",
         kind: input.kind,
@@ -1171,7 +1230,8 @@ async function sendOnce(
       };
     }
     if (!deps.media?.voiceMemo) throw new Error("This agent has no voice model");
-    const attachmentId = await uploadOnce(deps.sentAttachments, identity.sendKey, async () => {
+    const voiceCacheKey = await attachmentCacheKey(identity.sendKey, "voice_memo", [input.text, input.style ?? ""]);
+    const { attachmentId } = await uploadOnce(deps.sentAttachments, voiceCacheKey, async () => {
       const voice = await deps.media!.voiceMemo!(input.text, input.style, signal);
       assertCurrent();
       return await upload(relay, {
