@@ -151,6 +151,26 @@ describe("@relaymessenger/think/clone speak-gate", () => {
     expect(saved?.spoke).toBe(true);
   });
 
+  it("returns turn without calling Clef when a malformed group envelope lacks sender_handle and from_handle", async () => {
+    const ai = { run: vi.fn() };
+    const relay = makeRelay([]);
+    const result = await prepareSpeakGate(
+      { AI: ai as never, RELAY_SPEAK_GATE: "clef", RELAY_SPEAK_PEERS: "graham" },
+      {
+        event_type: "message.received",
+        data: {
+          id: MSG_ID,
+          direction: "inbound",
+          chat: { id: CHAT_ID, is_group: true, owner_handle: { handle: "jobs", display_name: "Steve Jobs" } },
+          parts: [{ type: "text", value: "hello" }],
+        },
+      },
+      { relay, get: () => undefined, put: vi.fn() },
+    );
+    expect(result).toEqual({ kind: "turn" });
+    expect(ai.run).not.toHaveBeenCalled();
+  });
+
   it("evaluates helper predicates cleanly", () => {
     expect(namesAgent([{ type: "text", value: "Hey Steve, what do you think?" }], { handle: "jobs", display_name: "Steve Jobs" })).toBe(true);
     expect(namesAgent([{ type: "text", value: "Stevenson agreed" }], { handle: "jobs", display_name: "Steve Jobs" })).toBe(false);

@@ -80,10 +80,10 @@ export async function verifyWebhookSignature(input: {
     );
   }
 
-  const secret = await resolveRelayCredential(
+  const secret = (await resolveRelayCredential(
     input.secret,
     "Relay webhook signing secret",
-  );
+  )).trim();
   // Validate the deployment secret before verification so malformed secrets
   // always surface as WebhookSecretError rather than a delivery 401.
   decodeWebhookSecret(secret);
@@ -94,6 +94,8 @@ export async function verifyWebhookSignature(input: {
     if (error instanceof SdkWebhookVerificationError) {
       throw new WebhookVerificationError(error.message);
     }
-    throw error;
+    throw new WebhookSecretError(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }

@@ -70,6 +70,17 @@ describe("Relay Standard Webhooks v1 signatures", () => {
     ).rejects.toBeInstanceOf(WebhookVerificationError);
   });
 
+  it("trims surrounding whitespace on deployment webhook secrets", async () => {
+    const request = await signedRequest(envelope());
+    await expect(
+      verifyWebhookSignature({
+        headers: request.headers,
+        payload: await request.text(),
+        secret: `  ${WEBHOOK_SECRET}\n`,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("names malformed deployment secrets separately", () => {
     expect(() => decodeWebhookSecret("whsec_!!!")).toThrow(
       WebhookSecretError,

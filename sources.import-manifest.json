@@ -382,7 +382,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/signature.ts",
       "source_sha256": "60035a6af4b57660cee602ae3cbfad6018b7a7986b72282358e2a10308a35f42",
-      "destination_sha256": "e2e843458bcbf6774339f4b5a5d269246f6bebe57727dbcc6f3c97b20f7ae20b",
+      "destination_sha256": "7142bfbb51f2b8e027569d15202730452405492110d30deb0fce492d2ba0b8b2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -514,10 +514,10 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/signature.test.ts",
       "source_sha256": "30e6a7994b3e7d16ecec3b84cbc407d575d969c042b7855618b128e05bdbada7",
-      "destination_sha256": "30e6a7994b3e7d16ecec3b84cbc407d575d969c042b7855618b128e05bdbada7",
+      "destination_sha256": "a6f279e4be04a5661c192bcb518b119c72df17177b223974f961c30a9edcea20",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/chat-sdk-adapter/test/thread-id.test.ts",

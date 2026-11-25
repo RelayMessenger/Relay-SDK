@@ -300,9 +300,10 @@ export async function prepareSpeakGate(
   if (!parsed.success) return { kind: "turn" };
   const message = parsed.data.data;
   const senderHandle = message.from_handle ?? message.sender_handle;
-  if (message.is_from_me === true || senderHandle?.is_me === true) return { kind: "turn" };
+  if (!senderHandle) return { kind: "turn" };
+  if (message.is_from_me === true || senderHandle.is_me === true) return { kind: "turn" };
   const owner = message.chat.owner_handle;
-  const fromPerson = senderHandle?.kind !== "agent";
+  const fromPerson = senderHandle.kind !== "agent";
   const name = owner.display_name || owner.handle;
   const saved = deps.get();
   if (saved && !saved.spoke) return { kind: "silent" };

@@ -106,7 +106,8 @@ export function extractPartMentions(
       if (!isRecord(entry)) continue;
       if (typeof entry.handle === "string" && entry.handle.length > 0) {
         found.push(entry.handle);
-      } else if (entry.is_me === true && ownHandle) {
+      }
+      if (entry.is_me === true && ownHandle) {
         found.push(ownHandle);
       }
     }
@@ -136,8 +137,22 @@ export function isOwnerMentioned(
   parts: ReadonlyArray<unknown>,
   ownerHandle: string | undefined,
 ): boolean {
-  if (!ownerHandle) return false;
-  return mentionedHandles(parts, ownerHandle).has(ownerHandle);
+  for (const part of parts) {
+    if (!isRecord(part) || part.type !== "text") continue;
+    if (ownerHandle && typeof part.mention === "string" && part.mention === ownerHandle) {
+      return true;
+    }
+    if (Array.isArray(part.mentions)) {
+      for (const entry of part.mentions) {
+        if (!isRecord(entry)) continue;
+        if (entry.is_me === true) return true;
+        if (ownerHandle && typeof entry.handle === "string" && entry.handle === ownerHandle) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 function relayMessageIngress(

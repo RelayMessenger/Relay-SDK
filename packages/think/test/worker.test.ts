@@ -89,8 +89,22 @@ describe("@relaymessenger/think/worker webhook helpers", () => {
     ];
     expect([...mentionedHandles(parts, "jobs")].sort()).toEqual(["graham", "jobs", "kay"]);
     expect(isOwnerMentioned(parts, "jobs")).toBe(true);
-    expect(isOwnerMentioned(parts, "musk")).toBe(false);
+    expect(
+      isOwnerMentioned(
+        [{ type: "text", value: "@jobs @graham thoughts?", mentions: [{ handle: "jobs", is_me: false }, { handle: "graham" }] }],
+        "musk",
+      ),
+    ).toBe(false);
     expect(extractPartMentions({ type: "text", mentions: [{ is_me: true }] }, "jobs")).toEqual(["jobs"]);
+    expect(
+      extractPartMentions({ type: "text", mentions: [{ handle: "Iris", is_me: true }] }, "iris"),
+    ).toEqual(["Iris", "iris"]);
+    expect(
+      isOwnerMentioned([{ type: "text", mentions: [{ handle: "Iris", is_me: true }] }], "iris"),
+    ).toBe(true);
+    expect(
+      isOwnerMentioned([{ type: "text", mentions: [{ handle: "Iris", is_me: true }] }], undefined),
+    ).toBe(true);
   });
 
   it("authenticates signed webhooks and admits multi-mention group messages", async () => {
