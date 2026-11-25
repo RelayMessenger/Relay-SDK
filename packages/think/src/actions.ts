@@ -856,6 +856,140 @@ export async function executeRelaySend(
   return result;
 }
 
+function stripSearchText(value: string): string {
+  return withoutSearchMarkers(value);
+}
+
+function stripSearchTrimmed(value: string): string {
+  return withoutSearchMarkers(value).trim();
+}
+
+function sanitizeCardSearchMarkers(card: CardInput): CardInput {
+  return {
+    ...card,
+    ...(card.title !== undefined ? { title: stripSearchTrimmed(card.title) } : {}),
+    ...(card.description !== undefined ? { description: stripSearchTrimmed(card.description) } : {}),
+    ...(card.suggestions !== undefined
+      ? {
+        suggestions: card.suggestions.map((suggestion) => ({
+          ...suggestion,
+          label: stripSearchTrimmed(suggestion.label),
+        })),
+      }
+      : {}),
+  };
+}
+
+function sanitizeFormSearchMarkers(form: Omit<FormPart, "type">): Omit<FormPart, "type"> {
+  return {
+    ...form,
+    title: stripSearchTrimmed(form.title),
+    pages: form.pages.map((page) => ({
+      ...page,
+      title: stripSearchTrimmed(page.title),
+      fields: page.fields.map((field) => {
+        const base = {
+          ...field,
+          label: stripSearchTrimmed(field.label),
+          ...(field.placeholder !== undefined ? { placeholder: stripSearchTrimmed(field.placeholder) } : {}),
+        };
+        if (field.type === "select" || field.type === "picker") {
+          return {
+            ...base,
+            options: field.options.map((option) => ({
+              ...option,
+              label: stripSearchTrimmed(option.label),
+            })),
+          };
+        }
+        return base;
+      }),
+    })),
+    ...(form.splash !== undefined
+      ? {
+        splash: {
+          ...form.splash,
+          ...(form.splash.title !== undefined ? { title: stripSearchTrimmed(form.splash.title) } : {}),
+          ...(form.splash.text !== undefined ? { text: stripSearchText(form.splash.text) } : {}),
+          button_title: stripSearchTrimmed(form.splash.button_title),
+        },
+      }
+      : {}),
+    ...(form.received_message !== undefined
+      ? {
+        received_message: {
+          ...form.received_message,
+          title: stripSearchTrimmed(form.received_message.title),
+          ...(form.received_message.subtitle !== undefined
+            ? { subtitle: stripSearchTrimmed(form.received_message.subtitle) }
+            : {}),
+        },
+      }
+      : {}),
+  };
+}
+
+function sanitizeWebSearchInput(input: SendInput): SendInput {
+  switch (input.kind) {
+    case "text":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        ...(input.title !== undefined ? { title: stripSearchTrimmed(input.title) } : {}),
+        ...(input.buttons !== undefined
+          ? { buttons: input.buttons.map((button) => ({ ...button, label: stripSearchTrimmed(button.label) })) }
+          : {}),
+        ...(input.selection !== undefined
+          ? { selection: input.selection.map((option) => ({ ...option, label: stripSearchTrimmed(option.label) })) }
+          : {}),
+      };
+    case "rich_card":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        cards: input.cards.map(sanitizeCardSearchMarkers),
+      };
+    case "carousel":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        cards: input.cards.map(sanitizeCardSearchMarkers),
+      };
+    case "form":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        form: sanitizeFormSearchMarkers(input.form),
+      };
+    case "place":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+        ...(input.name !== undefined ? { name: stripSearchTrimmed(input.name) } : {}),
+        ...(input.address !== undefined ? { address: stripSearchTrimmed(input.address) } : {}),
+      };
+    case "link":
+    case "media":
+      return {
+        ...input,
+        ...(input.text !== undefined ? { text: stripSearchText(input.text) } : {}),
+      };
+    case "voice_memo":
+      return {
+        ...input,
+        text: stripSearchText(input.text),
+      };
+    case "image":
+      return {
+        ...input,
+        ...(input.caption !== undefined ? { caption: stripSearchText(input.caption) } : {}),
+      };
+    case "payment":
+    case "rating_request":
+      return input;
+  }
+}
+
 async function sendOnce(
   deps: RelayActionDependencies,
   turn: RelayTurnIdentity,
@@ -864,6 +998,23 @@ async function sendOnce(
   signal?: AbortSignal,
   callKey?: string,
 ): Promise<SendResult> {
+  if (deps.webSearch) {
+    input = sanitizeWebSearchInput(input);
+  }
+  // Relay shows inline Markdown only; block marks would arrive as raw "#" and "-"
+  // on any kind that sends a visible chat text part.
+  if (
+    (input.kind === "text"
+      || input.kind === "link"
+      || input.kind === "place"
+      || input.kind === "rich_card"
+      || input.kind === "carousel"
+      || input.kind === "form"
+      || input.kind === "media")
+    && input.text
+  ) {
+    input = { ...input, text: plainChatText(input.text) };
+  }
   const identity: KeyedTurn = {
     ...turn,
     sendKey: relayIdempotencyKey(callKey === undefined ? turn.eventId : `${turn.eventId}:${callKey}`),
@@ -872,8 +1023,6 @@ async function sendOnce(
   const relay = createRelayClient(deps.env);
   const compose = deps.compose ?? finishComposition;
   if (input.kind === "text") {
-    // Relay shows inline Markdown only; block marks would arrive as raw "#" and "-".
-    if (input.text) input = { ...input, text: plainChatText(input.text) };
     // The ordinal survives overlap and ledger replay; completed sends alone do not.
     // An unnumbered turn has one logical send key.
     const firstSend = (callKey === undefined || callKey === "1")
@@ -1369,9 +1518,7 @@ export function createRelayActions(
           "send",
           () => executeRelaySend(
             deps,
-            deps.webSearch && input.text !== undefined
-              ? { ...input, text: withoutSearchMarkers(input.text) }
-              : input,
+            input,
             deps.signal(context.signal),
             String(number),
           ),

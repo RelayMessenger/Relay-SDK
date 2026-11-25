@@ -240,3 +240,69 @@ async def test_one_of_rules_refuse_before_sending(server: _Server) -> None:
     with pytest.raises(TypeError):
         await relay.contact_card.update("my_bot", nickname="x")
     assert server.seen == []
+
+
+async def test_patch_is_not_retried_without_idempotency_key(server: _Server) -> None:
+    server.replies = [(503, {"error": {"message": "busy"}}), (200, {})]
+    with pytest.raises(RelayAPIError) as raised:
+        await _relay(server, max_retries=2).contact_card.update("my_bot", subtitle="Travel")
+    assert raised.value.status == 503
+    assert len(server.seen) == 1
+
+
+async def test_attachment_upload_retries_transient_5xx(server: _Server) -> None:
+    server.replies = [(503, {"error": {"message": "busy"}}), (204, None)]
+    allocation: Any = {
+        "attachment_id": "att",
+        "upload_url": f"{server.base_url}/upload/att",
+        "download_url": "",
+        "http_method": "PUT",
+        "expires_at": "",
+        "required_headers": {"content-type": "image/png"},
+    }
+    await _relay(server, max_retries=2).attachments.upload(allocation, b"PNG")
+    assert len(server.seen) == 2
+
+
+async def test_non_json_2xx_raises_relay_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    relay = Relay("rel_test", base_url="https://api.example.test", max_retries=0)
+    monkeypatch.setattr(relay.me._transport, "_once", lambda *args: (200, b"<html>proxy</html>", {}))
+    with pytest.raises(RelayAPIError) as raised:
+        await relay.me.retrieve()
+    assert raised.value.status == 200
+    assert raised.value.body == "<html>proxy</html>"
+
+
+async def test_retry_after_ignores_blank_or_negative_and_clamps_huge(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from relaymessenger.client import MAX_RETRY_AFTER_SECONDS
+
+    sleeps: List[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    # Blank and negative Retry-After fall back to retry_base_delay.
+    for header in ("", "   ", "-5", "nan"):
+        sleeps.clear()
+        responses = iter([
+            (429, b'{"error":{"message":"slow"}}', {"Retry-After": header}),
+            (200, b"{}", {}),
+        ])
+        relay = Relay("rel_test", base_url="https://api.example.test", max_retries=1, retry_base_delay=0.25)
+        monkeypatch.setattr(relay.me._transport, "_once", lambda *args: next(responses))
+        await relay.me.retrieve()
+        assert sleeps == [0.25]
+
+    # Huge Retry-After is clamped to MAX_RETRY_AFTER_SECONDS (60s).
+    sleeps.clear()
+    responses = iter([
+        (429, b'{"error":{"message":"slow","retry_after":86400}}', {}),
+        (200, b"{}", {}),
+    ])
+    relay = Relay("rel_test", base_url="https://api.example.test", max_retries=1, retry_base_delay=0.25)
+    monkeypatch.setattr(relay.me._transport, "_once", lambda *args: next(responses))
+    await relay.me.retrieve()
+    assert sleeps == [MAX_RETRY_AFTER_SECONDS]

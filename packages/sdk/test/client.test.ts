@@ -157,5 +157,155 @@ describe("Relay transport", () => {
     expect(headers.get("content-type")).toBe("application/zip");
     expect(headers.get("content-length")).toBe("3");
     expect(captured?.init?.body).toBe(bytes);
+    expect(captured?.init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("ignores blank or negative Retry-After headers and clamps huge Retry-After waits to 60s", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const badHeader of ["", "   ", "-5", "not-a-number"]) {
+        let calls = 0;
+        const client = new Relay({
+          apiKey: "token",
+          maxRetries: 1,
+          retryBaseDelayMs: 50,
+          fetch: async () => {
+            calls += 1;
+            return calls === 1
+              ? new Response(JSON.stringify({ error: { message: "slow" } }), {
+                status: 429,
+                headers: { "retry-after": badHeader },
+              })
+              : Response.json({ chats: [], next_cursor: null });
+          },
+        });
+        const pending = client.chats.listChats();
+        await vi.advanceTimersByTimeAsync(49);
+        expect(calls).toBe(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await pending;
+        expect(calls).toBe(2);
+      }
+
+      // Blank/negative Retry-After does not populate retryAfter on RelayAPIError.
+      const failing = new Relay({
+        apiKey: "token",
+        maxRetries: 0,
+        fetch: async () => new Response(JSON.stringify({ error: { message: "slow" } }), {
+          status: 429,
+          headers: { "retry-after": "" },
+        }),
+      });
+      const err = await failing.chats.listChats().catch((e) => e) as RelayAPIError;
+      expect(err).toBeInstanceOf(RelayAPIError);
+      expect(err.retryAfter).toBeUndefined();
+
+      // Huge Retry-After wait is clamped to 60s.
+      let hugeCalls = 0;
+      const huge = new Relay({
+        apiKey: "token",
+        maxRetries: 1,
+        retryBaseDelayMs: 50,
+        fetch: async () => {
+          hugeCalls += 1;
+          return hugeCalls === 1
+            ? new Response(JSON.stringify({ error: { message: "slow", retry_after: 86_400 } }), { status: 429 })
+            : Response.json({ chats: [], next_cursor: null });
+        },
+      });
+      const hugePending = huge.chats.listChats();
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(hugeCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await hugePending;
+      expect(hugeCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("wraps non-JSON 2xx responses as RelayAPIError instead of raw SyntaxError", async () => {
+    const client = new Relay({
+      apiKey: "token",
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+      fetch: async () => new Response("<html>proxy page</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    });
+    const error = await client.chats.retrieve("chat-1").catch((e) => e);
+    expect(error).toBeInstanceOf(RelayAPIError);
+    expect((error as RelayAPIError).status).toBe(200);
+    expect((error as RelayAPIError).body).toBe("<html>proxy page</html>");
+    expect((error as RelayAPIError).retryable).toBe(false);
+  });
+
+  it("does not retry PATCH unless an idempotency key is set", async () => {
+    let calls = 0;
+    const client = new Relay({
+      apiKey: "token",
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+      fetch: async () => {
+        calls += 1;
+        return Response.json({ error: { message: "unavailable" } }, { status: 503 });
+      },
+    });
+    await expect(client.oauth2Client.update({ scopes: ["openid"] })).rejects.toBeInstanceOf(RelayAPIError);
+    expect(calls).toBe(1);
+
+    let keyedCalls = 0;
+    const keyed = new Relay({
+      apiKey: "token",
+      maxRetries: 1,
+      retryBaseDelayMs: 0,
+      fetch: async () => {
+        keyedCalls += 1;
+        return keyedCalls === 1
+          ? Response.json({ error: { message: "unavailable" } }, { status: 503 })
+          : Response.json({ client: { client_id: "c", redirect_uris: [], scopes: ["openid"], created_at: "", updated_at: "" } });
+      },
+    });
+    await keyed.oauth2Client.update({ scopes: ["openid"] }, { headers: { "Idempotency-Key": "patch-1" } });
+    expect(keyedCalls).toBe(2);
+  });
+
+  it("retries transient PUT upload failures and enforces upload timeout", async () => {
+    const allocation = {
+      attachment_id: "attachment",
+      upload_url: "https://upload.test/opaque",
+      download_url: "https://download.test/opaque",
+      http_method: "PUT" as const,
+      expires_at: "2026-08-28T00:00:00.000Z",
+      required_headers: { "Content-Type": "application/octet-stream" },
+    };
+    let attempts = 0;
+    const retrying = new Relay({
+      apiKey: "token",
+      maxRetries: 2,
+      retryBaseDelayMs: 0,
+      fetch: async () => {
+        attempts += 1;
+        return attempts < 3
+          ? new Response("try again", { status: 503 })
+          : new Response(null, { status: 200 });
+      },
+    });
+    await retrying.attachments.upload(allocation, new Uint8Array([1, 2, 3]));
+    expect(attempts).toBe(3);
+
+    const timingOut = new Relay({
+      apiKey: "token",
+      maxRetries: 0,
+      timeout: 25,
+      fetch: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+      }),
+    });
+    await expect(timingOut.attachments.upload(allocation, new Uint8Array([1]))).rejects.toMatchObject({
+      name: "RelayAPIError",
+      message: expect.stringContaining("timed out"),
+    });
   });
 });

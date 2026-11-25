@@ -78,4 +78,48 @@ describe("verifyRelayIdToken", () => {
     const other = await setup(`${ISSUER}/bad`);
     await expect(verifyRelayIdToken(await other.sign({}), options)).rejects.toThrow();
   });
+
+  it("enforces HTTPS except loopback, passes a timeout signal, and isolates caches by fetch", async () => {
+    const { fetch: fetchA, sign: signA } = await setup(`${ISSUER}/shared`);
+    const { fetch: fetchB, sign: signB } = await setup(`${ISSUER}/shared`);
+
+    await expect(verifyRelayIdToken(await signA({}), {
+      clientId: CLIENT_ID,
+      issuer: "http://evil.example/api/auth",
+      fetch: fetchA,
+    })).rejects.toThrow(/HTTPS/u);
+
+    const badJwksFetch = vi.fn(async () => Response.json({
+      issuer: `${ISSUER}/http-jwks`,
+      jwks_uri: "http://evil.example/jwks",
+    }));
+    await expect(verifyRelayIdToken(await signA({}), {
+      clientId: CLIENT_ID,
+      issuer: `${ISSUER}/http-jwks`,
+      fetch: badJwksFetch as typeof globalThis.fetch,
+    })).rejects.toThrow(/HTTPS/u);
+
+    const loopback = await setup("http://127.0.0.1:8787/api/auth");
+    const localClaims = await verifyRelayIdToken(await loopback.sign({}), {
+      clientId: CLIENT_ID,
+      issuer: "http://127.0.0.1:8787/api/auth",
+      fetch: loopback.fetch,
+    });
+    expect(localClaims.sub).toBe("user-1");
+
+    // Different custom fetch functions on the exact same issuer do not poison each other's key cache.
+    const claimsA = await verifyRelayIdToken(await signA({}), {
+      clientId: CLIENT_ID,
+      issuer: `${ISSUER}/shared`,
+      fetch: fetchA,
+    });
+    const claimsB = await verifyRelayIdToken(await signB({}), {
+      clientId: CLIENT_ID,
+      issuer: `${ISSUER}/shared`,
+      fetch: fetchB,
+    });
+    expect(claimsA.sub).toBe("user-1");
+    expect(claimsB.sub).toBe("user-1");
+    expect((fetchA.mock.calls[0] as unknown[])[1]).toMatchObject({ signal: expect.any(AbortSignal) });
+  });
 });

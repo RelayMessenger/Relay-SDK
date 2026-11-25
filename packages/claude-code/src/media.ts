@@ -52,6 +52,9 @@ export function mediaInputs(value: unknown): MediaInput[] | string {
  * remembered by reply key, position and file bytes, so a retry of the same
  * reply in this process sends the same attachment on the same idempotency key.
  */
+const MAX_UPLOAD_BYTES = 104_857_600;
+const UPLOAD_CACHE_MAX = 256;
+
 export class MediaUploader {
   readonly #uploaded = new Map<string, string>();
   readonly #relay: Pick<Relay, "attachments">;
@@ -75,10 +78,21 @@ export class MediaUploader {
   async #upload(path: string, given: string | undefined, replyKey: string, index: number): Promise<string> {
     const info = await stat(path);
     if (!info.isFile()) throw new Error(`media path ${path} is not a file`);
+    if (info.size < 1) throw new Error(`media file ${path} is empty`);
+    if (info.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`media file ${path} exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes (${info.size} bytes)`);
+    }
     const data = await readFile(path);
+    if (data.byteLength < 1 || data.byteLength > MAX_UPLOAD_BYTES) {
+      throw new Error(`media file ${path} exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes (${data.byteLength} bytes)`);
+    }
     const cacheKey = `${replyKey}\0${index}\0${createHash("sha256").update(data).digest("hex")}`;
     const known = this.#uploaded.get(cacheKey);
-    if (known) return known;
+    if (known) {
+      this.#uploaded.delete(cacheKey);
+      this.#uploaded.set(cacheKey, known);
+      return known;
+    }
     const filename = basename(path);
     const extension = /\.([^.]+)$/u.exec(filename)?.[1]?.toLowerCase();
     const contentType = given ?? (extension && Object.hasOwn(EXTENSIONS, extension) ? EXTENSIONS[extension] : undefined);
@@ -89,7 +103,13 @@ export class MediaUploader {
       size_bytes: data.byteLength,
     });
     await this.#relay.attachments.upload(allocation, new Uint8Array(data));
+    this.#uploaded.delete(cacheKey);
     this.#uploaded.set(cacheKey, allocation.attachment_id);
+    while (this.#uploaded.size > UPLOAD_CACHE_MAX) {
+      const oldest = this.#uploaded.keys().next();
+      if (oldest.done) break;
+      this.#uploaded.delete(oldest.value);
+    }
     return allocation.attachment_id;
   }
 }

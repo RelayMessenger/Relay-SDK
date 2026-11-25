@@ -398,9 +398,134 @@ describe("relayActions", () => {
 
   it("removes Google Search citation markers from send's words when the agent searches", async () => {
     const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
-    const wired = relayActions(agent(), { ...OPTIONS, webSearch: true }).send as unknown as Wired;
+    const wired = relayActions(agent(), { ...OPTIONS, webSearch: true, compose: async () => {} }).send as unknown as Wired;
     await wired.config.execute(wired.config.inputSchema.parse({ kind: "text", text: "Fares fell [1.2] in May [1]." }), {});
     expect(JSON.parse(calls[0]!.body!).message.parts).toEqual([{ type: "text", value: "Fares fell in May [1]." }]);
+  });
+
+  it("strips block Markdown from input.text across link, place, rich_card, carousel, form, and media", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, compose: async () => {} }).send as unknown as Wired;
+    const blockText = "## Heading\n- **item** one\n- item two";
+    const expectedText = "Heading\n**item** one\nitem two";
+
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "link", url: "https://example.com/a", text: blockText,
+    }), { requestId: "md", toolCallId: "1" });
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "place", latitude: 37.77, longitude: -122.41, name: "SF", text: blockText,
+    }), { requestId: "md", toolCallId: "2" });
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "rich_card", cards: [{ title: "Card" }], text: blockText,
+    }), { requestId: "md", toolCallId: "3" });
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "carousel", cards: [{ title: "A" }, { title: "B" }], text: blockText,
+    }), { requestId: "md", toolCallId: "4" });
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "form",
+      text: blockText,
+      form: { title: "RSVP", pages: [{ id: "p1", title: "Info", fields: [{ id: "name", type: "text", label: "Name" }] }] },
+    }), { requestId: "md", toolCallId: "5" });
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "media", url: "https://example.com/file.pdf", text: blockText,
+    }), { requestId: "md", toolCallId: "6" });
+
+    const textParts = calls
+      .map((call) => (JSON.parse(call.body!).message.parts as Array<{ type: string; value?: string }>))
+      .filter((parts) => parts[0]?.type === "text")
+      .map((parts) => parts[0]!.value);
+    expect(textParts).toEqual(Array(6).fill(expectedText));
+  });
+
+  it("removes Google Search citation markers from cards, forms, selections, and buttons when webSearch is enabled", async () => {
+    const calls = relayServer(() => Response.json({ chat_id: CHAT_ID, message: { id: "sent" } }));
+    const wired = relayActions(agent(), { ...OPTIONS, webSearch: true, compose: async () => {} }).send as unknown as Wired;
+
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "text",
+      text: "Choose a city [1.2]:",
+      title: "Top cities [2.3]",
+      selection: [
+        { value: "tokyo", label: "Tokyo [1.4]" },
+        { value: "zurich", label: "Zurich [2.1, 2.5]" },
+      ],
+    }), { requestId: "ws", toolCallId: "1" });
+
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "rich_card",
+      text: "Best spot [1.1]:",
+      cards: [{
+        title: "Blue Bottle [1.2]",
+        description: "Opens at 7am [1.3, 1.4].",
+        suggestions: [{ label: "Reserve [1.5]", id: "res-1" }],
+      }],
+    }), { requestId: "ws", toolCallId: "2" });
+
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "form",
+      text: "Confirm details [3.1]:",
+      form: {
+        title: "Trip Form [3.2]",
+        splash: { title: "Welcome [3.3]", text: "Takes 1 min [3.4]", button_title: "Start [3.5]" },
+        received_message: { title: "Got it [3.6]", subtitle: "Soon [3.7]" },
+        pages: [{
+          id: "p1",
+          title: "Preferences [3.8]",
+          fields: [{
+            id: "city",
+            type: "select",
+            label: "City [3.9]",
+            placeholder: "Pick one [4.1]",
+            options: [{ value: "nyc", label: "New York [4.2]" }],
+          }],
+        }],
+      },
+    }), { requestId: "ws", toolCallId: "3" });
+
+    await wired.config.execute(wired.config.inputSchema.parse({
+      kind: "text",
+      text: "Next step [5.1]",
+      buttons: [{ label: "Book now [5.2]" }],
+    }), { requestId: "ws", toolCallId: "4" });
+
+    const bodies = calls.map((call) => JSON.parse(call.body!).message.parts);
+    expect(bodies[0]).toEqual([
+      { type: "text", value: "Choose a city:" },
+      { type: "selection", title: "Top cities", options: [{ value: "tokyo", label: "Tokyo" }, { value: "zurich", label: "Zurich" }] },
+    ]);
+    expect(bodies[1]).toEqual([
+      { type: "text", value: "Best spot:" },
+      {
+        type: "rich_card",
+        title: "Blue Bottle",
+        description: "Opens at 7am.",
+        suggestions: [{ type: "reply", label: "Reserve", id: "res-1" }],
+      },
+    ]);
+    expect(bodies[2]).toEqual([
+      { type: "text", value: "Confirm details:" },
+      {
+        type: "form",
+        title: "Trip Form",
+        splash: { title: "Welcome", text: "Takes 1 min", button_title: "Start" },
+        received_message: { title: "Got it", subtitle: "Soon" },
+        pages: [{
+          id: "p1",
+          title: "Preferences",
+          fields: [{
+            id: "city",
+            type: "select",
+            label: "City",
+            placeholder: "Pick one",
+            options: [{ value: "nyc", label: "New York" }],
+          }],
+        }],
+      },
+    ]);
+    expect(bodies[3]).toEqual([
+      { type: "text", value: "Next step" },
+      { type: "buttons", items: [{ label: "Book now" }] },
+    ]);
   });
 
   it("tells the model the person can call the agent from the chat", () => {

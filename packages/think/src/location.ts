@@ -145,8 +145,11 @@ export function withLocationShares(adapter: RelayAdapter): RelayAdapter {
     const message = parse(raw);
     const source = raw.message;
     const parts = (source && Array.isArray(source.parts) ? source.parts : []) as unknown as MessagePartResponse[];
-    const context = [locationShareContext(parts), placeContext(parts)].filter(Boolean).join("\n\n");
-    if (context) message.text = [message.text, context].filter(Boolean).join("\n\n");
+    const additions = [locationShareContext(parts), placeContext(parts)]
+      .filter((line): line is string => typeof line === "string" && line.length > 0 && !message.text.includes(line));
+    if (additions.length > 0) {
+      message.text = [message.text, ...additions].filter(Boolean).join("\n\n");
+    }
     return message;
   };
   return adapter;

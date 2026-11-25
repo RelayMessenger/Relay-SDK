@@ -2,7 +2,7 @@
 // a mock model that records the prompt each turn sends. No paid model call.
 import { Think, type TurnConfig, type TurnContext } from "@cloudflare/think";
 import type Relay from "@relaymessenger/sdk";
-import type { Message } from "@relaymessenger/sdk";
+import { RelayAPIError, type Message } from "@relaymessenger/sdk";
 import { simulateReadableStream, type UIMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
@@ -20,12 +20,14 @@ export interface Env {
   RelayPersonMemory: RelayPersonMemoryNamespace & DurableObjectNamespace<RelayPersonMemory>;
 }
 
-export type MemoryTestAgentRpc = Pick<MemoryTestAgent, "seed" | "turn" | "relayCalls">;
+export type MemoryTestAgentRpc = Pick<MemoryTestAgent, "seed" | "turn" | "relayCalls" | "searchTool">;
 
 /** What a fake Relay holds: each Chat as GET /v1/chats/{chatId} returns it, and its Messages. */
 export interface FakeRelayData {
   chats: Record<string, PersonMemoryChat>;
   messages: Record<string, Message[]>;
+  /** Per-chat HTTP status errors thrown as RelayAPIError (e.g. 403, 404, 503). */
+  errors?: Record<string, number>;
   /** Every call throws, the way a Relay outage does. */
   throws?: boolean;
 }
@@ -34,17 +36,29 @@ export interface FakeRelayData {
 function fakeRelay(data: FakeRelayData, calls: string[]): Pick<Relay, "chats"> {
   return {
     chats: {
-      retrieve: async (chatId: string) => {
-        calls.push(`retrieve ${chatId}`);
+      retrieve: async (chatId: string, options?: { signal?: AbortSignal }) => {
+        calls.push(`retrieve ${chatId}${options?.signal instanceof AbortSignal ? " signal" : ""}`);
         if (data.throws) throw new Error("Relay is down");
+        const status = data.errors?.[chatId];
+        if (status !== undefined) {
+          throw new RelayAPIError(`Relay returned ${status}`, { status });
+        }
         const chat = data.chats[chatId];
-        if (!chat) throw new Error(`404 ${chatId}`);
+        if (!chat) throw new RelayAPIError(`404 ${chatId}`, { status: 404 });
         return chat;
       },
       messages: {
-        list: async (chatId: string, query: { order?: string; limit?: number } = {}) => {
-          calls.push(`list ${chatId} ${query.order} ${query.limit}`);
+        list: async (
+          chatId: string,
+          query: { order?: string; limit?: number } = {},
+          options?: { signal?: AbortSignal },
+        ) => {
+          calls.push(`list ${chatId} ${query.order} ${query.limit}${options?.signal instanceof AbortSignal ? " signal" : ""}`);
           if (data.throws) throw new Error("Relay is down");
+          const status = data.errors?.[chatId];
+          if (status !== undefined) {
+            throw new RelayAPIError(`Relay returned ${status}`, { status });
+          }
           const newest = [...(data.messages[chatId] ?? [])]
             .sort((a, b) => (b.sent_at ?? b.created_at).localeCompare(a.sent_at ?? a.created_at));
           return { data: newest.slice(0, query.limit ?? 50) };
@@ -124,6 +138,24 @@ export class MemoryTestAgent extends Think {
     this.#relay = relay ? fakeRelay(relay, this.#relayCalls) : undefined;
     await this.saveMessages([message]);
     return this.#prompts.join("\n");
+  }
+
+  /** Run beforeTurn and invoke the search_person_memory tool directly. */
+  async searchTool(
+    chat: PersonMemoryChat,
+    query: string,
+    relay?: FakeRelayData,
+  ): Promise<{ lines: string[]; promptHasMemory: boolean }> {
+    this.#chat = chat;
+    this.#relayCalls = [];
+    this.#relay = relay ? fakeRelay(relay, this.#relayCalls) : undefined;
+    const result = await this.memory.turn([{ role: "user", content: "check memory" }]);
+    const search = result?.tools.search_person_memory as
+      | { execute?: (input: { query: string }, options: unknown) => Promise<{ lines: string[] }> }
+      | undefined;
+    const found = search?.execute ? await search.execute({ query }, {}) : { lines: [] };
+    const promptHasMemory = Boolean(result?.messages.some((m) => typeof m.content === "string" && m.content.includes("<person_memory>")));
+    return { lines: found.lines, promptHasMemory };
   }
 
   /** The Relay calls the last turn made. */
