@@ -488,6 +488,9 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
         `${name} installed ${overridden}@${readJson(path).version}, not the release tarball`);
       say(`  ${name}: ${overridden} -> release tarball ${candidates.get(overridden).version}`);
     }
+    if (manifest.scripts?.types) {
+      run(npm, ["run", "types"], copy);
+    }
     // --no-install: tsc must come from the folder's own devDependencies.
     run(npx, ["--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"], copy);
     say(`  ${name}: standalone ok`);

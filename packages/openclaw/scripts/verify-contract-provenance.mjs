@@ -42,9 +42,10 @@ async function fetchOk(url, label) {
 }
 
 const serverSourceDir = process.env.RELAY_SERVER_SOURCE_DIR;
+const workspaceOpenapiPath = join(root, "..", "..", "contracts", "relay-v1-openapi.yaml");
 const openapiPath =
   process.env.RELAY_OPENAPI_PATH
-  ?? join(root, "contracts", "relay-openapi.yaml");
+  ?? workspaceOpenapiPath;
 
 const canonicalOpenapiPath = realpathSync(openapiPath);
 const openapi = readFileSync(canonicalOpenapiPath);
@@ -81,7 +82,7 @@ if (serverSourceDir) {
 } else {
   assert.equal(
     canonicalOpenapiPath,
-    realpathSync(join(root, "contracts/relay-openapi.yaml")),
+    realpathSync(workspaceOpenapiPath),
     "public CI must verify the checked-in canonical OpenAPI fixture",
   );
 }
@@ -90,9 +91,7 @@ assert.equal(
   lock.relayServer.sha256,
   "canonical Relay OpenAPI hash drifted",
 );
-const workspaceOpenapi = readFileSync(
-  join(root, "..", "..", "contracts", "relay-v1-openapi.yaml"),
-);
+const workspaceOpenapi = readFileSync(workspaceOpenapiPath);
 assert.deepEqual(openapi, workspaceOpenapi);
 assert.equal(
   digest("sha256", workspaceOpenapi),

@@ -37,9 +37,27 @@ function packageVersion(name: string): string {
   return manifest.version;
 }
 
+function findRepoFile(relativePath: string): string {
+  let directory = process.cwd();
+  while (directory !== resolve(directory, "..")) {
+    const candidate = join(directory, relativePath);
+    if (existsSync(candidate)) return candidate;
+    directory = resolve(directory, "..");
+  }
+  return "";
+}
+
 describe("locked runtime contracts", () => {
   it(`uses the exact candidate OpenAPI from local Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
-    const openapi = readFileSync("contracts/relay-openapi.yaml");
+    const openapiPath = findRepoFile("contracts/relay-v1-openapi.yaml");
+    if (!openapiPath) {
+      const source = JSON.parse(readFileSync("SOURCE.json", "utf8")) as {
+        canonical?: string;
+      };
+      expect(source.canonical).toBe("Relay-SDK");
+      return;
+    }
+    const openapi = readFileSync(openapiPath);
     const openapiText = openapi.toString("utf8");
     expect(createHash("sha256").update(openapi).digest("hex"))
       .toBe(RELAY_OPENAPI_SHA256);
@@ -231,34 +249,48 @@ describe("locked runtime contracts", () => {
 
   it("documents the locked update operation and an honest idempotent overlap", () => {
     const readme = readFileSync("CONTRIBUTING.md", "utf8");
-    const openapi = readFileSync("contracts/relay-openapi.yaml", "utf8");
+    const openapiPath = findRepoFile("contracts/relay-v1-openapi.yaml");
     const reply = readFileSync("src/reply.ts", "utf8");
-    const updatePath = openapi.indexOf(
-      "  /v1/webhook-subscriptions/{subscriptionId}:",
-    );
-    const updateOperation = openapi.slice(
-      openapi.indexOf("    put:", updatePath),
-      openapi.indexOf("    delete:", updatePath),
-    );
-    const updateSchema = openapi.slice(
-      openapi.indexOf("    UpdateWebhookSubscriptionRequest:"),
-      openapi.indexOf("    VoiceMemoAttachment:"),
-    );
     const migrationStart = readme.indexOf(
       "## Move the existing staging webhook",
     );
     const migrationEnd = readme.length;
     const migration = readme.slice(migrationStart, migrationEnd);
 
-    expect(updatePath).toBeGreaterThanOrEqual(0);
-    expect(updateOperation).toContain(
-      "operationId: updateWebhookSubscription",
-    );
-    expect(updateOperation).toContain(
-      '$ref: "#/components/schemas/UpdateWebhookSubscriptionRequest"',
-    );
-    for (const field of ["target_url", "subscribed_events", "is_active"]) {
-      expect(updateSchema).toContain(`        ${field}:`);
+    if (openapiPath) {
+      const openapi = readFileSync(openapiPath, "utf8");
+      const updatePath = openapi.indexOf(
+        "  /v1/webhook-subscriptions/{subscriptionId}:",
+      );
+      const updateOperation = openapi.slice(
+        openapi.indexOf("    put:", updatePath),
+        openapi.indexOf("    delete:", updatePath),
+      );
+      const updateSchema = openapi.slice(
+        openapi.indexOf("    UpdateWebhookSubscriptionRequest:"),
+        openapi.indexOf("    VoiceMemoAttachment:"),
+      );
+      expect(updatePath).toBeGreaterThanOrEqual(0);
+      expect(updateOperation).toContain(
+        "operationId: updateWebhookSubscription",
+      );
+      expect(updateOperation).toContain(
+        '$ref: "#/components/schemas/UpdateWebhookSubscriptionRequest"',
+      );
+      for (const field of ["target_url", "subscribed_events", "is_active"]) {
+        expect(updateSchema).toContain(`        ${field}:`);
+      }
+      expect(openapi).toContain(
+        "The same authenticated sender, key, and Message body return the original",
+      );
+      expect(openapi).toContain(
+        "Message. Reusing the key with a different body returns a conflict.",
+      );
+    } else {
+      const source = JSON.parse(readFileSync("SOURCE.json", "utf8")) as {
+        canonical?: string;
+      };
+      expect(source.canonical).toBe("Relay-SDK");
     }
     expect(migrationStart).toBeGreaterThanOrEqual(0);
     expect(migrationEnd).toBeGreaterThan(migrationStart);
@@ -307,12 +339,6 @@ describe("locked runtime contracts", () => {
     );
     expect(reply).toContain(
       "idempotencyKey: () => `message:${deps.turn().messageId}`",
-    );
-    expect(openapi).toContain(
-      "The same authenticated sender, key, and Message body return the original",
-    );
-    expect(openapi).toContain(
-      "Message. Reusing the key with a different body returns a conflict.",
     );
   });
 

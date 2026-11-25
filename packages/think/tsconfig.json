@@ -11,6 +11,6 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts", "vitest.workerd.config.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts", "vitest.workerd.config.ts", "worker-configuration.d.ts"],
   "exclude": ["dist", "node_modules"]
 }

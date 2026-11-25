@@ -4,5 +4,6 @@ coverage/
 .artifacts/
 .tmp/
 .wrangler/
+worker-configuration.d.ts
 *.tgz
 .DS_Store

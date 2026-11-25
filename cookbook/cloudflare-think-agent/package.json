@@ -35,12 +35,12 @@
     "dry-run:production": "wrangler deploy --env production --dry-run",
     "types": "wrangler types",
     "types:check": "wrangler types --check",
-    "check": "tsc --noEmit",
+    "check": "npm run types && tsc --noEmit",
     "test": "npm run test:unit && npm run test:workerd",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
     "test:installed": "node scripts/test-installed-template.mjs",
-    "test:all": "npm run types:check && npm run check && npm test && npm run test:installed && npm run dry-run"
+    "test:all": "npm run check && npm run types:check && npm test && npm run test:installed && npm run dry-run"
   },
   "dependencies": {
     "@cloudflare/think": "0.20.1",

@@ -22,7 +22,7 @@
   "type": "module",
   "sideEffects": false,
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22.3"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,7 +47,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit",
+    "check": "npm run wrangler:types && tsc --noEmit",
     "test": "npm run test:unit && npm run test:workerd",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:workerd": "vitest run --config vitest.workerd.config.ts",
