@@ -28,7 +28,9 @@ export function withFormReplies(adapter: RelayAdapter): RelayAdapter {
     const source = raw.message as { parts?: unknown; reply_to?: unknown } | undefined;
     const parts = source && Array.isArray(source.parts) ? source.parts as MessagePartResponse[] : [];
     const context = formReplyContext(parts, (source?.reply_to ?? null) as ReplyTo | null);
-    if (context) message.text = [message.text, context].filter(Boolean).join("\n\n");
+    if (context && !message.text.includes(context)) {
+      message.text = [message.text, context].filter(Boolean).join("\n\n");
+    }
     return message;
   };
   return adapter;

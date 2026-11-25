@@ -234,4 +234,17 @@ describe("signWebhookHeaders", () => {
     expect(() => verifyWebhookSignature(secret, `${body} `, headers)).toThrow(WebhookVerificationError);
     expect(() => verifyWebhookSignature(`whsec_${Buffer.from("other-secret").toString("base64")}`, body, headers)).toThrow(WebhookVerificationError);
   });
+
+  it("looks up plain-object webhook headers case-insensitively", () => {
+    const body = JSON.stringify({ event_id: "evt_mixed", hello: "world" });
+    const signed = signWebhookHeaders(secret, { id: "evt_mixed", body });
+    const mixedCase = {
+      "Webhook-Id": signed["webhook-id"],
+      "WEBHOOK-TIMESTAMP": signed["webhook-timestamp"],
+      "Webhook-Signature": signed["webhook-signature"],
+    };
+    expect(() => verifyWebhookSignature(secret, body, mixedCase)).not.toThrow();
+    const client = new Relay({ apiKey: "token", webhookSecret: secret });
+    expect(client.webhooks.unwrap(body, { headers: mixedCase })).toEqual({ event_id: "evt_mixed", hello: "world" });
+  });
 });

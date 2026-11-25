@@ -33,7 +33,7 @@
     "cookbook:link-check": "node scripts/validate-cookbook-standalone.mjs --link-check",
     "cookbook:standalone": "node scripts/validate-cookbook-standalone.mjs",
     "validate:cookbook": "npm run cookbook:link-check && npm run test:all --workspace @relaymessenger/cookbook-cloudflare-think-agent && npm run test:all --workspace @relaymessenger/cookbook-webhook-receiver && npm run test:all --workspace @relaymessenger/cookbook-websocket-agent && npm run check --workspace @relaymessenger/cookbook-send-a-message && npm run build --workspace @relaymessenger/cookbook-send-a-message && npm test --workspace @relaymessenger/cookbook-send-a-message && npm run check --workspace @relaymessenger/cookbook-send-an-image && npm run build --workspace @relaymessenger/cookbook-send-an-image && npm test --workspace @relaymessenger/cookbook-send-an-image && npm run check --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run build --workspace @relaymessenger/cookbook-send-a-voice-memo && npm test --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run test:all --workspace @relaymessenger/cookbook-trip-planner-agent && npm run check --workspace @relaymessenger/cookbook-grok-imagine-agent && npm run build --workspace @relaymessenger/cookbook-grok-imagine-agent && npm test --workspace @relaymessenger/cookbook-grok-imagine-agent && npm run check --workspace @relaymessenger/cookbook-clone-agent-rag && npm test --workspace @relaymessenger/cookbook-clone-agent-rag && npm run check --workspace @relaymessenger/cookbook-group-chat-agents && npm test --workspace @relaymessenger/cookbook-group-chat-agents",
-    "validate": "npm run workflows:check && npm run validate:sdk && npm run validate:chat-sdk && npm run build --workspace @relaymessenger/pi && npm run validate:cli && npm run validate:openclaw && npm run validate:claude-code && npm run validate:cookbook"
+    "validate": "npm run workflows:check && npm run validate:sdk && npm run validate:livekit && npm run validate:elevenlabs && npm run validate:chat-sdk && npm run validate:think && npm run validate:pi && npm run validate:cli && npm run validate:openclaw && npm run validate:claude-code && npm run validate:cookbook"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
@@ -64,7 +64,7 @@
     "workerd@1.20260918.1": true
   },
   "overrides": {
-    "undici@7.29.0": "7.29.1",
+    "undici@7.29.1": "7.30.2",
     "@modelcontextprotocol/sdk": "1.32.0",
     "@modelcontextprotocol/client": "$@modelcontextprotocol/client",
     "@modelcontextprotocol/server": "2.3.0"

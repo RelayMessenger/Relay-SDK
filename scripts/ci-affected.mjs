@@ -14,8 +14,11 @@ import { pathToFileURL } from "node:url";
 export const legs = {
   workflows: { dirs: [], build: [], run: "workflows:check" },
   sdk: { dirs: ["packages/sdk", "test"], build: [], run: "validate:sdk" },
+  livekit: { dirs: ["packages/livekit"], build: ["@relaymessenger/sdk"], run: "validate:livekit" },
+  elevenlabs: { dirs: ["packages/elevenlabs"], build: ["@relaymessenger/sdk"], run: "validate:elevenlabs" },
   "chat-sdk": { dirs: ["packages/chat-sdk-adapter"], build: ["@relaymessenger/sdk"], run: "validate:chat-sdk" },
-  cli: { dirs: ["packages/cli", "packages/pi"], build: ["@relaymessenger/sdk", "@relaymessenger/pi"], run: "validate:cli" },
+  pi: { dirs: ["packages/pi"], build: ["@relaymessenger/sdk"], run: "validate:pi" },
+  cli: { dirs: ["packages/cli"], build: ["@relaymessenger/sdk", "@relaymessenger/pi"], run: "validate:cli" },
   openclaw: { dirs: ["packages/openclaw"], build: ["@relaymessenger/sdk"], run: "validate:openclaw" },
   "claude-code": { dirs: ["packages/claude-code"], build: ["@relaymessenger/sdk"], run: "validate:claude-code" },
   think: { dirs: ["packages/think"], build: ["@relaymessenger/sdk", "@relaymessenger/chat-sdk-adapter"], run: "validate:think" },
@@ -24,8 +27,6 @@ export const legs = {
 
 // Files no check reads.
 const notes = new Set(["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md"]);
-// Workspaces whose own suites run in the release (release-run.mjs), not in CI.
-const releaseOnly = new Set(["packages/livekit", "packages/elevenlabs"]);
 
 function workspaces() {
   const found = new Map();
@@ -53,7 +54,7 @@ export function select({ event, baseRef, files }) {
     const dir = file.startsWith("test/") ? "packages/sdk" : `${parent}/${name}`;
     if (parent === "python") continue; // release-python.yml tests python/** on pull requests
     if (parent === "cookbook" && !byDir.has(dir) && existsSync(dir)) continue; // Python cookbooks
-    if (byDir.has(dir) && (legOf(dir) || releaseOnly.has(dir))) touched.add(dir);
+    if (byDir.has(dir) && legOf(dir)) touched.add(dir);
     else return all;
   }
   for (let size = -1; size !== touched.size;) {

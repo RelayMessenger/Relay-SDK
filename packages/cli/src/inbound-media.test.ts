@@ -67,4 +67,45 @@ describe("inbound media", () => {
     const [overridden] = await downloadInboundMedia([photo], { ...auth, fetch, context: { env: { ...context.env, RELAY_MEDIA_DIR: join(mediaDir, "override") } } });
     expect((overridden?.ok ? overridden.path : undefined)).toBe(join(mediaDir, "override", "chat-1", "photo-__photo.png"));
   });
+
+  it("bounds downloaded bytes, cancels oversized streams, and logs warnings instead of silently swallowing errors", async () => {
+    const options = await setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // Oversized streaming response (even when part.size_bytes claims 3 bytes).
+      let canceled = false;
+      let chunksPulled = 0;
+      const streamingFetch: typeof globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksPulled += 1;
+          controller.enqueue(new Uint8Array(64));
+        },
+        cancel() {
+          canceled = true;
+        },
+      }));
+      const streamResult = await downloadInboundMedia([photo], { ...options, fetch: streamingFetch, maxBytes: 100 });
+      expect(streamResult).toEqual([{ ok: false, filename: "../photo.png", error: "Media could not be downloaded." }]);
+      expect(canceled).toBe(true);
+      expect(chunksPulled).toBeLessThanOrEqual(3);
+
+      // Oversized declared size_bytes fails before fetching.
+      const fetchNever = vi.fn<typeof globalThis.fetch>(async () => new Response("ok"));
+      const declaredResult = await downloadInboundMedia([{ ...photo, id: "big", size_bytes: 500 }], {
+        ...options,
+        fetch: fetchNever,
+        maxBytes: 100,
+      });
+      expect(declaredResult).toEqual([{ ok: false, filename: "../photo.png", error: "Media could not be downloaded." }]);
+      expect(fetchNever).not.toHaveBeenCalled();
+
+      // Warnings are logged without leaking the bearer token.
+      expect(warn).toHaveBeenCalled();
+      const warningText = warn.mock.calls.flat().join("\n");
+      expect(warningText).toContain("exceeds maximum size");
+      expect(warningText).not.toContain(options.token);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

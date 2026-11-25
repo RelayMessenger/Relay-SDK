@@ -25,11 +25,13 @@ CLIENT_ID = "019f8e21-6c4a-7b1e-9d52-3f0a8c7e41b9"
 class _Handler(BaseHTTPRequestHandler):
     routes: Dict[str, Any] = {}
     seen: List[Tuple[str, str, Any]] = []
+    user_agents: Dict[str, str] = {}
 
     def _answer(self) -> None:
         length = int(self.headers.get("content-length") or 0)
         body = json.loads(self.rfile.read(length)) if length else None
         type(self).seen.append((self.command, self.path, body))
+        type(self).user_agents[self.path] = self.headers.get("User-Agent") or ""
         payload = type(self).routes.get(self.path, {"client": {"client_id": CLIENT_ID, "redirect_uris": [], "scopes": ["openid", "profile"], "created_at": "", "updated_at": ""}})
         data = json.dumps(payload).encode()
         self.send_response(200)
@@ -48,6 +50,7 @@ class _Handler(BaseHTTPRequestHandler):
 def server() -> Iterator[str]:
     _Handler.routes = {}
     _Handler.seen = []
+    _Handler.user_agents = {}
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -107,3 +110,13 @@ def test_verify_relay_id_token(server: str) -> None:
         verify_relay_id_token(sign(iss="https://evil.example"), client_id=CLIENT_ID, issuer=issuer)
     with pytest.raises(ValueError, match="nonce"):
         verify_relay_id_token(sign(nonce="a"), client_id=CLIENT_ID, issuer=issuer, nonce="b")
+
+    # Both OIDC discovery and JWKS requests send the Relay SDK User-Agent (not Python-urllib).
+    from relaymessenger.client import USER_AGENT
+
+    assert _Handler.user_agents["/api/auth/.well-known/openid-configuration"] == USER_AGENT
+    assert _Handler.user_agents["/api/auth/jwks"] == USER_AGENT
+
+    # Non-HTTPS non-loopback issuers are rejected.
+    with pytest.raises(ValueError, match="HTTPS"):
+        verify_relay_id_token(sign(), client_id=CLIENT_ID, issuer="http://evil.example/api/auth")

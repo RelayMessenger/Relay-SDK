@@ -142,6 +142,57 @@ async function boundedBytes(
   return bytes;
 }
 
+const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 20_000;
+
+interface BoundedDownloadOptions {
+  readonly maxBytes: number;
+  readonly signal: AbortSignal;
+  readonly timeoutMs: number;
+}
+
+type BoundedFetcher = (
+  options?: BoundedDownloadOptions,
+) => Promise<ArrayBuffer | ArrayBufferView>;
+
+function toUint8Array(value: ArrayBuffer | ArrayBufferView): Uint8Array {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+}
+
+function isOversizeDownloadError(error: unknown): boolean {
+  return error instanceof Error && error.name === "RelayAttachmentTooLargeError";
+}
+
+function resolveAttachmentFetcher(attachment: MessengerAttachment): BoundedFetcher | undefined {
+  // @cloudflare/think's toMessengerAttachment wraps Chat SDK's fetchData in a
+  // zero-argument closure, which would drop maxBytes/signal. When the original
+  // Chat SDK Attachment is attached on `raw`, invoke its fetchData directly so
+  // RelayClient.downloadAttachment enforces streaming byte bounds and abort.
+  const raw = (attachment as { raw?: { fetchData?: unknown } }).raw;
+  if (typeof raw?.fetchData === "function") {
+    return raw.fetchData as BoundedFetcher;
+  }
+  if (typeof attachment.fetch === "function") {
+    return attachment.fetch as unknown as BoundedFetcher;
+  }
+  return undefined;
+}
+
+async function withSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  aborted.catch(() => {});
+  try {
+    return await Promise.race([promise, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /**
  * Relay's attachment `url` is a sealed, unauthenticated download capability
  * that expires. A Chat SDK adapter that supplies bytes directly is preferred;
@@ -160,21 +211,37 @@ async function download(
   ) {
     return { oversize: true };
   }
+  const downloadSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS)])
+    : AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS);
+  if (downloadSignal.aborted) return { oversize: false };
   try {
-    if (attachment.data) return { bytes: new Uint8Array(attachment.data) };
-    if (attachment.fetch) {
-      return { bytes: new Uint8Array(await attachment.fetch()) };
+    if (attachment.data) {
+      const bytes = toUint8Array(attachment.data);
+      return bytes.byteLength > limit ? { oversize: true } : { bytes };
+    }
+    const fetcher = resolveAttachmentFetcher(attachment);
+    if (fetcher) {
+      const fetched = await withSignal(
+        fetcher({
+          maxBytes: limit,
+          signal: downloadSignal,
+          timeoutMs: ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+        }),
+        downloadSignal,
+      );
+      const bytes = toUint8Array(fetched);
+      return bytes.byteLength > limit ? { oversize: true } : { bytes };
     }
     if (!attachment.url) return { oversize: false };
     const response = await fetch(attachment.url, {
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-        : AbortSignal.timeout(20_000),
+      signal: downloadSignal,
     });
     if (!response.ok) return { oversize: false };
     const bytes = await boundedBytes(response, limit);
     return bytes ? { bytes } : { oversize: true };
-  } catch {
+  } catch (error) {
+    if (isOversizeDownloadError(error)) return { oversize: true };
     return { oversize: false };
   }
 }

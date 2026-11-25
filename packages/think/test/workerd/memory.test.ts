@@ -203,7 +203,118 @@ describe("a DM reads the shared groups from Relay", () => {
     expect(prompt).not.toContain("Dan before Cara joined");
     expect(prompt).not.toContain("Old Crew");
     expect(prompt).not.toContain("Crew after Cara left");
-    expect(await dm.relayCalls()).toContain(`list ${TRIP.id} desc 30`);
+    expect(await dm.relayCalls()).toContain(`list ${TRIP.id} desc 30 signal`);
+    expect(await dm.relayCalls()).toContain(`retrieve ${TRIP.id} signal`);
+  });
+
+  it("drops and purges chats returning 403 or 404, and filters search_person_memory hits", async () => {
+    const GINA = { id: "user-gina", kind: "user" as const, display_name: "Gina" };
+    const HANK = { id: "user-hank", kind: "user" as const, display_name: "Hank" };
+    const SECRET_403: PersonMemoryChat = {
+      id: "chat-secret-403",
+      display_name: "Secret 403",
+      is_group: true,
+      handles: [handle(GINA), handle(HANK), handle(STEVE)],
+    };
+    const DELETED_404: PersonMemoryChat = {
+      id: "chat-deleted-404",
+      display_name: "Deleted 404",
+      is_group: true,
+      handles: [handle(GINA), handle(HANK), handle(STEVE)],
+    };
+    const ACTIVE: PersonMemoryChat = {
+      id: "chat-active-gina",
+      display_name: "Active Group",
+      is_group: true,
+      handles: [handle(GINA), handle(HANK), handle(STEVE)],
+    };
+    const GINA_DM: PersonMemoryChat = { id: "chat-gina-dm", is_group: false, handles: [handle(GINA), handle(STEVE)] };
+
+    await (await agent(SECRET_403)).seed(SECRET_403, [said("s1", HANK, "Classified orchid blueprint.")]);
+    await (await agent(DELETED_404)).seed(DELETED_404, [said("d1", HANK, "Deleted orchid notes.")]);
+    await (await agent(ACTIVE)).seed(ACTIVE, [said("a1", GINA, "Public orchid garden.")]);
+
+    const dm = await agent(GINA_DM);
+    const relay: FakeRelayData = {
+      chats: { [ACTIVE.id]: ACTIVE },
+      messages: {
+        [ACTIVE.id]: [onRelay(ACTIVE.id, "a1", GINA, "2026-10-02T10:00:00.000Z", text("Public orchid garden."))],
+      },
+      errors: {
+        [SECRET_403.id]: 403,
+        [DELETED_404.id]: 404,
+      },
+    };
+
+    const prompt = await dm.turn(GINA_DM, said("gd1", GINA, "What about orchid?"), relay);
+    expect(prompt).toContain("Public orchid garden.");
+    expect(prompt).not.toContain("Classified orchid blueprint.");
+    expect(prompt).not.toContain("Deleted orchid notes.");
+
+    // Both revoked chats were purged from stored person memory and FTS search index.
+    const ginaMem = (await getAgentByName(testEnv.RelayPersonMemory as never, personMemoryName(GINA.id))) as unknown as
+      Pick<RelayPersonMemory, "recall" | "search">;
+    const afterRecall = await ginaMem.recall(GINA_DM.id, "orchid");
+    expect(afterRecall.chats.map((c) => c.chatId)).toEqual([ACTIVE.id]);
+    expect(await ginaMem.search("orchid", GINA_DM.id)).toEqual([
+      "[Active Group, 2026-10-08] Gina: Public orchid garden.",
+    ]);
+
+    // search_person_memory also verifies hits from chats outside the top 5 and purges revoked ones.
+    const OLD_REVOKED: PersonMemoryChat = {
+      id: "chat-old-revoked",
+      display_name: "Old Revoked",
+      is_group: true,
+      handles: [handle(GINA), handle(HANK), handle(STEVE)],
+    };
+    const oldMessage = said("old-1", HANK, "Vintage saffron recipe.");
+    (oldMessage.metadata as { turnMetadata: { message: { sent_at: string } } }).turnMetadata.message.sent_at = "2025-01-01T00:00:00.000Z";
+    await (await agent(OLD_REVOKED)).seed(OLD_REVOKED, [oldMessage]);
+    // Seed 5 newer active chats so OLD_REVOKED is pushed outside PERSON_MEMORY_CHATS (5).
+    const newerChats: Record<string, PersonMemoryChat> = { [ACTIVE.id]: ACTIVE };
+    const newerMessages: Record<string, Message[]> = {
+      [ACTIVE.id]: [onRelay(ACTIVE.id, "a1", GINA, "2026-10-02T10:00:00.000Z", text("Public orchid garden."))],
+    };
+    for (let i = 1; i <= 5; i += 1) {
+      const chat: PersonMemoryChat = {
+        id: `chat-newer-${i}`,
+        display_name: `Newer ${i}`,
+        is_group: true,
+        handles: [handle(GINA), handle(STEVE)],
+      };
+      const msg = said(`n-${i}`, GINA, `Recent chat ${i}.`);
+      (msg.metadata as { turnMetadata: { message: { sent_at: string } } }).turnMetadata.message.sent_at = `2026-11-0${i}T00:00:00.000Z`;
+      await (await agent(chat)).seed(chat, [msg]);
+      newerChats[chat.id] = chat;
+      newerMessages[chat.id] = [onRelay(chat.id, `n-${i}`, GINA, `2026-11-0${i}T00:00:00.000Z`, text(`Recent chat ${i}.`))];
+    }
+
+    const searchResult = await dm.searchTool(GINA_DM, "saffron", {
+      chats: newerChats,
+      messages: newerMessages,
+      errors: { [OLD_REVOKED.id]: 403 },
+    });
+    expect(searchResult.lines).toEqual([]);
+    expect(await ginaMem.search("saffron", GINA_DM.id)).toEqual([]);
+  });
+
+  it("drops and forgets a chat on a cross-package RelayAPIError-shaped 403", async () => {
+    const HANK = { id: "user-hank", handle: "hank", kind: "user" as const, display_name: "Hank" };
+    const REVOKED: PersonMemoryChat = {
+      id: "chat-foreign-403",
+      display_name: "Secret Room",
+      is_group: true,
+      handles: [handle(HANK), handle(STEVE)],
+    };
+    const HANK_DM: PersonMemoryChat = { id: "chat-hank-dm", is_group: false, handles: [handle(HANK), handle(STEVE)] };
+    await (await agent(REVOKED)).seed(REVOKED, [said("f1", HANK, "Top secret launch date.")]);
+    const prompt = await (await agent(HANK_DM)).turn(
+      HANK_DM,
+      said("hd1", HANK, "What was the launch date?"),
+      { chats: {}, messages: {}, foreignErrors: { [REVOKED.id]: 403 } },
+    );
+    expect(prompt).not.toContain("Secret Room");
+    expect(prompt).not.toContain("Top secret launch date.");
   });
 
   it("falls back to the stored lines when Relay fails", async () => {

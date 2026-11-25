@@ -16,8 +16,19 @@ export type WebhookHeaders =
 const requiredHeaders = (
   headers: WebhookHeaders,
 ): Record<string, string> => {
-  const get = (name: string): string | null | undefined =>
-    headers instanceof Headers ? headers.get(name) : headers[name];
+  let get: (name: string) => string | null | undefined;
+  if (headers instanceof Headers) {
+    get = (name) => headers.get(name);
+  } else {
+    const normalized = new Map<string, string | null | undefined>();
+    for (const [key, value] of Object.entries(headers)) {
+      const lower = key.toLowerCase();
+      if (value != null && (!normalized.has(lower) || normalized.get(lower) == null)) {
+        normalized.set(lower, value);
+      }
+    }
+    get = (name) => normalized.get(name);
+  }
   const id = get("webhook-id");
   const timestamp = get("webhook-timestamp");
   const signature = get("webhook-signature");

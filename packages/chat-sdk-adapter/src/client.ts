@@ -32,11 +32,51 @@ import type {
 
 export const RELAY_DEFAULT_BASE_URL = "https://api.relayapp.im";
 
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_AFTER_SECONDS = 60;
+const DEFAULT_MAX_DOWNLOAD_BYTES = 104_857_600;
+
 export interface RelayClientOptions {
   /** Relay Agent Token or a resolver evaluated for every Relay API call. */
   token?: RelayCredential;
   baseUrl?: string;
   fetch?: typeof fetch;
+  /** Request timeout in milliseconds. Defaults to 15000. */
+  timeoutMs?: number;
+  /** Maximum retry attempts for transient failures. Defaults to 2. */
+  maxRetries?: number;
+  /** Base delay in milliseconds for exponential backoff. Defaults to 250. */
+  retryBaseDelayMs?: number;
+  /** Maximum byte size for `downloadAttachment`. Defaults to 104857600 (100 MiB). */
+  maxDownloadBytes?: number;
+}
+
+export interface RelayDownloadOptions {
+  attachmentId?: string;
+  url: string;
+  maxBytes?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export class RelayAttachmentTooLargeError extends ValidationError {
+  readonly maxBytes: number;
+  readonly actualBytes: number | undefined;
+
+  constructor(label: string, maxBytes: number, actualBytes?: number) {
+    super(
+      "relay",
+      actualBytes !== undefined
+        ? `Relay attachment ${label} exceeds maximum download size of ${maxBytes} bytes (${actualBytes} bytes)`
+        : `Relay attachment ${label} exceeds maximum download size of ${maxBytes} bytes`,
+    );
+    this.name = "RelayAttachmentTooLargeError";
+    this.maxBytes = maxBytes;
+    this.actualBytes = actualBytes;
+  }
 }
 
 export interface RelayUploadOptions {
@@ -108,17 +148,137 @@ function errorDetails(
  * of seconds and is "Only present on 429 rate limit errors"
  * (`contracts/relay-openapi.yaml`, `ErrorDetail.retry_after`).
  */
-function retryAfterSeconds(body: unknown): number | undefined {
-  if (typeof body !== "object" || body === null) return undefined;
-  const record = body as Record<string, unknown>;
-  const error =
-    typeof record.error === "object" && record.error !== null
-      ? (record.error as Record<string, unknown>)
-      : record;
-  const value = error.retry_after;
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
+function retryAfterSeconds(
+  body: unknown,
+  headerValue?: string | null,
+): number | undefined {
+  if (typeof body === "object" && body !== null) {
+    const record = body as Record<string, unknown>;
+    const error =
+      typeof record.error === "object" && record.error !== null
+        ? (record.error as Record<string, unknown>)
+        : record;
+    const value = error.retry_after;
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value;
+    }
+  }
+  if (headerValue !== undefined && headerValue !== null) {
+    const trimmed = headerValue.trim();
+    if (trimmed !== "") {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+      if (Number.isNaN(numeric)) {
+        const parsedDate = Date.parse(trimmed);
+        if (Number.isFinite(parsedDate)) {
+          return Math.max(0, (parsedDate - Date.now()) / 1_000);
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function retryWaitMs(
+  retryAfter: number | undefined,
+  baseDelayMs: number,
+  attempt: number,
+): number {
+  return retryAfter !== undefined
+    ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1_000
+    : baseDelayMs * 2 ** attempt;
+}
+
+async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return;
+  if (signal?.aborted) throw signal.reason;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function readBoundedArrayBuffer(
+  response: Response,
+  maxBytes: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
+  const lengthHeader = response.headers.get("content-length");
+  if (lengthHeader !== null && lengthHeader.trim() !== "") {
+    const declared = Number(lengthHeader);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw new RelayAttachmentTooLargeError(label, maxBytes, declared);
+    }
+  }
+  if (!response.body) {
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > maxBytes) {
+      throw new RelayAttachmentTooLargeError(label, maxBytes, buffer.byteLength);
+    }
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+      })
     : undefined;
+  // Prevent unhandled rejection if aborted fires after normal completion.
+  aborted?.catch(() => {});
+  try {
+    while (true) {
+      if (signal?.aborted) throw signal.reason;
+      const readPromise = reader.read();
+      const { done, value } = aborted
+        ? await Promise.race([readPromise, aborted])
+        : await readPromise;
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new RelayAttachmentTooLargeError(label, maxBytes);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
 }
 
 const RESOURCE_BY_COLLECTION: Record<string, string> = {
@@ -159,6 +319,7 @@ export function relayHttpError(options: {
   body: unknown;
   path: string;
   status: number;
+  retryAfter?: number;
 }): AdapterError {
   const { body, path, status } = options;
   const details = errorDetails(body, status);
@@ -179,7 +340,10 @@ export function relayHttpError(options: {
       );
     }
     case 429:
-      return new AdapterRateLimitError("relay", retryAfterSeconds(body));
+      return new AdapterRateLimitError(
+        "relay",
+        options.retryAfter ?? retryAfterSeconds(body),
+      );
     default:
       if (status >= 500) {
         return new NetworkError("relay", details.message);
@@ -200,6 +364,11 @@ export class RelayClient {
   readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly token: RelayCredential | undefined;
+  private readonly timeoutMs: number;
+  private readonly downloadTimeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseDelayMs: number;
+  private readonly maxDownloadBytes: number;
 
   constructor(options: RelayClientOptions = {}) {
     validateStaticCredential(options.token, "Relay Agent Token");
@@ -223,37 +392,84 @@ export class RelayClient {
     }
     // workerd's host fetch requires its global receiver.
     this.fetchImpl = selected.bind(globalThis);
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.downloadTimeoutMs = options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryBaseDelayMs =
+      options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.maxDownloadBytes =
+      options.maxDownloadBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
   }
 
   private async request<T>(
     path: string,
     init: RequestInit,
+    options: { retryable?: boolean; maxRetries?: number } = {},
   ): Promise<T> {
-    const token = await resolveRelayCredential(
-      this.token,
-      "Relay Agent Token",
-    );
-    let response: Response;
-    try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...Object.fromEntries(new Headers(init.headers).entries()),
-        },
-      });
-    } catch (error) {
-      throw new NetworkError(
-        "relay",
-        "Network error calling the Relay API",
-        error instanceof Error ? error : undefined,
+    const method = (init.method ?? "GET").toUpperCase();
+    const requestHeaders = new Headers(init.headers);
+    const maxRetries = options.maxRetries ?? this.maxRetries;
+    const mayRetry =
+      options.retryable === true ||
+      method === "GET" ||
+      method === "PUT" ||
+      method === "DELETE" ||
+      Boolean(requestHeaders.get("idempotency-key")?.trim());
+
+    for (let attempt = 0; ; attempt += 1) {
+      const token = await resolveRelayCredential(
+        this.token,
+        "Relay Agent Token",
       );
+      const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+      const signal = init.signal
+        ? AbortSignal.any([init.signal, timeoutSignal])
+        : timeoutSignal;
+      let response: Response;
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          ...init,
+          signal,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...Object.fromEntries(requestHeaders.entries()),
+          },
+        });
+      } catch (error) {
+        if (init.signal?.aborted) throw error;
+        if (isAbortError(error) && !timeoutSignal.aborted) throw error;
+        if (mayRetry && attempt < maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt, init.signal ?? undefined);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Relay API request timed out after ${this.timeoutMs}ms`
+            : "Network error calling the Relay API",
+          error instanceof Error ? error : undefined,
+        );
+      }
+      const body = await parseResponseBody(response);
+      if (response.ok) return body as T;
+      const retryAfter = retryAfterSeconds(
+        body,
+        response.headers.get("retry-after"),
+      );
+      if (mayRetry && isRetryableStatus(response.status) && attempt < maxRetries) {
+        await delay(
+          retryWaitMs(retryAfter, this.retryBaseDelayMs, attempt),
+          init.signal ?? undefined,
+        );
+        continue;
+      }
+      throw relayHttpError({
+        body,
+        path,
+        status: response.status,
+        ...(retryAfter !== undefined ? { retryAfter } : {}),
+      });
     }
-    const body = await parseResponseBody(response);
-    if (!response.ok) {
-      throw relayHttpError({ body, path, status: response.status });
-    }
-    return body as T;
   }
 
   async sendMessage(options: {
@@ -425,14 +641,24 @@ export class RelayClient {
     await this.request<void>(
       `/v1/chats/${encodeURIComponent(chatId)}/typing`,
       { method: active ? "POST" : "DELETE" },
+      { retryable: true },
     );
   }
 
-  async markChatRead(chatId: string): Promise<void> {
+  async markChatRead(
+    chatId: string,
+    options?: { maxRetries?: number },
+  ): Promise<void> {
     assertRelayUuid(chatId, "chatId");
     await this.request<void>(
       `/v1/chats/${encodeURIComponent(chatId)}/read`,
       { method: "POST" },
+      {
+        retryable: true,
+        ...(options?.maxRetries !== undefined
+          ? { maxRetries: options.maxRetries }
+          : {}),
+      },
     );
   }
 
@@ -533,22 +759,41 @@ export class RelayClient {
       ...(options.width !== undefined ? { width: options.width } : {}),
     });
 
-    let response: Response;
-    try {
-      response = await this.fetchImpl(allocation.upload_url, {
-        body: options.body,
-        headers: allocation.required_headers,
-        method: allocation.http_method,
-      });
-    } catch (error) {
-      throw new NetworkError(
-        "relay",
-        "Network error uploading bytes to Relay attachment storage",
-        error instanceof Error ? error : undefined,
-      );
-    }
-    if (!response.ok) {
+    const uploadMethod = allocation.http_method.toUpperCase();
+    const mayRetry = uploadMethod === "PUT";
+    for (let attempt = 0; ; attempt += 1) {
+      const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+      let response: Response;
+      try {
+        response = await this.fetchImpl(allocation.upload_url, {
+          body: options.body,
+          headers: allocation.required_headers,
+          method: allocation.http_method,
+          signal: timeoutSignal,
+        });
+      } catch (error) {
+        if (mayRetry && attempt < this.maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Relay attachment upload timed out after ${this.timeoutMs}ms`
+            : "Network error uploading bytes to Relay attachment storage",
+          error instanceof Error ? error : undefined,
+        );
+      }
+      if (response.ok) return allocation;
       const body = await parseResponseBody(response);
+      const retryAfter = retryAfterSeconds(
+        body,
+        response.headers.get("retry-after"),
+      );
+      if (mayRetry && isRetryableStatus(response.status) && attempt < this.maxRetries) {
+        await delay(retryWaitMs(retryAfter, this.retryBaseDelayMs, attempt));
+        continue;
+      }
       const details = errorDetails(body, response.status);
       throw new RelayApiError(
         response.status,
@@ -557,7 +802,6 @@ export class RelayClient {
         body,
       );
     }
-    return allocation;
   }
 
   /**
@@ -568,32 +812,74 @@ export class RelayClient {
    * minutes after Relay minted it. A download after that window fails with
    * HTTP 404; `getAttachment` mints a replacement.
    */
-  async downloadAttachment(options: {
-    attachmentId?: string;
-    url: string;
-  }): Promise<ArrayBuffer> {
+  async downloadAttachment(options: RelayDownloadOptions): Promise<ArrayBuffer> {
     const label = options.attachmentId ?? options.url;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(options.url);
-    } catch (error) {
-      throw new NetworkError(
-        "relay",
-        `Network error downloading Relay attachment ${label}`,
-        error instanceof Error ? error : undefined,
-      );
+    const maxBytes = options.maxBytes ?? this.maxDownloadBytes;
+    const timeoutMs = options.timeoutMs ?? this.downloadTimeoutMs;
+
+    for (let attempt = 0; ; attempt += 1) {
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeoutSignal])
+        : timeoutSignal;
+      let response: Response;
+      try {
+        response = await this.fetchImpl(options.url, { signal });
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        if (isAbortError(error) && !timeoutSignal.aborted) throw error;
+        if (attempt < this.maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt, options.signal);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Timed out downloading Relay attachment ${label} after ${timeoutMs}ms`
+            : `Network error downloading Relay attachment ${label}`,
+          error instanceof Error ? error : undefined,
+        );
+      }
+      if (!response.ok) {
+        const body = await parseResponseBody(response);
+        const retryAfter = retryAfterSeconds(
+          body,
+          response.headers.get("retry-after"),
+        );
+        if (isRetryableStatus(response.status) && attempt < this.maxRetries) {
+          await delay(
+            retryWaitMs(retryAfter, this.retryBaseDelayMs, attempt),
+            options.signal,
+          );
+          continue;
+        }
+        const details = errorDetails(body, response.status);
+        throw new RelayApiError(
+          response.status,
+          details.code,
+          `Failed to download Relay attachment ${label}: `
+            + `HTTP ${response.status}`,
+          body,
+        );
+      }
+      try {
+        return await readBoundedArrayBuffer(response, maxBytes, label, signal);
+      } catch (error) {
+        if (error instanceof RelayAttachmentTooLargeError) throw error;
+        if (options.signal?.aborted) throw error;
+        if (isAbortError(error) && !timeoutSignal.aborted) throw error;
+        if (attempt < this.maxRetries) {
+          await delay(this.retryBaseDelayMs * 2 ** attempt, options.signal);
+          continue;
+        }
+        throw new NetworkError(
+          "relay",
+          timeoutSignal.aborted
+            ? `Timed out downloading Relay attachment ${label} after ${timeoutMs}ms`
+            : `Network error downloading Relay attachment ${label}`,
+          error instanceof Error ? error : undefined,
+        );
+      }
     }
-    if (!response.ok) {
-      const body = await parseResponseBody(response);
-      const details = errorDetails(body, response.status);
-      throw new RelayApiError(
-        response.status,
-        details.code,
-        `Failed to download Relay attachment ${label}: `
-          + `HTTP ${response.status}`,
-        body,
-      );
-    }
-    return await response.arrayBuffer();
   }
 }

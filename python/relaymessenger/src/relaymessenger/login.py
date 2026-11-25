@@ -14,6 +14,9 @@ from __future__ import annotations
 import json
 import urllib.request
 from typing import Any, Dict, Final, Optional, TypedDict, cast
+from urllib.parse import urlsplit
+
+from .client import USER_AGENT
 
 #: Relay's OpenID Connect issuer. Staging is ``https://auth.staging.relayapp.im/api/auth``.
 RELAY_ISSUER = "https://auth.relayapp.im/api/auth"
@@ -56,7 +59,17 @@ class RelayIdTokenClaims(_RelayIdTokenClaimsRequired, _RelayIdTokenClaimsOptiona
     only when the person shared them; ``claims[RELAY_USER_ID_CLAIM]`` (the
     person's ``id`` in chats) when the person has a Relay profile."""
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _key_clients: Dict[str, Any] = {}
+
+
+def _assert_safe_oidc_url(url: str, label: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme == "https" and parsed.hostname:
+        return url
+    if parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS:
+        return url
+    raise ValueError(f"{label} must use HTTPS (http is allowed only for loopback).")
 
 
 def _jwks_client(issuer: str) -> Any:
@@ -64,14 +77,21 @@ def _jwks_client(issuer: str) -> Any:
         import jwt  # PyJWT
     except ImportError as error:  # pragma: no cover - the message is the point
         raise ImportError("verify_relay_id_token needs the login extra: pip install 'relaymessenger[login]'") from error
+    _assert_safe_oidc_url(issuer, "Relay OpenID issuer")
     cached = _key_clients.get(issuer)
     if cached is not None:
         return cached
-    with urllib.request.urlopen(f"{issuer}/.well-known/openid-configuration", timeout=10) as response:
+    request = urllib.request.Request(
+        f"{issuer}/.well-known/openid-configuration",
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
         discovery = json.load(response)
-    if discovery.get("issuer") != issuer or not discovery.get("jwks_uri"):
+    jwks_uri = discovery.get("jwks_uri")
+    if discovery.get("issuer") != issuer or not isinstance(jwks_uri, str) or not jwks_uri:
         raise ValueError("Relay's OpenID configuration does not match the issuer.")
-    client = jwt.PyJWKClient(discovery["jwks_uri"])
+    _assert_safe_oidc_url(jwks_uri, "Relay OpenID jwks_uri")
+    client = jwt.PyJWKClient(jwks_uri, timeout=10, headers={"User-Agent": USER_AGENT})
     _key_clients[issuer] = client
     return client
 
