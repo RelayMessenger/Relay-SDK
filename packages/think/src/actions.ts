@@ -566,6 +566,14 @@ export interface RelayActionDependencies {
   compose?: typeof finishComposition;
   /** The idempotency keys of the Messages a turn already sent, across its retries. */
   sentParts?: { has(key: string): boolean; add(key: string): void };
+  /**
+   * Attachments already uploaded for a send key, reused across retries of that
+   * same key so image and voice-memo retries never regenerate or double-upload.
+   */
+  sentAttachments?: {
+    get(key: string): string | undefined;
+    put(key: string, attachmentId: string): void;
+  };
   timing?: (phase: RelayChatTimingPhase) => void;
   /** Whether this agent takes voice calls. When false, start_call is not offered. Absent means true. */
   voice?: boolean;
@@ -711,6 +719,18 @@ async function upload(
     requestOptions(signal),
   );
   return allocation.attachment_id;
+}
+
+async function uploadOnce(
+  sentAttachments: RelayActionDependencies["sentAttachments"],
+  sendKey: string,
+  make: () => Promise<string>,
+): Promise<string> {
+  const kept = sentAttachments?.get(sendKey);
+  if (kept) return kept;
+  const attachmentId = await make();
+  sentAttachments?.put(sendKey, attachmentId);
+  return attachmentId;
 }
 
 async function sendText(
@@ -1116,13 +1136,15 @@ async function sendOnce(
   try {
     if (input.kind === "image") {
       if (!deps.media?.image) throw new Error("This agent has no image model");
-      const image = await deps.media.image(input.prompt, signal);
-      assertCurrent();
-      const attachmentId = await upload(relay, {
-        bytes: image.bytes,
-        contentType: image.contentType,
-        filename: imageFilename(image.contentType, identity.eventId),
-      }, signal);
+      const attachmentId = await uploadOnce(deps.sentAttachments, identity.sendKey, async () => {
+        const image = await deps.media!.image!(input.prompt, signal);
+        assertCurrent();
+        return await upload(relay, {
+          bytes: image.bytes,
+          contentType: image.contentType,
+          filename: imageFilename(image.contentType, identity.eventId),
+        }, signal);
+      });
       await compose(
         input.caption ?? input.prompt,
         identity.eventId,
@@ -1149,14 +1171,16 @@ async function sendOnce(
       };
     }
     if (!deps.media?.voiceMemo) throw new Error("This agent has no voice model");
-    const voice = await deps.media.voiceMemo(input.text, input.style, signal);
-    assertCurrent();
-    const attachmentId = await upload(relay, {
-      bytes: voice.bytes,
-      contentType: voice.contentType,
-      filename: `relay-${identity.eventId}.wav`,
-      durationMs: voice.durationMs,
-    }, signal);
+    const attachmentId = await uploadOnce(deps.sentAttachments, identity.sendKey, async () => {
+      const voice = await deps.media!.voiceMemo!(input.text, input.style, signal);
+      assertCurrent();
+      return await upload(relay, {
+        bytes: voice.bytes,
+        contentType: voice.contentType,
+        filename: `relay-${identity.eventId}.wav`,
+        durationMs: voice.durationMs,
+      }, signal);
+    });
     await compose(input.text, identity.eventId, startedAt, signal);
     assertCurrent();
     deps.setIrreversibleSend(true);

@@ -936,3 +936,136 @@ describe("the composing pause", () => {
     await expect(second).resolves.toMatchObject({ status: "sent" });
   });
 });
+
+describe("sentAttachments upload-once on retry", () => {
+  it("reuses a previously uploaded image attachment when a send retries under the same key", async () => {
+    let generated = 0;
+    let allocated = 0;
+    let uploaded = 0;
+    const sentBodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/v1/attachments")) {
+        allocated += 1;
+        return Response.json({
+          attachment_id: ATTACHMENT_ID,
+          upload_url: "https://upload.example/image",
+          download_url: "https://api.example.test/attachment",
+          http_method: "PUT",
+          expires_at: "2026-10-14T12:00:00Z",
+          required_headers: { "content-type": "image/png" },
+        });
+      }
+      if (url === "https://upload.example/image") {
+        uploaded += 1;
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/messages`)) {
+        sentBodies.push(JSON.parse(String(init.body)));
+        return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+    const kept = new Map<string, string>();
+    let failOnce = true;
+    const deps: RelayActionDependencies = {
+      ...dependencies(),
+      media: {
+        image: async () => {
+          generated += 1;
+          return { bytes: new Uint8Array([137, 80, 78, 71]), contentType: "image/png" };
+        },
+      },
+      sentAttachments: {
+        get: (key) => kept.get(key),
+        put: (key, id) => kept.set(key, id),
+      },
+      compose: async () => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("interrupted before post");
+        }
+      },
+    };
+    const image: SendInput = { kind: "image", prompt: "tiny tower", caption: "built it" };
+    await expect(executeRelaySend(deps, image, undefined, "1")).rejects.toThrow("interrupted before post");
+    await expect(executeRelaySend(deps, image, undefined, "1")).resolves.toMatchObject({
+      status: "sent",
+      kind: "image",
+      messageId: SENT_ID,
+    });
+    expect({ generated, allocated, uploaded }).toEqual({ generated: 1, allocated: 1, uploaded: 1 });
+    expect(sentBodies).toEqual([
+      {
+        message: {
+          idempotency_key: `relay-agent:${MESSAGE_ID}:1`,
+          parts: [
+            { type: "text", value: "built it" },
+            { type: "media", attachment_id: ATTACHMENT_ID },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("reuses a previously uploaded voice memo attachment when a retry happens before dispatch", async () => {
+    let synthesized = 0;
+    let allocated = 0;
+    let uploaded = 0;
+    const voiceBodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/v1/attachments")) {
+        allocated += 1;
+        return Response.json({
+          attachment_id: ATTACHMENT_ID,
+          upload_url: "https://upload.example/voice",
+          download_url: "https://api.example.test/voice",
+          http_method: "PUT",
+          expires_at: "2026-10-14T12:00:00Z",
+          required_headers: { "content-type": "audio/x-wav" },
+        });
+      }
+      if (url === "https://upload.example/voice") {
+        uploaded += 1;
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith(`/v1/chats/${CHAT_ID}/voicememo`)) {
+        voiceBodies.push(JSON.parse(String(init.body)));
+        return Response.json({ chat_id: CHAT_ID, message: { id: SENT_ID } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }));
+    const kept = new Map<string, string>();
+    const tasks: Promise<void>[] = [];
+    let failOnce = true;
+    const deps: RelayActionDependencies = {
+      ...dependencies([], undefined, tasks),
+      media: {
+        voiceMemo: async () => {
+          synthesized += 1;
+          return { bytes: wav(), contentType: "audio/x-wav", durationMs: 1 };
+        },
+      },
+      sentAttachments: {
+        get: (key) => kept.get(key),
+        put: (key, id) => kept.set(key, id),
+      },
+      compose: async () => {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error("interrupted before voice dispatch");
+        }
+      },
+    };
+    const memo: SendInput = { kind: "voice_memo", text: "on my way" };
+    await expect(executeRelaySend(deps, memo, undefined, "1")).rejects.toThrow("interrupted before voice dispatch");
+    await expect(executeRelaySend(deps, memo, undefined, "1")).resolves.toMatchObject({
+      status: "terminal_ambiguous",
+      kind: "voice_memo",
+    });
+    await Promise.all(tasks);
+    expect({ synthesized, allocated, uploaded }).toEqual({ synthesized: 1, allocated: 1, uploaded: 1 });
+    expect(voiceBodies).toEqual([{ attachment_id: ATTACHMENT_ID }]);
+  });
+});
